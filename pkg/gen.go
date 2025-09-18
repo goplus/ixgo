@@ -27,20 +27,34 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
 var (
-	gover = runtime.Version()[:6]
+	gover    = runtime.Version()[:6]
+	minorVer int
 )
+
+func init() {
+	var err error
+	minorVer, err = strconv.Atoi(gover[4:])
+	if err != nil {
+		panic("error version: " + gover)
+	}
+}
 
 func main() {
 	var tags string
 	var name string
 	var fname string
 	switch gover {
+	case "go1.25":
+		tags = "//+build go1.25"
+		name = "go125_export"
+		fname = "go125_pkgs.go"
 	case "go1.24":
-		tags = "//+build go1.24"
+		tags = "//+build go1.24,!go1.25"
 		name = "go124_export"
 		fname = "go124_pkgs.go"
 	case "go1.23":
@@ -134,8 +148,7 @@ func main() {
 		}
 	}
 
-	switch gover {
-	case "go1.23", "go1.24":
+	if minorVer >= 23 {
 		for _, pkg := range []string{"iter"} {
 			log.Printf("export %v: %v patch", pkg, pkg+"/"+fname)
 			data, err := os.ReadFile("./_" + strings.Replace(gover, ".", "", -1) + "/" + pkg + "_export.go")
@@ -227,7 +240,7 @@ func isSkipPkg(pkg string) bool {
 	case "runtime/cgo", "runtime/race":
 		return true
 	case "plugin":
-		if gover == "go1.23" || gover == "go1.24" {
+		if minorVer >= 23 {
 			return true
 		}
 	default:

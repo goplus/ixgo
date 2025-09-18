@@ -7,12 +7,14 @@
 [![Go1.22](https://github.com/goplus/ixgo/workflows/Go1.22/badge.svg)](https://github.com/goplus/ixgo/actions/workflows/go122.yml)
 [![Go1.23](https://github.com/goplus/ixgo/workflows/Go1.23/badge.svg)](https://github.com/goplus/ixgo/actions/workflows/go123.yml)
 [![Go1.24](https://github.com/goplus/ixgo/workflows/Go1.24/badge.svg)](https://github.com/goplus/ixgo/actions/workflows/go124.yml)
+[![Go1.25](https://github.com/goplus/ixgo/workflows/Go1.25/badge.svg)](https://github.com/goplus/ixgo/actions/workflows/go125.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/goplus/ixgo.svg)](https://pkg.go.dev/github.com/goplus/ixgo)
 
+A fast and fully compatible Go language interpreter.
 
 ### Go Version
 
-- Go1.18 ~ Go1.24
+- Go1.18 ~ Go1.25
 - macOS Linux Windows  WebAssembly GopherJS and more.
 
 ### ABI
@@ -30,11 +32,12 @@ support ABI0 and ABIInternal
     - Go1.22: amd64 arm64 ppc64/ppc64le riscv64 loong64
     - Go1.23: amd64 arm64 ppc64/ppc64le riscv64 loong64
     - Go1.24: amd64 arm64 ppc64/ppc64le riscv64 loong64
+    - Go1.25: amd64 arm64 ppc64/ppc64le riscv64 loong64
 
 ### Generics
 
 - support typeparams (Go1.18 ~ Go1.24)
-- support alias typeparams (Go1.24)
+- support alias typeparams (Go1.24 ~ Go1.25)
 
 ### runtime.GC
 
@@ -52,7 +55,7 @@ go install github.com/goplus/ixgo/cmd/ixgo@latest
 
 Go version >= 1.23
 ```
-go install -ldflags="-checklinkname=0" github.com/goplus/ixgo/ixgo@v0.3.0
+go install -ldflags="-checklinkname=0" github.com/goplus/ixgo/ixgo@v0.3.1
 ```
 
 ### install ixgo export command line

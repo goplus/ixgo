@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -58,9 +59,14 @@ func init() {
 	// const ulp = (1.0 + (2.0 / 3.0)) - (5.0 / 3.0)
 	// Go 1.14 1.15 1.16 ulp = 1.4916681462400413e-154
 	// Go 1.17 1.18 ulp = 0
-	ver := runtime.Version()[:6]
-	switch ver {
-	case "go1.17", "go1.18", "go1.19", "go1.20", "go1.21", "go1.22", "go1.23", "go1.24":
+
+	// go1.24.3 => 24
+	ver, err := strconv.Atoi(runtime.Version()[4:6])
+	if err != nil {
+		panic("version error")
+	}
+	switch {
+	case ver >= 17:
 		// gorootTestSkips["fixedbugs/issue45045.go"] = "runtime.SetFinalizer"
 		// gorootTestSkips["fixedbugs/issue46725.go"] = "runtime.SetFinalizer"
 		gorootTestSkips["abi/fibish.go"] = "slow, 34s"
@@ -70,7 +76,7 @@ func init() {
 
 		gorootTestSkips["typeparam/chans.go"] = "runtime.SetFinalizer, maybe broken for go1.18 on linux workflows"
 		// gorootTestSkips["typeparam/issue376214.go"] = "build SSA package error: variadic parameter must be of unnamed slice type"
-		if ver != "go1.20" {
+		if ver != 20 {
 			gorootTestSkips["typeparam/nested.go"] = "skip, run pass but output same as go1.20"
 		}
 		//go1.20
@@ -83,11 +89,11 @@ func init() {
 		//go1.21
 		gorootTestSkips["fixedbugs/issue19658.go"] = "skip command"
 		// gorootTestSkips["fixedbugs/issue57823.go"] = "GC"
-		if ver == "go1.18" {
+		if ver == 18 {
 			gorootTestSkips["typeparam/cons.go"] = "skip golang.org/x/tools v0.7.0 on go1.18"
 			gorootTestSkips["typeparam/list2.go"] = "skip golang.org/x/tools v0.7.0 on go1.18"
 		}
-		if ver == "go1.22" || ver == "go1.23" || ver == "go1.24" {
+		if ver >= 22 {
 			gorootTestSkips["fixedbugs/bug369.go"] = "skip command"
 			gorootTestSkips["fixedbugs/issue10607.go"] = "skip command"
 			gorootTestSkips["fixedbugs/issue21317.go"] = "skip command"
@@ -100,13 +106,17 @@ func init() {
 			gorootTestSkips["linkx_run.go"] = "skip link"
 			gorootTestSkips["chanlinear.go"] = "skip -gc-exp"
 		}
-	case "go1.16":
+		if ver >= 25 {
+			gorootTestSkips["fixedbugs/issue72844.go"] = "BUG, range for nil *op[N]"
+			gorootTestSkips["fixedbugs/issue73476.go"] = "BUG, range for nil *op[N]"
+		}
+	case ver == 16:
 		gorootTestSkips["fixedbugs/issue7740.go"] = "BUG, const float"
-	case "go1.15":
+	case ver == 15:
 		gorootTestSkips["fixedbugs/issue15039.go"] = "BUG, uint64 -> string"
 		gorootTestSkips["fixedbugs/issue9355.go"] = "TODO, chdir"
 		gorootTestSkips["fixedbugs/issue7740.go"] = "BUG, const float"
-	case "go1.14":
+	case ver == 14:
 		gorootTestSkips["fixedbugs/issue9355.go"] = "TODO, chdir"
 		gorootTestSkips["fixedbugs/issue7740.go"] = "BUG, const float"
 	}
@@ -116,7 +126,7 @@ func init() {
 		gorootTestSkips["fixedbugs/issue15002.go"] = "skip windows"
 		gorootTestSkips["fixedbugs/issue5493.go"] = "skip windows"
 		gorootTestSkips["fixedbugs/issue5963.go"] = "skip windows"
-		if ver == "go1.22" || ver == "go1.23" || ver == "go1.24" {
+		if ver >= 22 {
 			gorootTestSkips["recover4.go"] = "skip windows"
 			gorootTestSkips["sigchld.go"] = "skip windows"
 		}
