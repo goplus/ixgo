@@ -118,7 +118,7 @@ ixgo repl -go              # run repl mode, disable XGo syntax
 
 #### ispx
 
-<https://github.com/goplus/ispx>
+[ispx](https://github.com/goplus/spx/tree/dev/cmd/igox)
 
 #### run simple Go source demo
 
