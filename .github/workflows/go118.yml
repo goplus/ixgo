@@ -2,15 +2,13 @@ name: Go1.18
 
 on:
   push:
-    branches: [ main ]
   pull_request:
-    branches: [ main ]
 
 jobs:
 
   macos:
     name: Test Go1.18 for macOS
-    runs-on: macos-13
+    runs-on: macos-15-intel
     steps:
 
     - name: Set up Go 1.18
