@@ -39,7 +39,10 @@ var (
 	tyEmptyArray  = reflect.TypeOf((*[0]struct{})(nil)).Elem()
 	tyEmptyChan   = reflect.TypeOf((*chan struct{})(nil)).Elem()
 	tyEmptyFunc   = reflect.TypeOf((*func())(nil)).Elem()
+	tyUnusedFunc  = reflect.TypeOf((*func(_unused))(nil)).Elem()
 )
+
+type _unused struct{}
 
 /*
 	Array
