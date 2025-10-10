@@ -1192,6 +1192,9 @@ func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{
 			}
 		}
 		rctx.SetHasImethod(func(typ reflect.Type, method reflectx.Method) bool {
+			if method.Type == tyUnusedFunc {
+				return false
+			}
 			if _, ok := rtyps[typ.String()]; ok {
 				if ast.IsExported(method.Name) {
 					return true
@@ -1204,6 +1207,9 @@ func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{
 		})
 	} else {
 		rctx.SetHasImethod(func(typ reflect.Type, method reflectx.Method) bool {
+			if method.Type == tyUnusedFunc {
+				return false
+			}
 			if ast.IsExported(method.Name) {
 				return true
 			}

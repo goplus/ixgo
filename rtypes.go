@@ -573,7 +573,7 @@ func (r *TypesLoader) ToType(rt reflect.Type) types.Type {
 				if im.Type != nil {
 					sig = r.toMethod(pkg, recv, 1, im.Type)
 				} else {
-					sig = r.toMethod(pkg, recv, 0, tyEmptyFunc)
+					sig = r.toMethod(pkg, recv, 0, tyUnusedFunc)
 				}
 				skip[im.Name] = true
 				named.AddMethod(types.NewFunc(token.NoPos, pkg, im.Name, sig))
@@ -589,7 +589,7 @@ func (r *TypesLoader) ToType(rt reflect.Type) types.Type {
 				if im.Type != nil {
 					sig = r.toMethod(pkg, precv, 1, im.Type)
 				} else {
-					sig = r.toMethod(pkg, precv, 0, tyEmptyFunc)
+					sig = r.toMethod(pkg, precv, 0, tyUnusedFunc)
 				}
 				named.AddMethod(types.NewFunc(token.NoPos, pkg, im.Name, sig))
 			}
