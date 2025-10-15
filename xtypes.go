@@ -23,6 +23,7 @@ import (
 	"log"
 	"reflect"
 	"strconv"
+	"strings"
 	"unsafe"
 
 	"github.com/goplus/ixgo/internal/typesalias"
@@ -185,6 +186,28 @@ type TypesRecord struct {
 	fntargs string        //reflect type arguments used to instantiate the current func
 	nested  map[*types.Named]int
 	nstack  nestedStack
+	mfnmap  map[mfnKey]mfnValue
+	mfnid   int
+}
+
+type mfnKey struct {
+	ftyp   types.Type
+	name   string
+	indexs string
+}
+
+type mfnValue struct {
+	fn func([]reflect.Value) []reflect.Value
+	id int
+}
+
+func indexsToString(index []int) string {
+	var sb strings.Builder
+	for _, v := range index {
+		sb.WriteByte('.')
+		sb.WriteString(strconv.Itoa(v))
+	}
+	return sb.String()
 }
 
 func (r *TypesRecord) Release() {
@@ -195,6 +218,7 @@ func (r *TypesRecord) Release() {
 	r.ncache = nil
 	r.finder = nil
 	r.nested = nil
+	r.mfnmap = nil
 }
 
 func NewTypesRecord(rctx *reflectx.Context, loader Loader, finder FindMethod, nested map[*types.Named]int) *TypesRecord {
@@ -205,6 +229,7 @@ func NewTypesRecord(rctx *reflectx.Context, loader Loader, finder FindMethod, ne
 		rcache: make(map[reflect.Type]types.Type),
 		tcache: &typeutil.Map{},
 		nested: nested,
+		mfnmap: make(map[mfnKey]mfnValue),
 	}
 }
 
@@ -433,6 +458,31 @@ func isPointer(typ types.Type) bool {
 	return ok
 }
 
+func embedFunc(name string, idx []int, isptr bool, variadic bool) func([]reflect.Value) []reflect.Value {
+	return func(args []reflect.Value) []reflect.Value {
+		v := args[0]
+		for v.Kind() == reflect.Ptr {
+			v = v.Elem()
+		}
+		v = reflectx.FieldByIndexX(v, idx[:len(idx)-1])
+		if isptr && v.Kind() != reflect.Ptr {
+			v = v.Addr()
+		}
+		if v.Kind() == reflect.Interface {
+			if variadic {
+				return v.MethodByName(name).CallSlice(args[1:])
+			}
+			return v.MethodByName(name).Call(args[1:])
+		}
+		m, _ := reflectx.MethodByName(v.Type(), name)
+		args[0] = v
+		if variadic {
+			return m.Func.CallSlice(args)
+		}
+		return m.Func.Call(args)
+	}
+}
+
 func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 	numMethods := len(methods)
 	var ms []reflectx.Method
@@ -443,30 +493,19 @@ func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 		mtyp, _ := r.ToType(sig)
 		var mfn func(args []reflect.Value) []reflect.Value
 		idx := methods[i].Index()
+		var mid int
 		if len(idx) > 1 {
-			isptr := isPointer(fn.Type().Underlying().(*types.Signature).Recv().Type())
-			variadic := mtyp.IsVariadic()
-			mfn = func(args []reflect.Value) []reflect.Value {
-				v := args[0]
-				for v.Kind() == reflect.Ptr {
-					v = v.Elem()
-				}
-				v = reflectx.FieldByIndexX(v, idx[:len(idx)-1])
-				if isptr && v.Kind() != reflect.Ptr {
-					v = v.Addr()
-				}
-				if v.Kind() == reflect.Interface {
-					if variadic {
-						return v.MethodByName(fn.Name()).CallSlice(args[1:])
-					}
-					return v.MethodByName(fn.Name()).Call(args[1:])
-				}
-				m, _ := reflectx.MethodByName(v.Type(), fn.Name())
-				args[0] = v
-				if variadic {
-					return m.Func.CallSlice(args)
-				}
-				return m.Func.Call(args)
+			rtyp := fn.Type().Underlying().(*types.Signature).Recv().Type()
+			key := mfnKey{ftyp: fn.Type(), name: fn.Name(), indexs: indexsToString(idx)}
+			if v, ok := r.mfnmap[key]; ok {
+				mfn = v.fn
+				mid = v.id
+			} else {
+				isptr := isPointer(rtyp)
+				variadic := mtyp.IsVariadic()
+				r.mfnid++
+				mfn = embedFunc(fn.Name(), idx, isptr, variadic)
+				r.mfnmap[key] = mfnValue{fn: mfn, id: r.mfnid}
 			}
 		} else {
 			mfn = r.finder.FindMethod(mtyp, fn)
@@ -475,7 +514,9 @@ func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 		if pkg := fn.Pkg(); pkg != nil {
 			pkgpath = pkg.Path()
 		}
-		ms = append(ms, reflectx.MakeMethod(fn.Name(), pkgpath, pointer, mtyp, mfn))
+		method := reflectx.MakeMethod(fn.Name(), pkgpath, pointer, mtyp, mfn)
+		method.FuncId = mid
+		ms = append(ms, method)
 	}
 	err := r.rctx.SetMethodSet(typ, ms, false)
 	if err != nil {

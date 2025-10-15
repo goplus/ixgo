@@ -1171,6 +1171,7 @@ func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{
 	if ctx.Mode&SupportMultipleInterp == 0 {
 		reflectx.ResetAll()
 		rctx = reflectx.Default
+		rctx.Reset()
 	} else {
 		rctx = reflectx.NewContext()
 	}
