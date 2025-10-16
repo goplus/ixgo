@@ -504,8 +504,9 @@ func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 				isptr := isPointer(rtyp)
 				variadic := mtyp.IsVariadic()
 				r.mfnid++
+				mid = r.mfnid
 				mfn = embedFunc(fn.Name(), idx, isptr, variadic)
-				r.mfnmap[key] = mfnValue{fn: mfn, id: r.mfnid}
+				r.mfnmap[key] = mfnValue{fn: mfn, id: mid}
 			}
 		} else {
 			mfn = r.finder.FindMethod(mtyp, fn)
