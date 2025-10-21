@@ -897,8 +897,9 @@ func (ctx *Context) buildPackage(sp *SourcePackage) (pkg *ssa.Package, err error
 					if !pkg.Loaded() {
 						continue
 					}
-					createAll(p.Imports())
-					prog.CreatePackage(p, pkg.Files, pkg.Info, true).Build()
+					created[pkg.Package] = true
+					createAll(pkg.Package.Imports())
+					prog.CreatePackage(pkg.Package, pkg.Files, pkg.Info, true).Build()
 					ctx.checkNested(pkg.Package, pkg.Info)
 				} else {
 					createAll(p.Imports())
