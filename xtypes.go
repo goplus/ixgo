@@ -191,9 +191,11 @@ type TypesRecord struct {
 }
 
 type mfnKey struct {
-	ftyp   types.Type
-	name   string
-	indexs string
+	ftyp     types.Type
+	name     string
+	indexs   string
+	pointer  bool
+	indirect bool
 }
 
 type mfnValue struct {
@@ -458,28 +460,49 @@ func isPointer(typ types.Type) bool {
 	return ok
 }
 
-func embedFunc(name string, idx []int, isptr bool, variadic bool) func([]reflect.Value) []reflect.Value {
-	return func(args []reflect.Value) []reflect.Value {
-		v := args[0]
-		for v.Kind() == reflect.Ptr {
-			v = v.Elem()
-		}
-		v = reflectx.FieldByIndexX(v, idx[:len(idx)-1])
-		if isptr && v.Kind() != reflect.Ptr {
-			v = v.Addr()
-		}
-		if v.Kind() == reflect.Interface {
-			if variadic {
+func embedFunc(typ reflect.Type, name string, idx []int, pointer bool, indirect bool, variadic bool) func([]reflect.Value) []reflect.Value {
+	switch kind := typ.Kind(); kind {
+	case reflect.Interface:
+		if variadic {
+			return func(args []reflect.Value) []reflect.Value {
+				v := reflectx.FieldByIndexX(args[0], idx[:len(idx)-1])
 				return v.MethodByName(name).CallSlice(args[1:])
 			}
+		}
+		return func(args []reflect.Value) []reflect.Value {
+			v := reflectx.FieldByIndexX(args[0], idx[:len(idx)-1])
 			return v.MethodByName(name).Call(args[1:])
 		}
-		m, _ := reflectx.MethodByName(v.Type(), name)
-		args[0] = v
-		if variadic {
-			return m.Func.CallSlice(args)
+	case reflect.Ptr:
+		if pointer {
+			m, _ := reflectx.MethodByName(typ, name)
+			if variadic {
+				return func(args []reflect.Value) []reflect.Value {
+					args[0] = reflectx.FieldByIndexX(args[0].Elem(), idx[:len(idx)-1]).Addr()
+					return m.Func.CallSlice(args)
+				}
+			}
+			return func(args []reflect.Value) []reflect.Value {
+				args[0] = reflectx.FieldByIndexX(args[0].Elem(), idx[:len(idx)-1]).Addr()
+				return m.Func.Call(args)
+			}
 		}
-		return m.Func.Call(args)
+		fallthrough
+	default:
+		if indirect && kind != reflect.Ptr {
+			typ = reflect.PointerTo(typ)
+		}
+		m, _ := reflectx.MethodByName(typ, name)
+		if variadic {
+			return func(args []reflect.Value) []reflect.Value {
+				args[0] = reflectx.FieldByIndexX(args[0], idx[:len(idx)-1])
+				return m.Func.CallSlice(args)
+			}
+		}
+		return func(args []reflect.Value) []reflect.Value {
+			args[0] = reflectx.FieldByIndexX(args[0], idx[:len(idx)-1])
+			return m.Func.Call(args)
+		}
 	}
 }
 
@@ -495,17 +518,18 @@ func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 		idx := methods[i].Index()
 		var mid int
 		if len(idx) > 1 {
-			rtyp := fn.Type().Underlying().(*types.Signature).Recv().Type()
-			key := mfnKey{ftyp: fn.Type(), name: fn.Name(), indexs: indexsToString(idx)}
+			indirect := methods[i].Indirect()
+			key := mfnKey{ftyp: fn.Type(), name: fn.Name(), indexs: indexsToString(idx), pointer: pointer, indirect: indirect}
 			if v, ok := r.mfnmap[key]; ok {
 				mfn = v.fn
 				mid = v.id
 			} else {
-				isptr := isPointer(rtyp)
+				rtyp := fn.Type().Underlying().(*types.Signature).Recv().Type()
+				rt, _ := r.ToType(rtyp)
 				variadic := mtyp.IsVariadic()
 				r.mfnid++
 				mid = r.mfnid
-				mfn = embedFunc(fn.Name(), idx, isptr, variadic)
+				mfn = embedFunc(rt, fn.Name(), idx, pointer, indirect, variadic)
 				r.mfnmap[key] = mfnValue{fn: mfn, id: mid}
 			}
 		} else {
