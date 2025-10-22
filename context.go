@@ -47,21 +47,22 @@ import (
 type Mode uint
 
 const (
-	DisableRecover                 Mode = 1 << iota // Disable recover() in target programs; show interpreter crash instead.
-	DisableCustomBuiltin                            // Disable load custom builtin func
-	EnableDumpImports                               // print import packages
-	EnableDumpInstr                                 // Print packages & SSA instruction code
-	EnableTracing                                   // Print a trace of all instructions as they are interpreted.
-	EnablePrintAny                                  // Enable builtin print for any type ( struct/array )
-	EnableNoStrict                                  // Enable no strict mode
-	ExperimentalSupportGC                           // experimental support runtime.GC
-	SupportMultipleInterp                           // Support multiple interp, must manual release interp reflectx icall.
-	CheckGopOverloadFunc                            // Check and skip gop overload func
-	DisableAutoLoadPatchs                           // Disable automatic loading of package patches.
-	DisableDynamicFuncCallAnalysis                  // Disable dynamic func call analysis and optimization.
-	OptionLoadRutimeImethod                         // Option load runtime imethod for less imethod and memory space.
-	OptionLoadAllImethod                            // Option load all imethod.
-	OptionLoadDefaultImethod       = 0              // Option load default imethod.
+	DisableRecover                 Mode                   = 1 << iota // Disable recover() in target programs; show interpreter crash instead.
+	DisableCustomBuiltin                                              // Disable load custom builtin func
+	EnableDumpImports                                                 // print import packages
+	EnableDumpInstr                                                   // Print packages & SSA instruction code
+	EnableTracing                                                     // Print a trace of all instructions as they are interpreted.
+	EnablePrintAny                                                    // Enable builtin print for any type ( struct/array )
+	EnableNoStrict                                                    // Enable no strict mode
+	ExperimentalSupportGC                                             // experimental support runtime.GC
+	SupportMultipleInterp                                             // Support multiple interp, must manual release interp reflectx icall.
+	CheckGopOverloadFunc                                              // Check and skip gop overload func
+	DisableAutoLoadPatchs                                             // Disable automatic loading of package patches.
+	DisableDynamicFuncCallAnalysis                                    // Disable dynamic func call analysis and optimization.
+	OptionLoadRutimeImethod                                           // Option load runtime imethod for less imethod and memory space.
+	OptionLoadAllImethod                                              // Option load all imethod.
+	OptionLoadDefaultImethod       = 0                                // Option load default imethod.
+	LastMode                       = OptionLoadAllImethod             // Last Mode
 )
 
 // Loader types loader interface

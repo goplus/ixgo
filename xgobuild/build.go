@@ -41,6 +41,13 @@ var (
 	projects = make(map[string]*modfile.Project)
 )
 
+// UnexportPatchPkg disables exporting pkg@patch code as a separate package.
+// When this mode is enabled, patch code is inserted into the original package
+// namespace instead of being exported as "path@patch".
+const (
+	UnexportPatchPkg ixgo.Mode = ixgo.LastMode << 1
+)
+
 func RegisterClassFileType(ext string, class string, works []*modfile.Class, pkgPaths ...string) {
 	cls := &modfile.Project{
 		Ext:      ext,
@@ -249,7 +256,10 @@ func (c *Context) Import(path string) (*types.Package, error) {
 		if err != nil {
 			return nil, err
 		}
-		patch := types.NewPackage(path+"@patch", pkg.Name())
+		patch := pkg
+		if c.Context.Mode&UnexportPatchPkg == 0 {
+			patch = types.NewPackage(path+"@patch", pkg.Name())
+		}
 		for _, name := range sp.Package.Scope().Names() {
 			obj := sp.Package.Scope().Lookup(name)
 			switch obj.(type) {
