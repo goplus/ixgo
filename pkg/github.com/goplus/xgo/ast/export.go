@@ -82,6 +82,7 @@ func init() {
 			"IndexListExpr":     reflect.TypeOf((*q.IndexListExpr)(nil)).Elem(),
 			"InterfaceType":     reflect.TypeOf((*q.InterfaceType)(nil)).Elem(),
 			"KeyValueExpr":      reflect.TypeOf((*q.KeyValueExpr)(nil)).Elem(),
+			"KwargExpr":         reflect.TypeOf((*q.KwargExpr)(nil)).Elem(),
 			"LabeledStmt":       reflect.TypeOf((*q.LabeledStmt)(nil)).Elem(),
 			"LambdaExpr":        reflect.TypeOf((*q.LambdaExpr)(nil)).Elem(),
 			"LambdaExpr2":       reflect.TypeOf((*q.LambdaExpr2)(nil)).Elem(),

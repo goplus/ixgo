@@ -22,9 +22,9 @@ import (
 	"testing"
 
 	"github.com/goplus/ixgo"
+	_ "github.com/goplus/ixgo/pkg/bytes"
 	_ "github.com/goplus/ixgo/xgobuild/pkg/gsh"
 	_ "github.com/goplus/ixgo/xgobuild/pkg/tpl"
-	_ "github.com/goplus/ixgo/pkg/bytes"
 )
 
 func gopClTest(t *testing.T, gopcode, expected string) {
@@ -253,10 +253,10 @@ var r io.Reader
 //line main.xgo:6
 func main() {
 //line main.xgo:6:1
-	for _gop_it := osx.Lines(r).Gop_Enum(); ; {
-		var _gop_ok bool
-		line, _gop_ok := _gop_it.Next()
-		if !_gop_ok {
+	for _xgo_it := osx.Lines(r).Gop_Enum(); ; {
+		var _xgo_ok bool
+		line, _xgo_ok := _xgo_it.Next()
+		if !_xgo_ok {
 			break
 		}
 //line main.xgo:7:1
@@ -539,6 +539,35 @@ func main() {
 `)
 }
 
+func TestPackagePatchUnexport(t *testing.T) {
+	ctx := ixgo.NewContext(UnexportPatchPkg)
+	err := RegisterPackagePatch(ctx, "github.com/qiniu/x/gsh", patch_data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gopClTestWith(t, ctx, "main.gsh", `
+getWidget(int,"info")
+`, `package main
+
+import "github.com/qiniu/x/gsh"
+
+type App struct {
+	gsh.App
+}
+//line main.gsh:2
+func (this *App) MainEntry() {
+//line main.gsh:2:1
+	gsh.Gopt_App_Gopx_GetWidget[int](this, "info")
+}
+func (this *App) Main() {
+	gsh.Gopt_App_Main(this)
+}
+func main() {
+	new(App).Main()
+}
+`)
+}
+
 func TestStringSlice(t *testing.T) {
 	gopClTest(t, `
 println "a".repeat(10)
@@ -614,6 +643,92 @@ expr = INT % "," => {
 `+"`"+`, "main.xgo", 3, 10, "expr", func(self []interface{}) interface{} {
 //line main.xgo:5:1
 			return tpl1.ListOp[int](self, func(v any) int {
+//line main.xgo:6:1
+				return func() (_xgo_ret int) {
+//line main.xgo:6:1
+					var _xgo_err error
+//line main.xgo:6:1
+					_xgo_ret, _xgo_err = strconv.Atoi(v.(*types.Token).Lit)
+//line main.xgo:6:1
+					if _xgo_err != nil {
+//line main.xgo:6:1
+						_xgo_err = errors.NewFrame(_xgo_err, "v.(*tpl.Token).Lit.int", "main.xgo", 6, "main.main")
+//line main.xgo:6:1
+						panic(_xgo_err)
+					}
+//line main.xgo:6:1
+					return
+				}()
+			})
+		})
+//line main.xgo:3:1
+		if _xgo_err != nil {
+//line main.xgo:3:1
+			_xgo_err = errors.NewFrame(_xgo_err, "tpl`+"`"+`\nexpr = INT % \",\" => {\n    return tpl.ListOp[int](self, v => {\n        return v.(*tpl.Token).Lit.int!\n    })\n}\n`+"`"+`", "main.xgo", 3, "main.main")
+//line main.xgo:3:1
+			panic(_xgo_err)
+		}
+//line main.xgo:3:1
+		return
+	}()
+//line main.xgo:11:1
+	fmt.Println(func() (_xgo_ret interface{}) {
+//line main.xgo:11:1
+		var _xgo_err error
+//line main.xgo:11:1
+		_xgo_ret, _xgo_err = cl.ParseExpr("1, 2, 3", nil)
+//line main.xgo:11:1
+		if _xgo_err != nil {
+//line main.xgo:11:1
+			_xgo_err = errors.NewFrame(_xgo_err, "cl.parseExpr(\"1, 2, 3\", nil)", "main.xgo", 11, "main.main")
+//line main.xgo:11:1
+			panic(_xgo_err)
+		}
+//line main.xgo:11:1
+		return
+	}())
+}
+`)
+}
+
+func TestTplPatchUnexport(t *testing.T) {
+	ctx := ixgo.NewContext(UnexportPatchPkg)
+	gopClTestWith(t, ctx, "main.xgo", `import "gop/tpl"
+
+cl := tpl`+"`"+`
+expr = INT % "," => {
+    return tpl.ListOp[int](self, v => {
+        return v.(*tpl.Token).Lit.int!
+    })
+}
+`+"`"+`!
+
+echo cl.parseExpr("1, 2, 3", nil)!
+`, `package main
+
+import (
+	"fmt"
+	"github.com/goplus/xgo/tpl"
+	"github.com/goplus/xgo/tpl/types"
+	"github.com/qiniu/x/errors"
+	"strconv"
+)
+//line main.xgo:3
+func main() {
+//line main.xgo:3:1
+	cl := func() (_xgo_ret tpl.Compiler) {
+//line main.xgo:3:1
+		var _xgo_err error
+//line main.xgo:3:1
+		_xgo_ret, _xgo_err = tpl.NewEx(`+"`"+`
+expr = INT % "," => {
+    return tpl.ListOp[int](self, v => {
+        return v.(*tpl.Token).Lit.int!
+    })
+}
+`+"`"+`, "main.xgo", 3, 10, "expr", func(self []interface{}) interface{} {
+//line main.xgo:5:1
+			return tpl.ListOp[int](self, func(v any) int {
 //line main.xgo:6:1
 				return func() (_xgo_ret int) {
 //line main.xgo:6:1
