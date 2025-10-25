@@ -33,3 +33,7 @@ func NewAlias(obj *types.TypeName, rhs types.Type) *Alias {
 func Unalias(t types.Type) types.Type {
 	return t
 }
+
+func Rhs(t *Alias) types.Type {
+	panic(unsupported)
+}

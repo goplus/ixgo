@@ -1,5 +1,5 @@
-//go:build go1.22 && !go1.23
-// +build go1.22,!go1.23
+//go:build go1.23
+// +build go1.23
 
 package typesalias
 
@@ -16,5 +16,5 @@ func Unalias(t types.Type) types.Type {
 }
 
 func Rhs(t *Alias) types.Type {
-	return types.Unalias(t)
+	return t.Rhs()
 }
