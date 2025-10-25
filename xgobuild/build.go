@@ -212,6 +212,11 @@ func NewContext(ctx *ixgo.Context) *Context {
 	return c
 }
 
+// Release cleans up package patches by removing temporarily added scope objects.
+// Must be called after finishing work with a Context to restore packages to their
+// original state.
+//
+// The method is idempotent - multiple calls are safe.
 func (p *Context) Release() {
 	fns := p.resetPkgs
 	p.resetPkgs = nil
