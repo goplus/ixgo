@@ -440,7 +440,10 @@ func main() {
 
 var patch_data = `package gsh
 
-import "github.com/qiniu/x/gsh"
+import (
+	"fmt"
+	"github.com/qiniu/x/gsh"
+)
 
 type Point struct {
 	X int
@@ -461,7 +464,7 @@ func Dump(i Info) {
 
 func Gopt_App_Gopx_GetWidget[T any](app any, name string) {
 	var _ gsh.App
-	println(app, name)
+	fmt.Printf("%T, %T, %v\n", app, (*T)(nil), name)
 }
 `
 
@@ -482,7 +485,6 @@ dump(pt)
 import (
 	"fmt"
 	"github.com/qiniu/x/gsh"
-	gsh1 "github.com/qiniu/x/gsh@patch"
 )
 
 type App struct {
@@ -491,15 +493,15 @@ type App struct {
 //line main.gsh:2
 func (this *App) MainEntry() {
 //line main.gsh:2:1
-	gsh1.Gopt_App_Gopx_GetWidget[int](this, "info")
+	gsh.Gopt_App_Gopx_GetWidget[int](this, "info")
 //line main.gsh:3:1
-	pt := &gsh1.Point{100, 200}
+	pt := &gsh.Point{100, 200}
 //line main.gsh:4:1
 	pt.Info()
 //line main.gsh:5:1
 	fmt.Println(pt.X)
 //line main.gsh:6:1
-	gsh1.Dump(pt)
+	gsh.Dump(pt)
 }
 func (this *App) Main() {
 	gsh.Gopt_App_Main(this)
@@ -539,33 +541,22 @@ func main() {
 `)
 }
 
-func TestPackagePatchUnexport(t *testing.T) {
-	ctx := ixgo.NewContext(UnexportPatchPkg)
+func TestPackagePatchRun(t *testing.T) {
+	ctx := ixgo.NewContext(0)
 	err := RegisterPackagePatch(ctx, "github.com/qiniu/x/gsh", patch_data)
 	if err != nil {
 		t.Fatal(err)
 	}
-	gopClTestWith(t, ctx, "main.gsh", `
+	_, err = ctx.RunFile("main.gsh", `
 getWidget(int,"info")
-`, `package main
-
-import "github.com/qiniu/x/gsh"
-
-type App struct {
-	gsh.App
-}
-//line main.gsh:2
-func (this *App) MainEntry() {
-//line main.gsh:2:1
-	gsh.Gopt_App_Gopx_GetWidget[int](this, "info")
-}
-func (this *App) Main() {
-	gsh.Gopt_App_Main(this)
-}
-func main() {
-	new(App).Main()
-}
-`)
+pt := &Point{100,200}
+pt.Info()
+println(pt.X)
+dump(pt)
+`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestStringSlice(t *testing.T) {
@@ -691,9 +682,9 @@ expr = INT % "," => {
 `)
 }
 
-func TestTplPatchUnexport(t *testing.T) {
-	ctx := ixgo.NewContext(UnexportPatchPkg)
-	gopClTestWith(t, ctx, "main.xgo", `import "gop/tpl"
+func TestTplPatchRun(t *testing.T) {
+	ctx := ixgo.NewContext(0)
+	_, err := ctx.RunFile("main.xgo", `import "gop/tpl"
 
 cl := tpl`+"`"+`
 expr = INT % "," => {
@@ -704,75 +695,8 @@ expr = INT % "," => {
 `+"`"+`!
 
 echo cl.parseExpr("1, 2, 3", nil)!
-`, `package main
-
-import (
-	"fmt"
-	"github.com/goplus/xgo/tpl"
-	"github.com/goplus/xgo/tpl/types"
-	"github.com/qiniu/x/errors"
-	"strconv"
-)
-//line main.xgo:3
-func main() {
-//line main.xgo:3:1
-	cl := func() (_xgo_ret tpl.Compiler) {
-//line main.xgo:3:1
-		var _xgo_err error
-//line main.xgo:3:1
-		_xgo_ret, _xgo_err = tpl.NewEx(`+"`"+`
-expr = INT % "," => {
-    return tpl.ListOp[int](self, v => {
-        return v.(*tpl.Token).Lit.int!
-    })
-}
-`+"`"+`, "main.xgo", 3, 10, "expr", func(self []interface{}) interface{} {
-//line main.xgo:5:1
-			return tpl.ListOp[int](self, func(v any) int {
-//line main.xgo:6:1
-				return func() (_xgo_ret int) {
-//line main.xgo:6:1
-					var _xgo_err error
-//line main.xgo:6:1
-					_xgo_ret, _xgo_err = strconv.Atoi(v.(*types.Token).Lit)
-//line main.xgo:6:1
-					if _xgo_err != nil {
-//line main.xgo:6:1
-						_xgo_err = errors.NewFrame(_xgo_err, "v.(*tpl.Token).Lit.int", "main.xgo", 6, "main.main")
-//line main.xgo:6:1
-						panic(_xgo_err)
-					}
-//line main.xgo:6:1
-					return
-				}()
-			})
-		})
-//line main.xgo:3:1
-		if _xgo_err != nil {
-//line main.xgo:3:1
-			_xgo_err = errors.NewFrame(_xgo_err, "tpl`+"`"+`\nexpr = INT % \",\" => {\n    return tpl.ListOp[int](self, v => {\n        return v.(*tpl.Token).Lit.int!\n    })\n}\n`+"`"+`", "main.xgo", 3, "main.main")
-//line main.xgo:3:1
-			panic(_xgo_err)
-		}
-//line main.xgo:3:1
-		return
-	}()
-//line main.xgo:11:1
-	fmt.Println(func() (_xgo_ret interface{}) {
-//line main.xgo:11:1
-		var _xgo_err error
-//line main.xgo:11:1
-		_xgo_ret, _xgo_err = cl.ParseExpr("1, 2, 3", nil)
-//line main.xgo:11:1
-		if _xgo_err != nil {
-//line main.xgo:11:1
-			_xgo_err = errors.NewFrame(_xgo_err, "cl.parseExpr(\"1, 2, 3\", nil)", "main.xgo", 11, "main.main")
-//line main.xgo:11:1
-			panic(_xgo_err)
-		}
-//line main.xgo:11:1
-		return
-	}())
-}
-`)
+`, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 }

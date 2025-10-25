@@ -26,6 +26,7 @@ import (
 
 	"github.com/goplus/gogen"
 	"github.com/goplus/ixgo"
+	"github.com/goplus/ixgo/internal/typesutil"
 	"github.com/goplus/mod/modfile"
 	"github.com/goplus/xgo/ast"
 	"github.com/goplus/xgo/cl"
@@ -39,13 +40,6 @@ type Import = modfile.Import
 
 var (
 	projects = make(map[string]*modfile.Project)
-)
-
-// UnexportPatchPkg disables exporting pkg@patch code as a separate package.
-// When this mode is enabled, patch code is inserted into the original package
-// namespace instead of being exported as "path@patch".
-const (
-	UnexportPatchPkg ixgo.Mode = ixgo.LastMode << 1
 )
 
 func RegisterClassFileType(ext string, class string, works []*modfile.Class, pkgPaths ...string) {
@@ -91,6 +85,7 @@ func BuildFile(ctx *ixgo.Context, filename string, src interface{}) (data []byte
 		}
 	}()
 	c := NewContext(ctx)
+	defer c.Release()
 	pkg, err := c.ParseFile(filename, src)
 	if err != nil {
 		return nil, err
@@ -106,6 +101,7 @@ func BuildFSDir(ctx *ixgo.Context, fs parser.FileSystem, dir string) (data []byt
 		}
 	}()
 	c := NewContext(ctx)
+	defer c.Release()
 	pkg, err := c.ParseFSDir(fs, dir)
 	if err != nil {
 		return nil, err
@@ -121,6 +117,7 @@ func BuildDir(ctx *ixgo.Context, dir string) (data []byte, err error) {
 		}
 	}()
 	c := NewContext(ctx)
+	defer c.Release()
 	pkg, err := c.ParseDir(dir)
 	if err != nil {
 		return nil, err
@@ -174,11 +171,12 @@ func (p *Package) ForEachFile(fn func(pkg *gogen.Package, fname string)) {
 }
 
 type Context struct {
-	Context  *ixgo.Context
-	FileSet  *token.FileSet
-	Importer *ixgo.Importer
-	Loader   ixgo.Loader
-	pkgs     map[string]*types.Package
+	Context   *ixgo.Context
+	FileSet   *token.FileSet
+	Importer  *ixgo.Importer
+	Loader    ixgo.Loader
+	pkgs      map[string]*types.Package
+	resetPkgs []func()
 }
 
 func ClassKind(fname string) (isProj, ok bool) {
@@ -212,6 +210,14 @@ func NewContext(ctx *ixgo.Context) *Context {
 	c := &Context{Context: ctx, Importer: ixgo.NewImporter(ctx), FileSet: token.NewFileSet(),
 		Loader: ctx.Loader, pkgs: make(map[string]*types.Package)}
 	return c
+}
+
+func (p *Context) Release() {
+	fns := p.resetPkgs
+	p.resetPkgs = nil
+	for _, fn := range fns {
+		fn()
+	}
 }
 
 func RegisterPackagePatch(ctx *ixgo.Context, path string, src interface{}) error {
@@ -250,21 +256,20 @@ func (c *Context) Import(path string) (*types.Package, error) {
 		return pkg, err
 	}
 	c.pkgs[path] = pkg
-	if sp := c.Context.SourcePackage(path + "@patch.xgo"); sp != nil {
+	if sp := c.Context.SourcePackage(path + "@patch"); sp != nil {
 		sp.Importer = c
 		err := sp.Load()
 		if err != nil {
 			return nil, err
 		}
-		patch := pkg
-		if c.Context.Mode&UnexportPatchPkg == 0 {
-			patch = types.NewPackage(path+"@patch", pkg.Name())
-		}
-		for _, name := range sp.Package.Scope().Names() {
-			obj := sp.Package.Scope().Lookup(name)
+		var names []string
+		scope := sp.Package.Scope()
+		rscope := pkg.Scope()
+		for _, name := range scope.Names() {
+			obj := scope.Lookup(name)
 			switch obj.(type) {
 			case *types.Func:
-				obj = types.NewFunc(obj.Pos(), patch, obj.Name(), obj.Type().(*types.Signature))
+				obj = types.NewFunc(obj.Pos(), pkg, obj.Name(), obj.Type().(*types.Signature))
 			case *types.TypeName:
 				named := obj.Type().(*types.Named)
 				var methods []*types.Func
@@ -274,13 +279,19 @@ func (c *Context) Import(path string) (*types.Package, error) {
 						methods[i] = named.Method(i)
 					}
 				}
-				obj = types.NewTypeName(obj.Pos(), patch, obj.Name(), nil)
+				obj = types.NewTypeName(obj.Pos(), pkg, obj.Name(), nil)
 				types.NewNamed(obj.(*types.TypeName), named.Underlying(), methods)
 			default:
 				continue
 			}
-			pkg.Scope().Insert(obj)
+			names = append(names, name)
+			rscope.Insert(obj)
 		}
+		c.resetPkgs = append(c.resetPkgs, func() {
+			for _, name := range names {
+				typesutil.ScopeDelete(rscope, name)
+			}
+		})
 	}
 	return pkg, nil
 }

@@ -38,7 +38,7 @@ func NewImporter(ctx *Context) *Importer {
 	}
 }
 
-func (i *Importer) Import(path string) (*types.Package, error) {
+func (i *Importer) Import(path string) (ret *types.Package, err error) {
 	if pkg, ok := i.pkgs[path]; ok {
 		return pkg, nil
 	}
@@ -48,6 +48,21 @@ func (i *Importer) Import(path string) (*types.Package, error) {
 	i.importing[path] = true
 	defer func() {
 		i.importing[path] = false
+	}()
+	defer func() {
+		if err == nil {
+			// check patch
+			if sp, ok := i.ctx.pkgs[path+"@patch"]; ok {
+				if err = sp.Load(); err == nil {
+					scope := sp.Package.Scope()
+					rscope := ret.Scope()
+					for _, name := range scope.Names() {
+						obj := scope.Lookup(name)
+						rscope.Insert(obj)
+					}
+				}
+			}
+		}
 	}()
 	if pkg, err := i.ctx.Loader.Import(path); err == nil && pkg.Complete() {
 		i.pkgs[path] = pkg
