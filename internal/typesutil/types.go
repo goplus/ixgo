@@ -48,10 +48,4 @@ func ScopeDelete(s *types.Scope, name string) types.Object {
 	return nil
 }
 
-func init() {
-	if unsafe.Sizeof(Scope{}) != unsafe.Sizeof(types.Scope{}) {
-		panic("unexpected sizeof types.Scope")
-	}
-}
-
 // -----------------------------------------------------------------------------
