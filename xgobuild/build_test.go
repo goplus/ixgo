@@ -445,6 +445,14 @@ import (
 	"github.com/qiniu/x/gsh"
 )
 
+const (
+	Version = "ver@patch"
+)
+
+var Zero = &Point{0,0}
+
+type MyPoint = Point
+
 type Point struct {
 	X int
 	Y int
@@ -480,6 +488,14 @@ pt := &Point{100,200}
 pt.Info()
 println(pt.X)
 dump(pt)
+
+// var
+dump(Zero)
+// const
+println(Version)
+// alias
+pt2 := &MyPoint{1,2}
+dump(pt2)
 `, `package main
 
 import (
@@ -502,6 +518,14 @@ func (this *App) MainEntry() {
 	fmt.Println(pt.X)
 //line main.gsh:6:1
 	gsh.Dump(pt)
+//line main.gsh:9:1
+	gsh.Dump(gsh.Zero)
+//line main.gsh:11:1
+	fmt.Println(gsh.Version)
+//line main.gsh:13:1
+	pt2 := &gsh.MyPoint{1, 2}
+//line main.gsh:14:1
+	gsh.Dump(pt2)
 }
 func (this *App) Main() {
 	gsh.Gopt_App_Main(this)
@@ -553,6 +577,14 @@ pt := &Point{100,200}
 pt.Info()
 println(pt.X)
 dump(pt)
+
+// var
+dump(Zero)
+// const
+println(Version)
+// alias
+pt2 := &MyPoint{1,2}
+dump(pt2)
 `, nil)
 	if err != nil {
 		t.Fatal(err)

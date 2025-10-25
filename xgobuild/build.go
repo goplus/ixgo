@@ -26,6 +26,7 @@ import (
 
 	"github.com/goplus/gogen"
 	"github.com/goplus/ixgo"
+	"github.com/goplus/ixgo/internal/typesalias"
 	"github.com/goplus/ixgo/internal/typesutil"
 	"github.com/goplus/mod/modfile"
 	"github.com/goplus/xgo/ast"
@@ -272,20 +273,29 @@ func (c *Context) Import(path string) (*types.Package, error) {
 		rscope := pkg.Scope()
 		for _, name := range scope.Names() {
 			obj := scope.Lookup(name)
-			switch obj.(type) {
+			switch v := obj.(type) {
+			case *types.Const:
+				obj = types.NewConst(obj.Pos(), pkg, obj.Name(), obj.Type(), v.Val())
+			case *types.Var:
+				obj = types.NewVar(obj.Pos(), pkg, obj.Name(), obj.Type())
 			case *types.Func:
 				obj = types.NewFunc(obj.Pos(), pkg, obj.Name(), obj.Type().(*types.Signature))
 			case *types.TypeName:
-				named := obj.Type().(*types.Named)
-				var methods []*types.Func
-				if n := named.NumMethods(); n > 0 {
-					methods = make([]*types.Func, n)
-					for i := 0; i < n; i++ {
-						methods[i] = named.Method(i)
+				switch typ := obj.Type().(type) {
+				case *typesalias.Alias:
+					obj = types.NewTypeName(obj.Pos(), pkg, obj.Name(), nil)
+					typesalias.NewAlias(obj.(*types.TypeName), typesalias.Rhs(typ))
+				case *types.Named:
+					var methods []*types.Func
+					if n := typ.NumMethods(); n > 0 {
+						methods = make([]*types.Func, n)
+						for i := 0; i < n; i++ {
+							methods[i] = typ.Method(i)
+						}
 					}
+					obj = types.NewTypeName(obj.Pos(), pkg, obj.Name(), nil)
+					types.NewNamed(obj.(*types.TypeName), typ.Underlying(), methods)
 				}
-				obj = types.NewTypeName(obj.Pos(), pkg, obj.Name(), nil)
-				types.NewNamed(obj.(*types.TypeName), named.Underlying(), methods)
 			default:
 				continue
 			}

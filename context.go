@@ -879,8 +879,28 @@ func (ctx *Context) buildPackage(sp *SourcePackage) (pkg *ssa.Package, err error
 	prog := ssa.NewProgram(ctx.FileSet, mode)
 	// Create SSA packages for all imports.
 	// Order is not significant.
+	checkPatch := func(p *types.Package) {
+		var addin []*types.Package
+		for _, im := range p.Imports() {
+			patch := im.Path() + "@patch"
+			if p.Path() == patch {
+				// skip p.path is pkg@patch
+				continue
+			}
+			if pkg, ok := ctx.pkgs[patch]; ok && pkg.Loaded() {
+				addin = append(addin, pkg.Package)
+			}
+		}
+		if len(addin) > 0 {
+			p.SetImports(append(p.Imports(), addin...))
+		}
+	}
 	created := make(map[*types.Package]bool)
 	var createAll func(pkgs []*types.Package)
+	var create = func(pkg *types.Package) {
+		checkPatch(pkg)
+		createAll(pkg.Imports())
+	}
 	createAll = func(pkgs []*types.Package) {
 		for _, p := range pkgs {
 			if !created[p] {
@@ -899,11 +919,11 @@ func (ctx *Context) buildPackage(sp *SourcePackage) (pkg *ssa.Package, err error
 						continue
 					}
 					created[pkg.Package] = true
-					createAll(pkg.Package.Imports())
+					create(pkg.Package)
 					prog.CreatePackage(pkg.Package, pkg.Files, pkg.Info, true).Build()
 					ctx.checkNested(pkg.Package, pkg.Info)
 				} else {
-					createAll(p.Imports())
+					create(p)
 					var indirect bool
 					if !p.Complete() {
 						indirect = true
@@ -938,7 +958,7 @@ func (ctx *Context) buildPackage(sp *SourcePackage) (pkg *ssa.Package, err error
 		})
 		createAll(addin)
 	}
-	createAll(sp.Package.Imports())
+	create(sp.Package)
 	if ctx.Mode&EnableDumpImports != 0 {
 		if sp.Dir != "" {
 			fmt.Println("# package", sp.Package.Path(), sp.Dir)
