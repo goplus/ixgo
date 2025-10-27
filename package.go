@@ -21,7 +21,6 @@ import (
 	"log"
 	"reflect"
 	"sort"
-	"strings"
 )
 
 var (
@@ -54,12 +53,9 @@ func RegisterPackage(pkg *Package) {
 	//	externPackages[pkg.Path] = true
 }
 
-// RegisterPatch register path with "pkg@patch"
-func RegisterPatch(path string, src interface{}) {
-	if !strings.Contains(path, "@patch") {
-		return
-	}
-	registerPatchs[path] = src
+// RegisterPatch register pkg with "pkg@patch"
+func RegisterPatch(pkg string, src interface{}) {
+	registerPatchs[pkg] = src
 }
 
 type TypedConst struct {

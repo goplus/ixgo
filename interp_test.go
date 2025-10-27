@@ -2893,3 +2893,53 @@ func main() {
 		t.Fatal(err)
 	}
 }
+
+func TestRegisterPatch(t *testing.T) {
+	ctx := ixgo.NewContext(0)
+	err := ctx.RegisterPatch("fmt", `
+package fmt
+
+import (
+	"fmt"
+	"math"
+)
+
+const Pi = math.Pi
+
+var (
+	Patch = "v1.0"
+)
+
+func Println1(v ...interface{}) {
+	fmt.Println(v...)
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = ctx.RegisterPatch("fmt", `
+package fmt
+import "fmt"
+
+func Println2(v ...interface{}) {
+	fmt.Println(v...)
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := `
+package main
+
+import "fmt"
+
+func main() {
+	fmt.Println1(fmt.Pi,fmt.Patch)
+	fmt.Println2("hello world")
+}
+`
+	_, err = ctx.RunFile("main.go", src, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+}

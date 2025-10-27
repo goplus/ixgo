@@ -26,6 +26,8 @@ import (
 
 	"github.com/goplus/gogen"
 	"github.com/goplus/ixgo"
+	"github.com/goplus/ixgo/internal/typesalias"
+	"github.com/goplus/ixgo/internal/typesutil"
 	"github.com/goplus/mod/modfile"
 	"github.com/goplus/xgo/ast"
 	"github.com/goplus/xgo/cl"
@@ -39,13 +41,6 @@ type Import = modfile.Import
 
 var (
 	projects = make(map[string]*modfile.Project)
-)
-
-// UnexportPatchPkg disables exporting pkg@patch code as a separate package.
-// When this mode is enabled, patch code is inserted into the original package
-// namespace instead of being exported as "path@patch".
-const (
-	UnexportPatchPkg ixgo.Mode = ixgo.LastMode << 1
 )
 
 func RegisterClassFileType(ext string, class string, works []*modfile.Class, pkgPaths ...string) {
@@ -91,6 +86,7 @@ func BuildFile(ctx *ixgo.Context, filename string, src interface{}) (data []byte
 		}
 	}()
 	c := NewContext(ctx)
+	defer c.Release()
 	pkg, err := c.ParseFile(filename, src)
 	if err != nil {
 		return nil, err
@@ -106,6 +102,7 @@ func BuildFSDir(ctx *ixgo.Context, fs parser.FileSystem, dir string) (data []byt
 		}
 	}()
 	c := NewContext(ctx)
+	defer c.Release()
 	pkg, err := c.ParseFSDir(fs, dir)
 	if err != nil {
 		return nil, err
@@ -121,6 +118,7 @@ func BuildDir(ctx *ixgo.Context, dir string) (data []byte, err error) {
 		}
 	}()
 	c := NewContext(ctx)
+	defer c.Release()
 	pkg, err := c.ParseDir(dir)
 	if err != nil {
 		return nil, err
@@ -174,11 +172,12 @@ func (p *Package) ForEachFile(fn func(pkg *gogen.Package, fname string)) {
 }
 
 type Context struct {
-	Context  *ixgo.Context
-	FileSet  *token.FileSet
-	Importer *ixgo.Importer
-	Loader   ixgo.Loader
-	pkgs     map[string]*types.Package
+	Context   *ixgo.Context
+	FileSet   *token.FileSet
+	Importer  *ixgo.Importer
+	Loader    ixgo.Loader
+	pkgs      map[string]*types.Package
+	resetPkgs []func()
 }
 
 func ClassKind(fname string) (isProj, ok bool) {
@@ -214,12 +213,17 @@ func NewContext(ctx *ixgo.Context) *Context {
 	return c
 }
 
-func RegisterPackagePatch(ctx *ixgo.Context, path string, src interface{}) error {
-	err := ctx.AddImportFile(path+"@patch", "src.go", src)
-	if err != nil {
-		return err
+// Release cleans up package patches by removing temporarily added scope objects.
+// Must be called after finishing work with a Context to restore packages to their
+// original state.
+//
+// The method is idempotent - multiple calls are safe.
+func (p *Context) Release() {
+	fns := p.resetPkgs
+	p.resetPkgs = nil
+	for _, fn := range fns {
+		fn()
 	}
-	return ctx.AddImportFile(path+"@patch.xgo", "src.go", src)
 }
 
 func isGopPackage(path string) bool {
@@ -250,37 +254,52 @@ func (c *Context) Import(path string) (*types.Package, error) {
 		return pkg, err
 	}
 	c.pkgs[path] = pkg
-	if sp := c.Context.SourcePackage(path + "@patch.xgo"); sp != nil {
+	if sp := c.Context.SourcePackage(path + "@patch"); sp != nil {
 		sp.Importer = c
 		err := sp.Load()
 		if err != nil {
 			return nil, err
 		}
-		patch := pkg
-		if c.Context.Mode&UnexportPatchPkg == 0 {
-			patch = types.NewPackage(path+"@patch", pkg.Name())
-		}
-		for _, name := range sp.Package.Scope().Names() {
-			obj := sp.Package.Scope().Lookup(name)
-			switch obj.(type) {
+		var names []string
+		scope := sp.Package.Scope()
+		rscope := pkg.Scope()
+		for _, name := range scope.Names() {
+			obj := scope.Lookup(name)
+			switch v := obj.(type) {
+			case *types.Const:
+				obj = types.NewConst(obj.Pos(), pkg, obj.Name(), obj.Type(), v.Val())
+			case *types.Var:
+				obj = types.NewVar(obj.Pos(), pkg, obj.Name(), obj.Type())
 			case *types.Func:
-				obj = types.NewFunc(obj.Pos(), patch, obj.Name(), obj.Type().(*types.Signature))
+				obj = types.NewFunc(obj.Pos(), pkg, obj.Name(), obj.Type().(*types.Signature))
 			case *types.TypeName:
-				named := obj.Type().(*types.Named)
-				var methods []*types.Func
-				if n := named.NumMethods(); n > 0 {
-					methods = make([]*types.Func, n)
-					for i := 0; i < n; i++ {
-						methods[i] = named.Method(i)
+				switch typ := obj.Type().(type) {
+				case *typesalias.Alias:
+					obj = types.NewTypeName(obj.Pos(), pkg, obj.Name(), nil)
+					typesalias.NewAlias(obj.(*types.TypeName), typesalias.Rhs(typ))
+				case *types.Named:
+					var methods []*types.Func
+					if n := typ.NumMethods(); n > 0 {
+						methods = make([]*types.Func, n)
+						for i := 0; i < n; i++ {
+							methods[i] = typ.Method(i)
+						}
 					}
+					obj = types.NewTypeName(obj.Pos(), pkg, obj.Name(), nil)
+					types.NewNamed(obj.(*types.TypeName), typ.Underlying(), methods)
 				}
-				obj = types.NewTypeName(obj.Pos(), patch, obj.Name(), nil)
-				types.NewNamed(obj.(*types.TypeName), named.Underlying(), methods)
 			default:
 				continue
 			}
-			pkg.Scope().Insert(obj)
+			if rscope.Insert(obj) == nil {
+				names = append(names, name)
+			}
 		}
+		c.resetPkgs = append(c.resetPkgs, func() {
+			for _, name := range names {
+				typesutil.ScopeDelete(rscope, name)
+			}
+		})
 	}
 	return pkg, nil
 }
