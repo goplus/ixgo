@@ -478,7 +478,7 @@ func Gopt_App_Gopx_GetWidget[T any](app any, name string) {
 
 func TestPackagePatch(t *testing.T) {
 	ctx := ixgo.NewContext(0)
-	err := RegisterPackagePatch(ctx, "github.com/qiniu/x/gsh", patch_data)
+	err := ctx.RegisterPatch("github.com/qiniu/x/gsh", patch_data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -538,7 +538,7 @@ func main() {
 
 func TestPackagePatchNoUse(t *testing.T) {
 	ctx := ixgo.NewContext(0)
-	err := RegisterPackagePatch(ctx, "github.com/qiniu/x/gsh", patch_data)
+	err := ctx.RegisterPatch("github.com/qiniu/x/gsh", patch_data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -567,7 +567,7 @@ func main() {
 
 func TestPackagePatchRun(t *testing.T) {
 	ctx := ixgo.NewContext(0)
-	err := RegisterPackagePatch(ctx, "github.com/qiniu/x/gsh", patch_data)
+	err := ctx.RegisterPatch("github.com/qiniu/x/gsh", patch_data)
 	if err != nil {
 		t.Fatal(err)
 	}

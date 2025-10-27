@@ -226,14 +226,6 @@ func (p *Context) Release() {
 	}
 }
 
-func RegisterPackagePatch(ctx *ixgo.Context, path string, src interface{}) error {
-	err := ctx.AddImportFile(path+"@patch", "src.go", src)
-	if err != nil {
-		return err
-	}
-	return ctx.AddImportFile(path+"@patch.xgo", "src.go", src)
-}
-
 func isGopPackage(path string) bool {
 	if pkg, ok := ixgo.LookupPackage(path); ok {
 		if _, ok := pkg.UntypedConsts["GopPackage"]; ok {
@@ -299,8 +291,9 @@ func (c *Context) Import(path string) (*types.Package, error) {
 			default:
 				continue
 			}
-			names = append(names, name)
-			rscope.Insert(obj)
+			if rscope.Insert(obj) == nil {
+				names = append(names, name)
+			}
 		}
 		c.resetPkgs = append(c.resetPkgs, func() {
 			for _, name := range names {
