@@ -27,6 +27,7 @@ func init() {
 			"internal/unsafeheader": "unsafeheader",
 			"runtime":               "runtime",
 			"sync":                  "sync",
+			"sync/atomic":           "atomic",
 			"unsafe":                "unsafe",
 		},
 		Interfaces: map[string]reflect.Type{
