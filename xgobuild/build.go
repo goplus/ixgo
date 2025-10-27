@@ -226,6 +226,10 @@ func (p *Context) Release() {
 	}
 }
 
+func RegisterPackagePatch(ctx *ixgo.Context, path string, src interface{}) error {
+	return ctx.RegisterPatch(path, src)
+}
+
 func isGopPackage(path string) bool {
 	if pkg, ok := ixgo.LookupPackage(path); ok {
 		if _, ok := pkg.UntypedConsts["GopPackage"]; ok {
