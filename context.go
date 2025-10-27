@@ -194,9 +194,9 @@ func NewContext(mode Mode) *Context {
 
 	if mode&DisableAutoLoadPatchs == 0 {
 		for path, src := range registerPatchs {
-			err := ctx.AddImportFile(path, path+".go", src)
+			err := ctx.RegisterPatch(path, src)
 			if err != nil {
-				log.Printf("import %v failed: %v\n", path, err)
+				log.Printf("import patch %v failed: %v\n", path, err)
 			}
 		}
 	}
@@ -456,6 +456,19 @@ func (ctx *Context) AddImport(path string, dir string) (err error) {
 
 func (ctx *Context) SourcePackage(path string) *SourcePackage {
 	return ctx.pkgs[path]
+}
+
+func (ctx *Context) RegisterPatch(pkg string, src interface{}) error {
+	if sp, ok := ctx.pkgs[pkg+"@patch"]; ok {
+		file, err := ctx.ParseFile(pkg+"_patch.go", src)
+		if err != nil {
+			return err
+		}
+		sp.Files = append(sp.Files, file)
+		return nil
+	}
+	_, err := ctx.addImportFile(pkg+"@patch", pkg+"_patch.go", src)
+	return err
 }
 
 func (ctx *Context) addImportFile(path string, filename string, src interface{}) (*SourcePackage, error) {

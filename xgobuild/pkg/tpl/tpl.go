@@ -69,10 +69,7 @@ func ListOp[T any](in []any, op func(v any) T, fn func(flat []T)) any {
 }`
 
 func init() {
-	ixgo.RegisterPatch("github.com/goplus/xgo/tpl@patch", tpl_patch)
-	ixgo.RegisterPatch("github.com/goplus/xgo/tpl@patch.xgo", tpl_patch)
-	ixgo.RegisterPatch("github.com/goplus/xgo/tpl/variant@patch", variant_patch)
-	ixgo.RegisterPatch("github.com/goplus/xgo/tpl/variant@patch.xgo", variant_patch)
-	ixgo.RegisterPatch("github.com/goplus/xgo/tpl/variant/delay@patch", delay_patch)
-	ixgo.RegisterPatch("github.com/goplus/xgo/tpl/variant/delay@patch.xgo", delay_patch)
+	ixgo.RegisterPatch("github.com/goplus/xgo/tpl", tpl_patch)
+	ixgo.RegisterPatch("github.com/goplus/xgo/tpl/variant", variant_patch)
+	ixgo.RegisterPatch("github.com/goplus/xgo/tpl/variant/delay", delay_patch)
 }
