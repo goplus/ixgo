@@ -1025,6 +1025,7 @@ func init() {
 			"O_APPEND":                      {"untyped int", constant.MakeInt64(int64(q.O_APPEND))},
 			"O_CLOEXEC":                     {"untyped int", constant.MakeInt64(int64(q.O_CLOEXEC))},
 			"O_CREAT":                       {"untyped int", constant.MakeInt64(int64(q.O_CREAT))},
+			"O_DIRECTORY":                   {"untyped int", constant.MakeInt64(int64(q.O_DIRECTORY))},
 			"O_DSYNC":                       {"untyped int", constant.MakeInt64(int64(q.O_DSYNC))},
 			"O_EXCL":                        {"untyped int", constant.MakeInt64(int64(q.O_EXCL))},
 			"O_EXEC":                        {"untyped int", constant.MakeInt64(int64(q.O_EXEC))},

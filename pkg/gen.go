@@ -114,14 +114,15 @@ func main() {
 	}
 
 	gpkgs := genericPkgs(pkgs)
-	// sync/atomic
-	cmd = exec.Command("qexp", "-outdir", ".", "-addtags", tags, "-filename", name, "-src")
-	cmd.Args = append(cmd.Args, gpkgs...)
-	cmd.Stderr = os.Stderr
-	cmd.Stdout = os.Stdout
-	err = cmd.Run()
-	if err != nil {
-		panic(err)
+	if len(gpkgs) > 0 {
+		cmd = exec.Command("qexp", "-outdir", ".", "-addtags", tags, "-filename", name, "-src")
+		cmd.Args = append(cmd.Args, gpkgs...)
+		cmd.Stderr = os.Stderr
+		cmd.Stdout = os.Stdout
+		err = cmd.Run()
+		if err != nil {
+			panic(err)
+		}
 	}
 
 	list := osarchList()
@@ -163,20 +164,18 @@ func main() {
 	}
 }
 
-var genericList = []string{
-	"sync/atomic",
-	"maps",
-	"slices",
-	"cmp",
-	"iter",
+func isGeneric(pkg string) bool {
+	switch pkg {
+	case "maps", "slices", "cmp", "iter":
+		return true
+	}
+	return false
 }
 
 func genericPkgs(std []string) (pkgs []string) {
 	for _, pkg := range std {
-		for _, v := range genericList {
-			if pkg == v {
-				pkgs = append(pkgs, v)
-			}
+		if isGeneric(pkg) {
+			pkgs = append(pkgs, pkg)
 		}
 	}
 	return
