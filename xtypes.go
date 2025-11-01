@@ -177,6 +177,7 @@ type FindMethod interface {
 }
 
 type TypesRecord struct {
+	ctx     *Context
 	rctx    *reflectx.Context // reflectx context
 	loader  Loader
 	finder  FindMethod
@@ -186,12 +187,10 @@ type TypesRecord struct {
 	fntargs string        //reflect type arguments used to instantiate the current func
 	nested  map[*types.Named]int
 	nstack  nestedStack
-	mfnmap  map[mfnKey]mfnValue
-	mfnid   int
 }
 
 type mfnKey struct {
-	ftyp     types.Type
+	typ      reflect.Type
 	name     string
 	indexs   string
 	pointer  bool
@@ -213,25 +212,26 @@ func indexsToString(index []int) string {
 }
 
 func (r *TypesRecord) Release() {
-	r.rctx.Reset()
+	if r.ctx.Mode&SupportMultipleInterp != 0 {
+		r.rctx.Reset()
+	}
 	r.loader = nil
 	r.rcache = nil
 	r.tcache = nil
 	r.ncache = nil
 	r.finder = nil
 	r.nested = nil
-	r.mfnmap = nil
 }
 
-func NewTypesRecord(rctx *reflectx.Context, loader Loader, finder FindMethod, nested map[*types.Named]int) *TypesRecord {
+func NewTypesRecord(ctx *Context, rctx *reflectx.Context, loader Loader, finder FindMethod, nested map[*types.Named]int) *TypesRecord {
 	return &TypesRecord{
+		ctx:    ctx,
 		rctx:   rctx,
 		loader: loader,
 		finder: finder,
 		rcache: make(map[reflect.Type]types.Type),
 		tcache: &typeutil.Map{},
 		nested: nested,
-		mfnmap: make(map[mfnKey]mfnValue),
 	}
 }
 
@@ -519,18 +519,18 @@ func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 		var mid int
 		if len(idx) > 1 {
 			indirect := methods[i].Indirect()
-			key := mfnKey{ftyp: fn.Type(), name: fn.Name(), indexs: indexsToString(idx), pointer: pointer, indirect: indirect}
-			if v, ok := r.mfnmap[key]; ok {
+			rtyp := fn.Type().Underlying().(*types.Signature).Recv().Type()
+			rt, _ := r.ToType(rtyp)
+			key := mfnKey{typ: rt, name: fn.Name(), indexs: indexsToString(idx), pointer: pointer, indirect: indirect}
+			if v, ok := r.ctx.mfnmap[key]; ok {
 				mfn = v.fn
 				mid = v.id
 			} else {
-				rtyp := fn.Type().Underlying().(*types.Signature).Recv().Type()
-				rt, _ := r.ToType(rtyp)
 				variadic := mtyp.IsVariadic()
-				r.mfnid++
-				mid = r.mfnid
+				r.ctx.mfnid++
+				mid = r.ctx.mfnid
 				mfn = embedFunc(rt, fn.Name(), idx, pointer, indirect, variadic)
-				r.mfnmap[key] = mfnValue{fn: mfn, id: mid}
+				r.ctx.mfnmap[key] = mfnValue{fn: mfn, id: mid}
 			}
 		} else {
 			mfn = r.finder.FindMethod(mtyp, fn)

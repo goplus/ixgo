@@ -91,6 +91,8 @@ type Context struct {
 	override     map[string]reflect.Value                                 // override function
 	evalInit     map[string]bool                                          // eval init check
 	nestedMap    map[*types.Named]int                                     // nested named index
+	mfnmap       map[mfnKey]mfnValue                                      // mfn map for global context
+	mfnid        int                                                      // mfn id for global context
 	root         string                                                   // project root
 	callForPool  int                                                      // least call count for enable function pool
 	Mode         Mode                                                     // mode
@@ -180,6 +182,7 @@ func NewContext(mode Mode) *Context {
 		pkgs:         make(map[string]*SourcePackage),
 		override:     make(map[string]reflect.Value),
 		nestedMap:    make(map[*types.Named]int),
+		mfnmap:       make(map[mfnKey]mfnValue),
 		callForPool:  64,
 	}
 	ctx.Loader = NewTypesLoader(ctx, mode)
