@@ -212,9 +212,6 @@ func indexsToString(index []int) string {
 }
 
 func (r *TypesRecord) Release() {
-	if r.ctx.Mode&SupportMultipleInterp != 0 {
-		r.rctx.Reset()
-	}
 	r.loader = nil
 	r.rcache = nil
 	r.tcache = nil

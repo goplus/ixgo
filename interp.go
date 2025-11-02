@@ -82,6 +82,7 @@ func init() {
 
 type Interp struct {
 	ctx          *Context
+	rctx         *reflectx.Context
 	mainpkg      *ssa.Package                                // the SSA main package
 	record       *TypesRecord                                // lookup type and ToType
 	globals      map[string]value                            // addresses of global variables (immutable)
@@ -1155,8 +1156,17 @@ func NewInterp(ctx *Context, mainpkg *ssa.Package) (*Interp, error) {
 }
 
 func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{}) (*Interp, error) {
+	var rctx *reflectx.Context
+	if ctx.Mode&SupportMultipleInterp == 0 {
+		reflectx.ResetAll()
+		rctx = reflectx.Default
+		rctx.Reset()
+	} else {
+		rctx = reflectx.NewContext()
+	}
 	i := &Interp{
 		ctx:          ctx,
+		rctx:         rctx,
 		mainpkg:      mainpkg,
 		globals:      make(map[string]value),
 		chkinit:      make(map[string]bool),
@@ -1166,14 +1176,6 @@ func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{
 		msets:        make(map[reflect.Type](map[string]*ssa.Function)),
 		chexit:       make(chan int),
 		mainid:       goroutineID(),
-	}
-	var rctx *reflectx.Context
-	if ctx.Mode&SupportMultipleInterp == 0 {
-		reflectx.ResetAll()
-		rctx = reflectx.Default
-		rctx.Reset()
-	} else {
-		rctx = reflectx.NewContext()
 	}
 	prog := mainpkg.Prog
 	if ctx.Mode&OptionLoadAllImethod != 0 {
@@ -1412,18 +1414,26 @@ func IcallStat() (capacity int, allocate int, aviable int) {
 	return reflectx.IcallStat()
 }
 
+// IcallCached return reflectx icall cached
+func IcallCached() int {
+	return reflectx.IcallCached()
+}
+
 // icall allocate
 func (i *Interp) IcallAlloc() int {
-	return i.record.rctx.IcallAlloc()
+	return i.rctx.IcallAlloc()
 }
 
 // ResetIcall is reset reflectx icall, all methods invalid.
 func (i *Interp) ResetIcall() {
-	i.record.rctx.Reset()
+	i.rctx.Reset()
 }
 
 // UnsafeRelease is unsafe release interp. interp all invalid.
 func (i *Interp) UnsafeRelease() {
+	if i.ctx.Mode&SupportMultipleInterp != 0 {
+		i.rctx.Reset()
+	}
 	i.record.Release()
 	for _, v := range i.funcs {
 		v.UnsafeRelease()
