@@ -2943,3 +2943,87 @@ func main() {
 		t.Fatal(err)
 	}
 }
+
+func TestIcallCached(t *testing.T) {
+	src := `
+package main
+
+import (
+	"bytes"
+	"fmt"
+)
+
+type T struct {
+	bytes.Buffer
+}
+
+func (t *T) Text() string {
+	return t.String()
+}
+
+func main() {
+	var t T
+	t.WriteString("hello world")
+	fmt.Println(&t)
+}
+`
+	ctx := ixgo.NewContext(ixgo.SupportMultipleInterp)
+
+	pkg1, err := ctx.LoadFile("main.go", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg2, err := ctx.LoadFile("main.go", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, orgAllocate, _ := ixgo.IcallStat()
+	orgCached := ixgo.IcallCached()
+	defer func() {
+		_, allocate, _ := ixgo.IcallStat()
+		cached := ixgo.IcallCached()
+		if orgAllocate != allocate {
+			t.Fatalf("allocate release error: %v", allocate-orgAllocate)
+		}
+		if orgCached != cached {
+			t.Fatalf("cached release error: %v", cached-orgCached)
+		}
+	}()
+
+	interp1, err := ctx.NewInterp(pkg1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	interp2, err := ctx.NewInterp(pkg2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	checkStats := func(step string) {
+		_, allocate, _ := ixgo.IcallStat()
+		cached := ixgo.IcallCached()
+		alloc1 := interp1.IcallAlloc()
+		alloc2 := interp2.IcallAlloc()
+		if cached == 0 || allocate != cached+alloc1+alloc2 {
+			t.Fatalf("%s: cached error: all %v, cached %v, alloc1 %v, alloc2 %v",
+				step, allocate, cached, alloc1, alloc2)
+		}
+	}
+
+	checkStats("after creating interpreters")
+
+	_, err = ctx.RunInterp(interp1, "main.go", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	interp1.UnsafeRelease()
+
+	checkStats("after releasing interp1")
+
+	_, err = ctx.RunInterp(interp2, "main.go", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	interp2.UnsafeRelease()
+}
