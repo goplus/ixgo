@@ -66,7 +66,7 @@ func AddBuildFlags(cmd *base.Command, mask BuildFlagMask) {
 		cmd.Flag.BoolVar(&DebugSSATrace, "ssa-trace", false, "trace SSA interpreter code")
 	}
 	if mask&OmitExperimentalGCFlag != 0 {
-		cmd.Flag.BoolVar(&ExperimentalGC, "exp-gc", false, "experimental support runtime.GC")
+		cmd.Flag.BoolVar(&ExperimentalGC, "exp-gc", true, "experimental support runtime.GC")
 	}
 	cmd.Flag.Var((*tagsFlag)(&BuildContext.BuildTags), "tags", "a comma-separated list of build tags to consider satisfied during the build")
 }
