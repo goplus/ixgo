@@ -9,6 +9,7 @@ import (
 	"unsafe"
 
 	"github.com/goplus/ixgo"
+	_ "github.com/goplus/ixgo/pkg/github.com/goplus/ixgo/x/abi"
 )
 
 //go:embed _patch/mcleanup_go124.go
