@@ -646,7 +646,6 @@ import (
 	"fmt"
 	"github.com/goplus/xgo/tpl"
 	"github.com/goplus/xgo/tpl/types"
-	tpl1 "github.com/goplus/xgo/tpl@patch"
 	"github.com/qiniu/x/errors"
 	"strconv"
 )
@@ -665,7 +664,7 @@ expr = INT % "," => {
 }
 `+"`"+`, "main.xgo", 3, 10, "expr", func(self []interface{}) interface{} {
 //line main.xgo:5:1
-			return tpl1.ListOp[int](self, func(v any) int {
+			return tpl.ListOp[int](self, func(v any) int {
 //line main.xgo:6:1
 				return func() (_xgo_ret int) {
 //line main.xgo:6:1
