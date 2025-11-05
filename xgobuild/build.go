@@ -230,7 +230,10 @@ func RegisterPackagePatch(ctx *ixgo.Context, path string, src interface{}) error
 	return ctx.RegisterPatch(path, src)
 }
 
-func isGopPackage(path string) bool {
+func (c *Context) isOwnedPackage(path string) bool {
+	if c.Context.SourcePackage(path+"@patch") != nil {
+		return true
+	}
 	if pkg, ok := ixgo.LookupPackage(path); ok {
 		if _, ok := pkg.UntypedConsts["GopPackage"]; ok {
 			return true
@@ -239,9 +242,8 @@ func isGopPackage(path string) bool {
 	return false
 }
 
-func (c *Context) importPath(path string) (gop bool, pkg *types.Package, err error) {
-	if isGopPackage(path) {
-		gop = true
+func (c *Context) importPath(path string) (pkg *types.Package, err error) {
+	if c.isOwnedPackage(path) {
 		pkg, err = c.Loader.Import(path)
 	} else {
 		pkg, err = c.Importer.Import(path)
@@ -253,7 +255,7 @@ func (c *Context) Import(path string) (*types.Package, error) {
 	if pkg, ok := c.pkgs[path]; ok {
 		return pkg, nil
 	}
-	_, pkg, err := c.importPath(path)
+	pkg, err := c.importPath(path)
 	if err != nil {
 		return pkg, err
 	}
