@@ -11,11 +11,8 @@ import (
 	"unsafe"
 
 	"github.com/goplus/ixgo/x/abi"
+	"github.com/goplus/ixgo/x/goarch"
 )
-
-// PtrSize is the size of a pointer in bytes - unsafe.Sizeof(uintptr(0)) but as an ideal constant.
-// It is also the size of the machine's native word size (that is, 4 on 32-bit systems, 8 on 64-bit).
-const PtrSize = 4 << (^uintptr(0) >> 63)
 
 // HashTrieMap is an implementation of a concurrent hash-trie. The implementation
 // is designed around frequent loads, but offers decent performance for stores
@@ -72,7 +69,7 @@ func (ht *HashTrieMap[K, V]) Load(key K) (value V, ok bool) {
 	hash := ht.keyHash(abi.NoEscape(unsafe.Pointer(&key)), ht.seed)
 
 	i := ht.root.Load()
-	hashShift := 8 * PtrSize
+	hashShift := 8 * goarch.PtrSize
 	for hashShift != 0 {
 		hashShift -= nChildrenLog2
 
@@ -101,7 +98,7 @@ func (ht *HashTrieMap[K, V]) LoadOrStore(key K, value V) (result V, loaded bool)
 	for {
 		// Find the key or a candidate location for insertion.
 		i = ht.root.Load()
-		hashShift = 8 * PtrSize
+		hashShift = 8 * goarch.PtrSize
 		haveInsertPoint := false
 		for hashShift != 0 {
 			hashShift -= nChildrenLog2
@@ -218,7 +215,7 @@ func (ht *HashTrieMap[K, V]) Swap(key K, new V) (previous V, loaded bool) {
 	for {
 		// Find the key or a candidate location for insertion.
 		i = ht.root.Load()
-		hashShift = 8 * PtrSize
+		hashShift = 8 * goarch.PtrSize
 		haveInsertPoint := false
 		for hashShift != 0 {
 			hashShift -= nChildrenLog2
@@ -344,7 +341,7 @@ func (ht *HashTrieMap[K, V]) LoadAndDelete(key K) (value V, loaded bool) {
 
 	// Check if the node is now empty (and isn't the root), and delete it if able.
 	for i.parent != nil && i.empty() {
-		if hashShift == 8*PtrSize {
+		if hashShift == 8*goarch.PtrSize {
 			panic("internal/sync.HashTrieMap: ran out of hash bits while iterating")
 		}
 		hashShift += nChildrenLog2
@@ -406,7 +403,7 @@ func (ht *HashTrieMap[K, V]) CompareAndDelete(key K, old V) (deleted bool) {
 
 	// Check if the node is now empty (and isn't the root), and delete it if able.
 	for i.parent != nil && i.empty() {
-		if hashShift == 8*PtrSize {
+		if hashShift == 8*goarch.PtrSize {
 			panic("internal/sync.HashTrieMap: ran out of hash bits while iterating")
 		}
 		hashShift += nChildrenLog2
@@ -433,7 +430,7 @@ func (ht *HashTrieMap[K, V]) find(key K, hash uintptr, valEqual equalFunc, value
 	for {
 		// Find the key or return if it's not there.
 		i = ht.root.Load()
-		hashShift = 8 * PtrSize
+		hashShift = 8 * goarch.PtrSize
 		found := false
 		for hashShift != 0 {
 			hashShift -= nChildrenLog2

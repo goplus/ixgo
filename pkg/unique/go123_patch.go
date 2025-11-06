@@ -1,5 +1,5 @@
-//go:build go1.23
-// +build go1.23
+//go:build go1.23 && !go1.25
+// +build go1.23,!go1.25
 
 package unique
 
@@ -10,6 +10,7 @@ import (
 
 	_ "github.com/goplus/ixgo/pkg/github.com/goplus/ixgo/x/abi"
 	_ "github.com/goplus/ixgo/pkg/github.com/goplus/ixgo/x/isync"
+	_ "github.com/goplus/ixgo/pkg/github.com/goplus/ixgo/x/stringslite"
 
 	"github.com/goplus/ixgo"
 )
