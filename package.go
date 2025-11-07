@@ -25,7 +25,7 @@ import (
 
 var (
 	registerPkgs   = make(map[string]*Package)
-	registerPatchs = make(map[string]interface{})
+	registerPatchs = make(map[string][]interface{})
 )
 
 // PackageList return all register packages
@@ -54,8 +54,8 @@ func RegisterPackage(pkg *Package) {
 }
 
 // RegisterPatch register pkg with "pkg@patch"
-func RegisterPatch(pkg string, src interface{}) {
-	registerPatchs[pkg] = src
+func RegisterPatch(pkg string, src ...interface{}) {
+	registerPatchs[pkg] = append(registerPatchs[pkg], src...)
 }
 
 type TypedConst struct {

@@ -196,10 +196,12 @@ func NewContext(mode Mode) *Context {
 	ctx.Lookup = new(load.ListDriver).Lookup
 
 	if mode&DisableAutoLoadPatchs == 0 {
-		for path, src := range registerPatchs {
-			err := ctx.RegisterPatch(path, src)
-			if err != nil {
-				log.Printf("import patch %v failed: %v\n", path, err)
+		for path, srcs := range registerPatchs {
+			for _, src := range srcs {
+				err := ctx.RegisterPatch(path, src)
+				if err != nil {
+					log.Printf("import patch %v failed: %v\n", path, err)
+				}
 			}
 		}
 	}
