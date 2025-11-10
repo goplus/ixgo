@@ -22,6 +22,7 @@ import (
 	"go/format"
 	"io/ioutil"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -98,6 +99,10 @@ func exportPkg(pkg *Package, sname string, id string, tagList []string) ([]byte,
 		if len(pkg.Links) > 0 {
 			imports = append(imports, `_ "unsafe"`)
 		}
+	}
+	if flagCustomPkg != "" {
+		pkg.Path = path.Clean(flagCustomPkg)
+		pkg.Name = path.Base(pkg.Path)
 	}
 	r := strings.NewReplacer("$PKGNAME", pkg.Name,
 		"$IMPORTS", strings.Join(imports, "\n"),
