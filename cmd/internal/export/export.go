@@ -32,6 +32,7 @@ import (
 
 var (
 	flagExportDir      string
+	flagCustomPkg      string
 	flagBuildContext   string
 	flagCustomTags     string
 	flagBuildTags      string
@@ -41,8 +42,9 @@ var (
 )
 
 func init() {
-	flag.StringVar(&flagExportDir, "outdir", "", "set export pkg path")
-	flag.StringVar(&flagBuildContext, "contexts", "", "set customer build contexts goos_goarch list. eg \"drawin_amd64 darwin_arm64\"")
+	flag.StringVar(&flagExportDir, "outdir", "", "set export out dir")
+	flag.StringVar(&flagCustomPkg, "pkgpath", "", "set custom pkg path")
+	flag.StringVar(&flagBuildContext, "contexts", "", "set custom build contexts goos_goarch list. eg \"drawin_amd64 darwin_arm64\"")
 	flag.StringVar(&flagCustomTags, "addtags", "", "add custom tags, split by ;")
 	flag.StringVar(&flagBuildTags, "tags", "", "a comma-separated list of build tags")
 	flag.StringVar(&flagExportFileName, "filename", "export", "set export file name")
@@ -191,6 +193,9 @@ func ExportPkg(prog *Program, pkg string, ctx *build.Context) (string, error) {
 	if flagExportDir == "" {
 		fmt.Println(string(data))
 		return "stdout", nil
+	}
+	if flagCustomPkg != "" {
+		pkg = flagCustomPkg
 	}
 	fpath := filepath.Join(flagExportDir, pkg)
 	var fname string
