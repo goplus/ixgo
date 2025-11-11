@@ -23,6 +23,7 @@ func init() {
 			"encoding/json":       "json",
 			"fmt":                 "fmt",
 			"html":                "html",
+			"internal/godebug":    "godebug",
 			"io":                  "io",
 			"io/fs":               "fs",
 			"os":                  "os",

@@ -46,6 +46,7 @@ func init() {
 			"fmt":                    "fmt",
 			"hash":                   "hash",
 			"internal/cpu":           "cpu",
+			"internal/godebug":       "godebug",
 			"io":                     "io",
 			"math/big":               "big",
 			"net":                    "net",

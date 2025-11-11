@@ -20,8 +20,10 @@ func init() {
 		Deps: map[string]string{
 			"bufio":   "bufio",
 			"bytes":   "bytes",
+			"errors":  "errors",
 			"fmt":     "fmt",
 			"io":      "io",
+			"math":    "math",
 			"net":     "net",
 			"strconv": "strconv",
 			"strings": "strings",

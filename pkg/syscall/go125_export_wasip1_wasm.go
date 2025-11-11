@@ -53,8 +53,8 @@ func init() {
 			"WaitStatus":    reflect.TypeOf((*q.WaitStatus)(nil)).Elem(),
 		},
 		AliasTypes: map[string]reflect.Type{
-			"Dircookie": reflect.TypeOf((*uint64)(nil)).Elem(),
-			"Filetype":  reflect.TypeOf((*uint8)(nil)).Elem(),
+			"Dircookie": reflect.TypeOf((*q.Dircookie)(nil)).Elem(),
+			"Filetype":  reflect.TypeOf((*q.Filetype)(nil)).Elem(),
 		},
 		Vars: map[string]reflect.Value{},
 		Funcs: map[string]reflect.Value{

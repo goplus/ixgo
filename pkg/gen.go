@@ -105,7 +105,7 @@ func main() {
 	log.Println(pkgs)
 
 	cmd := exec.Command("qexp", "-outdir", ".", "-addtags", tags, "-filename", name)
-	cmd.Args = append(cmd.Args, pkgs...)
+	cmd.Args = append(cmd.Args, normalPkgs(pkgs)...)
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
 	err := cmd.Run()
@@ -113,6 +113,20 @@ func main() {
 		panic(err)
 	}
 
+	// log
+	cmd = exec.Command("qexp", "-outdir", ".", "-addtags", tags, "-filename", name, "-code")
+	cmd.Args = append(cmd.Args, "log")
+	if minorVer >= 21 {
+		cmd.Args = append(cmd.Args, "log/slog", "log/internal", "log/slog/internal", "log/slog/internal/buffer")
+	}
+	cmd.Stderr = os.Stderr
+	cmd.Stdout = os.Stdout
+	err = cmd.Run()
+	if err != nil {
+		panic(err)
+	}
+
+	// generic pkgs
 	gpkgs := genericPkgs(pkgs)
 	if len(gpkgs) > 0 {
 		cmd = exec.Command("qexp", "-outdir", ".", "-addtags", tags, "-filename", name, "-src")
@@ -124,7 +138,7 @@ func main() {
 			panic(err)
 		}
 	}
-
+	// syscall
 	list := osarchList()
 	log.Println(list)
 	for _, osarch := range list {
@@ -162,6 +176,21 @@ func main() {
 			}
 		}
 	}
+}
+
+func normalPkgs(std []string) (pkgs []string) {
+	for _, pkg := range std {
+		switch pkg {
+		case "syscall", "log", "log/slog":
+			continue
+		default:
+			if isGeneric(pkg) {
+				continue
+			}
+		}
+		pkgs = append(pkgs, pkg)
+	}
+	return
 }
 
 func isGeneric(pkg string) bool {

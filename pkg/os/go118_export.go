@@ -23,6 +23,7 @@ func init() {
 			"internal/itoa":            "itoa",
 			"internal/oserror":         "oserror",
 			"internal/poll":            "poll",
+			"internal/safefilepath":    "safefilepath",
 			"internal/syscall/execenv": "execenv",
 			"internal/syscall/unix":    "unix",
 			"internal/testlog":         "testlog",
