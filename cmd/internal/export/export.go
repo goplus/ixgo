@@ -107,13 +107,23 @@ func parserPkgs(expr string) ([]string, error) {
 		pos := strings.Index(line, "=")
 		if pos != -1 {
 			pkg, name := line[:pos], line[pos+1:]
-			if name == "main" || isSkipPkg(pkg) {
+			if name == "main" {
 				continue
 			}
 			pkgs = append(pkgs, pkg)
 		}
 	}
-	return pkgs, nil
+	if len(pkgs) <= 1 {
+		return pkgs, nil
+	}
+	var rets []string
+	for _, pkg := range pkgs {
+		if isSkipPkg(pkg) {
+			continue
+		}
+		rets = append(rets, pkg)
+	}
+	return rets, nil
 }
 
 func runGoCommand(args ...string) (ret []byte, err error) {

@@ -60,7 +60,7 @@ func exportPkg(pkg *Package, sname string, id string, tagList []string) ([]byte,
 	if pkg.usedPkg {
 		imports = append(imports, fmt.Sprintf("q %q", pkg.Path))
 		imports = append(imports, "")
-	} else {
+	} else if !flagExportCode {
 		imports = append(imports, fmt.Sprintf("_ %q", pkg.Path))
 	}
 	if !pkg.IsEmpty() {
