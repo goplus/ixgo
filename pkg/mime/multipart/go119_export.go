@@ -23,6 +23,7 @@ func init() {
 			"crypto/rand":          "rand",
 			"errors":               "errors",
 			"fmt":                  "fmt",
+			"internal/godebug":     "godebug",
 			"io":                   "io",
 			"math":                 "math",
 			"mime":                 "mime",
@@ -31,7 +32,9 @@ func init() {
 			"os":                   "os",
 			"path/filepath":        "filepath",
 			"sort":                 "sort",
+			"strconv":              "strconv",
 			"strings":              "strings",
+			"unsafe":               "unsafe",
 		},
 		Interfaces: map[string]reflect.Type{
 			"File": reflect.TypeOf((*q.File)(nil)).Elem(),

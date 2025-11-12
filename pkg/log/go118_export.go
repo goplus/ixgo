@@ -6,11 +6,6 @@
 package log
 
 import (
-	q "log"
-
-	"go/constant"
-	"reflect"
-
 	"github.com/goplus/ixgo"
 )
 
@@ -27,42 +22,8 @@ func init() {
 			"sync/atomic": "atomic",
 			"time":        "time",
 		},
-		Interfaces: map[string]reflect.Type{},
-		NamedTypes: map[string]reflect.Type{
-			"Logger": reflect.TypeOf((*q.Logger)(nil)).Elem(),
-		},
-		AliasTypes: map[string]reflect.Type{},
-		Vars:       map[string]reflect.Value{},
-		Funcs: map[string]reflect.Value{
-			"Default":   reflect.ValueOf(q.Default),
-			"Fatal":     reflect.ValueOf(q.Fatal),
-			"Fatalf":    reflect.ValueOf(q.Fatalf),
-			"Fatalln":   reflect.ValueOf(q.Fatalln),
-			"Flags":     reflect.ValueOf(q.Flags),
-			"New":       reflect.ValueOf(q.New),
-			"Output":    reflect.ValueOf(q.Output),
-			"Panic":     reflect.ValueOf(q.Panic),
-			"Panicf":    reflect.ValueOf(q.Panicf),
-			"Panicln":   reflect.ValueOf(q.Panicln),
-			"Prefix":    reflect.ValueOf(q.Prefix),
-			"Print":     reflect.ValueOf(q.Print),
-			"Printf":    reflect.ValueOf(q.Printf),
-			"Println":   reflect.ValueOf(q.Println),
-			"SetFlags":  reflect.ValueOf(q.SetFlags),
-			"SetOutput": reflect.ValueOf(q.SetOutput),
-			"SetPrefix": reflect.ValueOf(q.SetPrefix),
-			"Writer":    reflect.ValueOf(q.Writer),
-		},
-		TypedConsts: map[string]ixgo.TypedConst{},
-		UntypedConsts: map[string]ixgo.UntypedConst{
-			"LUTC":          {"untyped int", constant.MakeInt64(int64(q.LUTC))},
-			"Ldate":         {"untyped int", constant.MakeInt64(int64(q.Ldate))},
-			"Llongfile":     {"untyped int", constant.MakeInt64(int64(q.Llongfile))},
-			"Lmicroseconds": {"untyped int", constant.MakeInt64(int64(q.Lmicroseconds))},
-			"Lmsgprefix":    {"untyped int", constant.MakeInt64(int64(q.Lmsgprefix))},
-			"Lshortfile":    {"untyped int", constant.MakeInt64(int64(q.Lshortfile))},
-			"LstdFlags":     {"untyped int", constant.MakeInt64(int64(q.LstdFlags))},
-			"Ltime":         {"untyped int", constant.MakeInt64(int64(q.Ltime))},
-		},
+		Source: source,
 	})
 }
+
+var source = "package log\n\nimport (\n\t\"fmt\"\n\t\"io\"\n\t\"os\"\n\t\"runtime\"\n\t\"sync\"\n\t\"sync/atomic\"\n\t\"time\"\n)\n\nconst (\n\tLdate\t= 1 << iota\n\tLtime\n\tLmicroseconds\n\tLlongfile\n\tLshortfile\n\tLUTC\n\tLmsgprefix\n\tLstdFlags\t= Ldate | Ltime\n)\n\ntype Logger struct {\n\tmu\t\tsync.Mutex\n\tprefix\t\tstring\n\tflag\t\tint\n\tout\t\tio.Writer\n\tbuf\t\t[]byte\n\tisDiscard\tint32\n}\n\nfunc New(out io.Writer, prefix string, flag int) *Logger {\n\tl := &Logger{out: out, prefix: prefix, flag: flag}\n\tif out == io.Discard {\n\t\tl.isDiscard = 1\n\t}\n\treturn l\n}\n\nfunc (l *Logger) SetOutput(w io.Writer) {\n\tl.mu.Lock()\n\tdefer l.mu.Unlock()\n\tl.out = w\n\tisDiscard := int32(0)\n\tif w == io.Discard {\n\t\tisDiscard = 1\n\t}\n\tatomic.StoreInt32(&l.isDiscard, isDiscard)\n}\n\nvar std = New(os.Stderr, \"\", LstdFlags)\n\nfunc Default() *Logger\t{ return std }\n\nfunc itoa(buf *[]byte, i int, wid int) {\n\n\tvar b [20]byte\n\tbp := len(b) - 1\n\tfor i >= 10 || wid > 1 {\n\t\twid--\n\t\tq := i / 10\n\t\tb[bp] = byte('0' + i - q*10)\n\t\tbp--\n\t\ti = q\n\t}\n\n\tb[bp] = byte('0' + i)\n\t*buf = append(*buf, b[bp:]...)\n}\n\nfunc (l *Logger) formatHeader(buf *[]byte, t time.Time, file string, line int) {\n\tif l.flag&Lmsgprefix == 0 {\n\t\t*buf = append(*buf, l.prefix...)\n\t}\n\tif l.flag&(Ldate|Ltime|Lmicroseconds) != 0 {\n\t\tif l.flag&LUTC != 0 {\n\t\t\tt = t.UTC()\n\t\t}\n\t\tif l.flag&Ldate != 0 {\n\t\t\tyear, month, day := t.Date()\n\t\t\titoa(buf, year, 4)\n\t\t\t*buf = append(*buf, '/')\n\t\t\titoa(buf, int(month), 2)\n\t\t\t*buf = append(*buf, '/')\n\t\t\titoa(buf, day, 2)\n\t\t\t*buf = append(*buf, ' ')\n\t\t}\n\t\tif l.flag&(Ltime|Lmicroseconds) != 0 {\n\t\t\thour, min, sec := t.Clock()\n\t\t\titoa(buf, hour, 2)\n\t\t\t*buf = append(*buf, ':')\n\t\t\titoa(buf, min, 2)\n\t\t\t*buf = append(*buf, ':')\n\t\t\titoa(buf, sec, 2)\n\t\t\tif l.flag&Lmicroseconds != 0 {\n\t\t\t\t*buf = append(*buf, '.')\n\t\t\t\titoa(buf, t.Nanosecond()/1e3, 6)\n\t\t\t}\n\t\t\t*buf = append(*buf, ' ')\n\t\t}\n\t}\n\tif l.flag&(Lshortfile|Llongfile) != 0 {\n\t\tif l.flag&Lshortfile != 0 {\n\t\t\tshort := file\n\t\t\tfor i := len(file) - 1; i > 0; i-- {\n\t\t\t\tif file[i] == '/' {\n\t\t\t\t\tshort = file[i+1:]\n\t\t\t\t\tbreak\n\t\t\t\t}\n\t\t\t}\n\t\t\tfile = short\n\t\t}\n\t\t*buf = append(*buf, file...)\n\t\t*buf = append(*buf, ':')\n\t\titoa(buf, line, -1)\n\t\t*buf = append(*buf, \": \"...)\n\t}\n\tif l.flag&Lmsgprefix != 0 {\n\t\t*buf = append(*buf, l.prefix...)\n\t}\n}\n\nfunc (l *Logger) Output(calldepth int, s string) error {\n\tnow := time.Now()\n\tvar file string\n\tvar line int\n\tl.mu.Lock()\n\tdefer l.mu.Unlock()\n\tif l.flag&(Lshortfile|Llongfile) != 0 {\n\n\t\tl.mu.Unlock()\n\t\tvar ok bool\n\t\t_, file, line, ok = runtime.Caller(calldepth)\n\t\tif !ok {\n\t\t\tfile = \"???\"\n\t\t\tline = 0\n\t\t}\n\t\tl.mu.Lock()\n\t}\n\tl.buf = l.buf[:0]\n\tl.formatHeader(&l.buf, now, file, line)\n\tl.buf = append(l.buf, s...)\n\tif len(s) == 0 || s[len(s)-1] != '\\n' {\n\t\tl.buf = append(l.buf, '\\n')\n\t}\n\t_, err := l.out.Write(l.buf)\n\treturn err\n}\n\nfunc (l *Logger) Printf(format string, v ...any) {\n\tif atomic.LoadInt32(&l.isDiscard) != 0 {\n\t\treturn\n\t}\n\tl.Output(2, fmt.Sprintf(format, v...))\n}\n\nfunc (l *Logger) Print(v ...any) {\n\tif atomic.LoadInt32(&l.isDiscard) != 0 {\n\t\treturn\n\t}\n\tl.Output(2, fmt.Sprint(v...))\n}\n\nfunc (l *Logger) Println(v ...any) {\n\tif atomic.LoadInt32(&l.isDiscard) != 0 {\n\t\treturn\n\t}\n\tl.Output(2, fmt.Sprintln(v...))\n}\n\nfunc (l *Logger) Fatal(v ...any) {\n\tl.Output(2, fmt.Sprint(v...))\n\tos.Exit(1)\n}\n\nfunc (l *Logger) Fatalf(format string, v ...any) {\n\tl.Output(2, fmt.Sprintf(format, v...))\n\tos.Exit(1)\n}\n\nfunc (l *Logger) Fatalln(v ...any) {\n\tl.Output(2, fmt.Sprintln(v...))\n\tos.Exit(1)\n}\n\nfunc (l *Logger) Panic(v ...any) {\n\ts := fmt.Sprint(v...)\n\tl.Output(2, s)\n\tpanic(s)\n}\n\nfunc (l *Logger) Panicf(format string, v ...any) {\n\ts := fmt.Sprintf(format, v...)\n\tl.Output(2, s)\n\tpanic(s)\n}\n\nfunc (l *Logger) Panicln(v ...any) {\n\ts := fmt.Sprintln(v...)\n\tl.Output(2, s)\n\tpanic(s)\n}\n\nfunc (l *Logger) Flags() int {\n\tl.mu.Lock()\n\tdefer l.mu.Unlock()\n\treturn l.flag\n}\n\nfunc (l *Logger) SetFlags(flag int) {\n\tl.mu.Lock()\n\tdefer l.mu.Unlock()\n\tl.flag = flag\n}\n\nfunc (l *Logger) Prefix() string {\n\tl.mu.Lock()\n\tdefer l.mu.Unlock()\n\treturn l.prefix\n}\n\nfunc (l *Logger) SetPrefix(prefix string) {\n\tl.mu.Lock()\n\tdefer l.mu.Unlock()\n\tl.prefix = prefix\n}\n\nfunc (l *Logger) Writer() io.Writer {\n\tl.mu.Lock()\n\tdefer l.mu.Unlock()\n\treturn l.out\n}\n\nfunc SetOutput(w io.Writer) {\n\tstd.SetOutput(w)\n}\n\nfunc Flags() int {\n\treturn std.Flags()\n}\n\nfunc SetFlags(flag int) {\n\tstd.SetFlags(flag)\n}\n\nfunc Prefix() string {\n\treturn std.Prefix()\n}\n\nfunc SetPrefix(prefix string) {\n\tstd.SetPrefix(prefix)\n}\n\nfunc Writer() io.Writer {\n\treturn std.Writer()\n}\n\nfunc Print(v ...any) {\n\tif atomic.LoadInt32(&std.isDiscard) != 0 {\n\t\treturn\n\t}\n\tstd.Output(2, fmt.Sprint(v...))\n}\n\nfunc Printf(format string, v ...any) {\n\tif atomic.LoadInt32(&std.isDiscard) != 0 {\n\t\treturn\n\t}\n\tstd.Output(2, fmt.Sprintf(format, v...))\n}\n\nfunc Println(v ...any) {\n\tif atomic.LoadInt32(&std.isDiscard) != 0 {\n\t\treturn\n\t}\n\tstd.Output(2, fmt.Sprintln(v...))\n}\n\nfunc Fatal(v ...any) {\n\tstd.Output(2, fmt.Sprint(v...))\n\tos.Exit(1)\n}\n\nfunc Fatalf(format string, v ...any) {\n\tstd.Output(2, fmt.Sprintf(format, v...))\n\tos.Exit(1)\n}\n\nfunc Fatalln(v ...any) {\n\tstd.Output(2, fmt.Sprintln(v...))\n\tos.Exit(1)\n}\n\nfunc Panic(v ...any) {\n\ts := fmt.Sprint(v...)\n\tstd.Output(2, s)\n\tpanic(s)\n}\n\nfunc Panicf(format string, v ...any) {\n\ts := fmt.Sprintf(format, v...)\n\tstd.Output(2, s)\n\tpanic(s)\n}\n\nfunc Panicln(v ...any) {\n\ts := fmt.Sprintln(v...)\n\tstd.Output(2, s)\n\tpanic(s)\n}\n\nfunc Output(calldepth int, s string) error {\n\treturn std.Output(calldepth+1, s)\n}\n"

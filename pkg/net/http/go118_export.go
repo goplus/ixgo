@@ -31,6 +31,7 @@ func init() {
 			"errors":                                 "errors",
 			"fmt":                                    "fmt",
 			"internal/godebug":                       "godebug",
+			"internal/safefilepath":                  "safefilepath",
 			"io":                                     "io",
 			"io/fs":                                  "fs",
 			"io/ioutil":                              "ioutil",

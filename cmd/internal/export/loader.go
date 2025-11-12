@@ -378,6 +378,12 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 	for _, v := range pkg.Imports() {
 		e.Deps = append(e.Deps, fmt.Sprintf("%q: %q", v.Path(), v.Name()))
 	}
+	if flagExportCode {
+		if err := p.ExportSource(e, info); err != nil {
+			return nil, fmt.Errorf("export source for %q failed: %w", e.Path, err)
+		}
+		return e, nil
+	}
 	var foundGeneric bool
 	for _, name := range pkg.Scope().Names() {
 		if !token.IsExported(name) {
@@ -438,9 +444,9 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 			log.Panicf("unreachable %v %T\n", name, t)
 		}
 	}
-	if (flagExportSource && foundGeneric) || flagExportCode {
+	if flagExportSource && foundGeneric {
 		if err := p.ExportSource(e, info); err != nil {
-			log.Println("export source failed", err)
+			return nil, fmt.Errorf("export source for %q failed: %w", e.Path, err)
 		}
 	}
 	return e, nil

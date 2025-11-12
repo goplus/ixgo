@@ -47,6 +47,7 @@ func init() {
 			"math/big":                              "big",
 			"math/bits":                             "bits",
 			"net":                                   "net",
+			"net/netip":                             "netip",
 			"net/url":                               "url",
 			"reflect":                               "reflect",
 			"runtime":                               "runtime",
