@@ -430,7 +430,12 @@ func (r *TypesRecord) toStructField(v *types.Var, typ reflect.Type, tag string) 
 		Anonymous: v.Anonymous(),
 	}
 	if !token.IsExported(name) {
-		fld.PkgPath = v.Pkg().Path()
+		if pkg := v.Pkg(); pkg != nil {
+			fld.PkgPath = pkg.Path()
+		} else {
+			// fix golang.org/x/tools@v0.29 or higher invalid prog.RuntimeTypes struct{in string; out string}
+			fld.PkgPath = "_"
+		}
 	}
 	return fld
 }
