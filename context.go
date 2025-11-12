@@ -54,6 +54,7 @@ const (
 	EnableTracing                                                     // Print a trace of all instructions as they are interpreted.
 	EnablePrintAny                                                    // Enable builtin print for any type ( struct/array )
 	EnableNoStrict                                                    // Enable no strict mode
+	EnableLoadAllPackages                                             // Enable load all loaded packages
 	ExperimentalSupportGC                                             // experimental support runtime.GC
 	SupportMultipleInterp                                             // Support multiple interp, must manual release interp reflectx icall.
 	CheckGopOverloadFunc                                              // Check and skip gop overload func
@@ -924,17 +925,19 @@ func (ctx *Context) buildPackage(sp *SourcePackage) (pkg *ssa.Package, err error
 			if !created[p] {
 				created[p] = true
 				if pkg, ok := ctx.pkgs[p.Path()]; ok {
+					if !pkg.Loaded() {
+						continue
+					}
 					if ctx.Mode&EnableDumpImports != 0 {
 						if pkg.Dir != "" {
-							fmt.Println("# source", p.Path(), pkg.Dir)
+							fmt.Println("# source", p.Path(), "<"+pkg.Dir+">")
 						} else if pkg.Register {
-							fmt.Println("# package", p.Path(), "<generic>")
+							fmt.Println("# package", p.Path(), "<source>")
+						} else if strings.HasSuffix(p.Path(), "@patch") {
+							fmt.Println("# package", p.Path(), "<source>")
 						} else {
 							fmt.Println("# source", p.Path(), "<memory>")
 						}
-					}
-					if !pkg.Loaded() {
-						continue
 					}
 					created[pkg.Package] = true
 					create(pkg.Package)
@@ -959,23 +962,27 @@ func (ctx *Context) buildPackage(sp *SourcePackage) (pkg *ssa.Package, err error
 			}
 		}
 	}
-	var addin []*types.Package
-	for _, pkg := range ctx.Loader.Packages() {
-		path := pkg.Path()
-		if _, ok := ctx.pkgs[path]; ok && strings.HasSuffix(path, "@patch") {
-			addin = append(addin, pkg)
-			continue
+
+	if ctx.Mode&EnableLoadAllPackages != 0 {
+		var addin []*types.Package
+		for _, pkg := range ctx.Loader.Packages() {
+			path := pkg.Path()
+			if _, ok := ctx.pkgs[path]; ok && strings.HasSuffix(path, "@patch") {
+				addin = append(addin, pkg)
+				continue
+			}
+			if !pkg.Complete() {
+				addin = append(addin, pkg)
+			}
 		}
-		if !pkg.Complete() {
-			addin = append(addin, pkg)
+		if len(addin) > 0 {
+			sort.Slice(addin, func(i, j int) bool {
+				return addin[i].Path() < addin[j].Path()
+			})
+			createAll(addin)
 		}
 	}
-	if len(addin) > 0 {
-		sort.Slice(addin, func(i, j int) bool {
-			return addin[i].Path() < addin[j].Path()
-		})
-		createAll(addin)
-	}
+
 	create(sp.Package)
 	if ctx.Mode&EnableDumpImports != 0 {
 		if sp.Dir != "" {
