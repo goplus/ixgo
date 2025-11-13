@@ -81,7 +81,7 @@ type Context struct {
 	Loader       Loader                                                   // types loader
 	BuildContext build.Context                                            // build context, default build.Default
 	RunContext   context.Context                                          // run context, default unset
-	Importer     *Importer                                                // importer
+	Importer     types.Importer                                           // importer
 	output       io.Writer                                                // capture print/println output
 	FileSet      *token.FileSet                                           // file set
 	sizes        types.Sizes                                              // types unsafe sizes

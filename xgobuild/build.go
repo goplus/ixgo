@@ -174,7 +174,7 @@ func (p *Package) ForEachFile(fn func(pkg *gogen.Package, fname string)) {
 type Context struct {
 	Context   *ixgo.Context
 	FileSet   *token.FileSet
-	Importer  *ixgo.Importer
+	Importer  types.Importer
 	Loader    ixgo.Loader
 	pkgs      map[string]*types.Package
 	resetPkgs []func()
