@@ -81,6 +81,7 @@ type Context struct {
 	Loader       Loader                                                   // types loader
 	BuildContext build.Context                                            // build context, default build.Default
 	RunContext   context.Context                                          // run context, default unset
+	Importer     *Importer                                                // importer
 	output       io.Writer                                                // capture print/println output
 	FileSet      *token.FileSet                                           // file set
 	sizes        types.Sizes                                              // types unsafe sizes
@@ -195,6 +196,7 @@ func NewContext(mode Mode) *Context {
 	}
 	ctx.sizes = types.SizesFor("gc", runtime.GOARCH)
 	ctx.Lookup = new(load.ListDriver).Lookup
+	ctx.Importer = NewImporter(ctx)
 
 	if mode&DisableAutoLoadPatchs == 0 {
 		for path, srcs := range registerPatchs {
@@ -507,9 +509,10 @@ func (ctx *Context) loadPackageFile(path string, filename string, src interface{
 	}
 	pkg := types.NewPackage(path, file.Name.Name)
 	tp := &SourcePackage{
-		Context: ctx,
-		Package: pkg,
-		Files:   []*ast.File{file},
+		Context:  ctx,
+		Package:  pkg,
+		Files:    []*ast.File{file},
+		Importer: ctx.Importer,
 	}
 	ctx.pkgs[path] = tp
 	return tp, nil
@@ -531,10 +534,11 @@ func (ctx *Context) loadPackage(bp *build.Package, path string, dir string) (*So
 		path = "main"
 	}
 	tp := &SourcePackage{
-		Package: types.NewPackage(path, bp.Name),
-		Files:   files,
-		Dir:     dir,
-		Context: ctx,
+		Package:  types.NewPackage(path, bp.Name),
+		Files:    files,
+		Dir:      dir,
+		Context:  ctx,
+		Importer: ctx.Importer,
 	}
 	ctx.pkgs[path] = tp
 	return tp, nil
@@ -564,10 +568,11 @@ func (ctx *Context) loadTestPackage(bp *build.Package, path string, dir string) 
 		}
 	}
 	tp := &SourcePackage{
-		Package: types.NewPackage(path, name),
-		Files:   files,
-		Dir:     dir,
-		Context: ctx,
+		Package:  types.NewPackage(path, name),
+		Files:    files,
+		Dir:      dir,
+		Context:  ctx,
+		Importer: ctx.Importer,
 	}
 	ctx.pkgs[path] = tp
 	if len(bp.XTestGoFiles) > 0 {
@@ -583,10 +588,11 @@ func (ctx *Context) loadTestPackage(bp *build.Package, path string, dir string) 
 			files = append(files, embed)
 		}
 		tp := &SourcePackage{
-			Package: types.NewPackage(path+"_test", bp.Name+"_test"),
-			Files:   files,
-			Dir:     dir,
-			Context: ctx,
+			Package:  types.NewPackage(path+"_test", bp.Name+"_test"),
+			Files:    files,
+			Dir:      dir,
+			Context:  ctx,
+			Importer: ctx.Importer,
 		}
 		ctx.pkgs[path+"_test"] = tp
 	}
@@ -599,10 +605,11 @@ func (ctx *Context) loadTestPackage(bp *build.Package, path string, dir string) 
 		return nil, err
 	}
 	return &SourcePackage{
-		Package: types.NewPackage(path+".test", "main"),
-		Files:   []*ast.File{f},
-		Dir:     dir,
-		Context: ctx,
+		Package:  types.NewPackage(path+".test", "main"),
+		Files:    []*ast.File{f},
+		Dir:      dir,
+		Context:  ctx,
+		Importer: ctx.Importer,
 	}, nil
 }
 
@@ -696,9 +703,10 @@ func (ctx *Context) LoadAstFile(path string, file *ast.File) (*ssa.Package, erro
 		files = append(files, embed)
 	}
 	sp := &SourcePackage{
-		Context: ctx,
-		Package: types.NewPackage(path, file.Name.Name),
-		Files:   files,
+		Context:  ctx,
+		Package:  types.NewPackage(path, file.Name.Name),
+		Files:    files,
+		Importer: ctx.Importer,
 	}
 	if err := sp.Load(); err != nil {
 		return nil, err
@@ -718,9 +726,10 @@ func (ctx *Context) LoadAstPackage(path string, apkg *ast.Package) (*ssa.Package
 		}
 	}
 	sp := &SourcePackage{
-		Context: ctx,
-		Package: types.NewPackage(path, apkg.Name),
-		Files:   files,
+		Context:  ctx,
+		Package:  types.NewPackage(path, apkg.Name),
+		Files:    files,
+		Importer: ctx.Importer,
 	}
 	err := sp.Load()
 	if err != nil {
