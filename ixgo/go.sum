@@ -6,12 +6,12 @@ github.com/gopherjs/gopherjs v0.0.0-20200217142428-fce0ec30dd00 h1:l5lAOZEym3oK3
 github.com/gopherjs/gopherjs v0.0.0-20200217142428-fce0ec30dd00/go.mod h1:wJfORRmW1u3UXTncJ5qlYoELFm8eSnnEO6hX4iZ3EWY=
 github.com/goplus/gogen v1.19.5 h1:YWPwpRA1PusPhptv9jKg/XiN+AQGiAD9r6I86mJ3lR4=
 github.com/goplus/gogen v1.19.5/go.mod h1:owX2e1EyU5WD+Nm6oH2m/GXjLdlBYcwkLO4wN8HHXZI=
-github.com/goplus/ixgo v0.55.0 h1:+aX6KyahUumC1vUA15E9/Njd0ed+XoA6Ua2RenW9ajQ=
-github.com/goplus/ixgo v0.55.0/go.mod h1:jEUDBjOwhl9z4DAs5Wtl3I4w7D+e35IRF6Nfz6HW0rk=
+github.com/goplus/ixgo v0.58.0 h1:XlT+Qz+wwX26vo/7TYnoR2IKDr512zm5nsuPNQLtrds=
+github.com/goplus/ixgo v0.58.0/go.mod h1:oreqPAcYBb/sEx6oCl7/kiCawfHQm08e6OAwYVi5aMM=
 github.com/goplus/mod v0.17.1 h1:ITovxDcc5zbURV/Wrp3/SBsYLgC1KrxY6pq1zMM2V94=
 github.com/goplus/mod v0.17.1/go.mod h1:iXEszBKqi38BAyQApBPyQeurLHmQN34YMgC2ZNdap50=
-github.com/goplus/reflectx v1.4.3 h1:iNWyuzSdblbua1iclT1n9vyDGkjz9yB8NchgMjJ5TKg=
-github.com/goplus/reflectx v1.4.3/go.mod h1:wHOS9ilbB4zrecI0W1dMmkW9JMcpXV7VjALVbNU9xfM=
+github.com/goplus/reflectx v1.5.0 h1:d6THLWzrQJCIAnNzyXJDA7J1sxj8ELzKH+Wj17X/dtE=
+github.com/goplus/reflectx v1.5.0/go.mod h1:wHOS9ilbB4zrecI0W1dMmkW9JMcpXV7VjALVbNU9xfM=
 github.com/goplus/xgo v1.5.2 h1:38lqaHPMpOAzdk6pvo+GFMaUMSyA1tJKzyFEnqHROTI=
 github.com/goplus/xgo v1.5.2/go.mod h1:WjJwPgZyo9wXnWelIUAP/cKJA/deZ5jtnWUcua6MklI=
 github.com/mattn/go-runewidth v0.0.3 h1:a+kO+98RDGEfo6asOGMmpodZq4FNtnGP54yps8BzLR4=
