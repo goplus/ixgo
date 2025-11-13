@@ -210,7 +210,6 @@ func NewContext(ctx *ixgo.Context) *Context {
 	ctx.Mode |= ixgo.CheckGopOverloadFunc
 	c := &Context{Context: ctx, Importer: ixgo.NewImporter(ctx), FileSet: token.NewFileSet(),
 		Loader: ctx.Loader, pkgs: make(map[string]*types.Package)}
-
 	return c
 }
 
