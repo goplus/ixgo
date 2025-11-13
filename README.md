@@ -1,6 +1,5 @@
 # iXGo The Go/XGo Interpreter
 
-[![Go1.18](https://github.com/goplus/ixgo/workflows/Go1.18/badge.svg)](https://github.com/goplus/ixgo/actions/workflows/go118.yml)
 [![Go1.19](https://github.com/goplus/ixgo/workflows/Go1.19/badge.svg)](https://github.com/goplus/ixgo/actions/workflows/go119.yml)
 [![Go1.20](https://github.com/goplus/ixgo/workflows/Go1.20/badge.svg)](https://github.com/goplus/ixgo/actions/workflows/go120.yml)
 [![Go1.21](https://github.com/goplus/ixgo/workflows/Go1.21/badge.svg)](https://github.com/goplus/ixgo/actions/workflows/go121.yml)
@@ -14,7 +13,7 @@ A fast and fully compatible Go language interpreter.
 
 ### Go Version
 
-- Go1.18 ~ Go1.25
+- Go1.19 ~ Go1.25
 - macOS Linux Windows  WebAssembly GopherJS and more.
 
 ### ABI
@@ -36,7 +35,7 @@ support ABI0 and ABIInternal
 
 ### Generics
 
-- support typeparams (Go1.18 ~ Go1.24)
+- support typeparams (Go1.19 ~ Go1.24)
 - support alias typeparams (Go1.24 ~ Go1.25)
 
 ### runtime.GC
