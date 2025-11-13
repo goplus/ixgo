@@ -208,12 +208,9 @@ func NewContext(ctx *ixgo.Context) *Context {
 		ctx = ixgo.NewContext(0)
 	}
 	ctx.Mode |= ixgo.CheckGopOverloadFunc
-	c := &Context{Context: ctx, Importer: ctx.Importer, FileSet: token.NewFileSet(),
+	c := &Context{Context: ctx, Importer: ixgo.NewImporter(ctx), FileSet: token.NewFileSet(),
 		Loader: ctx.Loader, pkgs: make(map[string]*types.Package)}
 
-	if c.Importer == nil {
-		c.Importer = ixgo.NewImporter(ctx)
-	}
 	return c
 }
 
