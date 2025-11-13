@@ -928,6 +928,8 @@ func (ctx *Context) buildPackage(sp *SourcePackage) (pkg *ssa.Package, err error
 					if !pkg.Loaded() {
 						continue
 					}
+					created[pkg.Package] = true
+					create(pkg.Package)
 					if ctx.Mode&EnableDumpImports != 0 {
 						if pkg.Dir != "" {
 							fmt.Println("# source", p.Path(), "<"+pkg.Dir+">")
@@ -939,8 +941,6 @@ func (ctx *Context) buildPackage(sp *SourcePackage) (pkg *ssa.Package, err error
 							fmt.Println("# source", p.Path(), "<memory>")
 						}
 					}
-					created[pkg.Package] = true
-					create(pkg.Package)
 					prog.CreatePackage(pkg.Package, pkg.Files, pkg.Info, true).Build()
 					ctx.checkNested(pkg.Package, pkg.Info)
 				} else {
