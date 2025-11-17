@@ -57,12 +57,9 @@ func (i *Importer) Import(path string) (ret *types.Package, err error) {
 					scope := sp.Package.Scope()
 					rscope := ret.Scope()
 					names := scope.Names()
-					rnames := make([]string, 0, len(names))
 					for _, name := range names {
 						obj := scope.Lookup(name)
-						if rscope.Insert(obj) == nil {
-							rnames = append(rnames, name)
-						}
+						rscope.Insert(obj)
 					}
 				}
 			}
