@@ -40,6 +40,11 @@ type Project = modfile.Project
 type Import = modfile.Import
 
 const (
+	// StaticLoad is a mode flag that disables dynamic Importer creation.
+	// When StaticLoad is set, the Context will use only the base Loader
+	// for package imports instead of creating a dynamic ixgo.Importer.
+	// This mode is useful for scenarios where all packages are pre-loaded
+	// or when dynamic importing is not needed.
 	StaticLoad = ixgo.LastMode * 2
 )
 
@@ -267,10 +272,12 @@ func (c *Context) Import(path string) (*types.Package, error) {
 		if err != nil {
 			return nil, err
 		}
-		var names []string
 		scope := sp.Package.Scope()
+		names := scope.Names()
 		rscope := pkg.Scope()
-		for _, name := range scope.Names() {
+		rnames := make([]string, 0, len(names))
+		ralts := make([]types.Object, 0, len(names))
+		for _, name := range names {
 			obj := scope.Lookup(name)
 			switch v := obj.(type) {
 			case *types.Const:
@@ -298,14 +305,24 @@ func (c *Context) Import(path string) (*types.Package, error) {
 			default:
 				continue
 			}
-			if rscope.Insert(obj) == nil {
-				names = append(names, name)
+			alt := rscope.Insert(obj)
+			if alt == nil {
+				rnames = append(rnames, name)
+			} else if alt.Pkg() == sp.Package {
+				typesutil.ScopeDelete(rscope, name)
+				rscope.Insert(obj)
+				rnames = append(rnames, name)
+				ralts = append(ralts, alt)
 			}
 		}
 		c.resetPkgs = append(c.resetPkgs, func() {
-			for _, name := range names {
+			for _, name := range rnames {
 				typesutil.ScopeDelete(rscope, name)
 			}
+			for _, alt := range ralts {
+				rscope.Insert(alt)
+			}
+			delete(c.pkgs, path)
 		})
 	}
 	return pkg, nil
@@ -383,6 +400,7 @@ func (c *Context) ParseFile(fname string, src interface{}) (*Package, error) {
 }
 
 func (c *Context) loadPackages(srcDir string, apkgs map[string]*ast.Package) (*Package, error) {
+	defer c.rewindPkgs()
 	var pkgs []*gogen.Package
 	for _, apkg := range apkgs {
 		pkg, err := c.loadPackage(srcDir, apkg)
@@ -409,6 +427,5 @@ func (c *Context) loadPackage(srcDir string, apkg *ast.Package) (*gogen.Package,
 	if c.Context.IsEvalMode() {
 		conf.NoSkipConstant = true
 	}
-	defer c.rewindPkgs()
 	return cl.NewPackage("", apkg, conf)
 }
