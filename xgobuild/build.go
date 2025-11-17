@@ -39,6 +39,15 @@ type Class = modfile.Class
 type Project = modfile.Project
 type Import = modfile.Import
 
+const (
+	// StaticLoad is a mode flag that disables dynamic Importer creation.
+	// When StaticLoad is set, the Context will use only the base Loader
+	// for package imports instead of creating a dynamic ixgo.Importer.
+	// This mode is useful for scenarios where all packages are pre-loaded
+	// or when dynamic importing is not needed.
+	StaticLoad = ixgo.LastMode * 2
+)
+
 var (
 	projects = make(map[string]*modfile.Project)
 )
@@ -86,7 +95,6 @@ func BuildFile(ctx *ixgo.Context, filename string, src interface{}) (data []byte
 		}
 	}()
 	c := NewContext(ctx)
-	defer c.Release()
 	pkg, err := c.ParseFile(filename, src)
 	if err != nil {
 		return nil, err
@@ -102,7 +110,6 @@ func BuildFSDir(ctx *ixgo.Context, fs parser.FileSystem, dir string) (data []byt
 		}
 	}()
 	c := NewContext(ctx)
-	defer c.Release()
 	pkg, err := c.ParseFSDir(fs, dir)
 	if err != nil {
 		return nil, err
@@ -118,7 +125,6 @@ func BuildDir(ctx *ixgo.Context, dir string) (data []byte, err error) {
 		}
 	}()
 	c := NewContext(ctx)
-	defer c.Release()
 	pkg, err := c.ParseDir(dir)
 	if err != nil {
 		return nil, err
@@ -208,17 +214,17 @@ func NewContext(ctx *ixgo.Context) *Context {
 		ctx = ixgo.NewContext(0)
 	}
 	ctx.Mode |= ixgo.CheckGopOverloadFunc
-	c := &Context{Context: ctx, Importer: ixgo.NewImporter(ctx), FileSet: token.NewFileSet(),
-		Loader: ctx.Loader, pkgs: make(map[string]*types.Package)}
+	c := &Context{Context: ctx, FileSet: token.NewFileSet(), Loader: ctx.Loader,
+		pkgs: make(map[string]*types.Package)}
+	if ctx.Mode&StaticLoad == 0 {
+		c.Importer = ixgo.NewImporter(ctx)
+	}
 	return c
 }
 
-// Release cleans up package patches by removing temporarily added scope objects.
-// Must be called after finishing work with a Context to restore packages to their
-// original state.
-//
-// The method is idempotent - multiple calls are safe.
-func (p *Context) Release() {
+// rewindPkgs cleans up package patches by removing temporarily added scope objects
+// to restore them to their original state. It's idempotent.
+func (p *Context) rewindPkgs() {
 	fns := p.resetPkgs
 	p.resetPkgs = nil
 	for _, fn := range fns {
@@ -243,7 +249,7 @@ func (c *Context) isOwnedPackage(path string) bool {
 }
 
 func (c *Context) importPath(path string) (pkg *types.Package, err error) {
-	if c.isOwnedPackage(path) {
+	if c.Importer == nil || c.isOwnedPackage(path) {
 		pkg, err = c.Loader.Import(path)
 	} else {
 		pkg, err = c.Importer.Import(path)
@@ -266,10 +272,12 @@ func (c *Context) Import(path string) (*types.Package, error) {
 		if err != nil {
 			return nil, err
 		}
-		var names []string
 		scope := sp.Package.Scope()
+		names := scope.Names()
 		rscope := pkg.Scope()
-		for _, name := range scope.Names() {
+		rnames := make([]string, 0, len(names))
+		ralts := make([]types.Object, 0, len(names))
+		for _, name := range names {
 			obj := scope.Lookup(name)
 			switch v := obj.(type) {
 			case *types.Const:
@@ -297,14 +305,24 @@ func (c *Context) Import(path string) (*types.Package, error) {
 			default:
 				continue
 			}
-			if rscope.Insert(obj) == nil {
-				names = append(names, name)
+			alt := rscope.Insert(obj)
+			if alt == nil {
+				rnames = append(rnames, name)
+			} else if alt.Pkg() == sp.Package {
+				typesutil.ScopeDelete(rscope, name)
+				rscope.Insert(obj)
+				rnames = append(rnames, name)
+				ralts = append(ralts, alt)
 			}
 		}
 		c.resetPkgs = append(c.resetPkgs, func() {
-			for _, name := range names {
+			for _, name := range rnames {
 				typesutil.ScopeDelete(rscope, name)
 			}
+			for _, alt := range ralts {
+				rscope.Insert(alt)
+			}
+			delete(c.pkgs, path)
 		})
 	}
 	return pkg, nil
@@ -317,7 +335,7 @@ func (c *Context) ParseDir(dir string) (*Package, error) {
 	if err != nil {
 		return nil, err
 	}
-	return c.loadPackage(dir, pkgs)
+	return c.loadPackages(dir, pkgs)
 }
 
 func (c *Context) ParseFSDir(fs parser.FileSystem, dir string) (*Package, error) {
@@ -327,7 +345,7 @@ func (c *Context) ParseFSDir(fs parser.FileSystem, dir string) (*Package, error)
 	if err != nil {
 		return nil, err
 	}
-	return c.loadPackage(dir, pkgs)
+	return c.loadPackages(dir, pkgs)
 }
 
 func (c *Context) ParseFile(fname string, src interface{}) (*Package, error) {
@@ -378,31 +396,36 @@ func (c *Context) ParseFile(fname string, src interface{}) (*Package, error) {
 			},
 		},
 	}
-	return c.loadPackage(srcDir, pkgs)
+	return c.loadPackages(srcDir, pkgs)
 }
 
-func (c *Context) loadPackage(srcDir string, apkgs map[string]*ast.Package) (*Package, error) {
+func (c *Context) loadPackages(srcDir string, apkgs map[string]*ast.Package) (*Package, error) {
+	defer c.rewindPkgs()
 	var pkgs []*gogen.Package
 	for _, apkg := range apkgs {
-		if c.Context.Mode&ixgo.DisableCustomBuiltin == 0 {
-			if f, err := ixgo.ParseBuiltin(c.FileSet, apkg.Name); err == nil {
-				apkg.GoFiles = map[string]*goast.File{"_ixgo_builtin.go": f}
-			}
-		}
-		conf := &cl.Config{Fset: c.FileSet}
-		conf.Importer = c
-		conf.LookupClass = func(ext string) (c *cl.Project, ok bool) {
-			c, ok = projects[ext]
-			return
-		}
-		if c.Context.IsEvalMode() {
-			conf.NoSkipConstant = true
-		}
-		out, err := cl.NewPackage("", apkg, conf)
+		pkg, err := c.loadPackage(srcDir, apkg)
 		if err != nil {
 			return nil, err
 		}
-		pkgs = append(pkgs, out)
+		pkgs = append(pkgs, pkg)
 	}
 	return &Package{c.FileSet, pkgs}, nil
+}
+
+func (c *Context) loadPackage(srcDir string, apkg *ast.Package) (*gogen.Package, error) {
+	if c.Context.Mode&ixgo.DisableCustomBuiltin == 0 {
+		if f, err := ixgo.ParseBuiltin(c.FileSet, apkg.Name); err == nil {
+			apkg.GoFiles = map[string]*goast.File{"_ixgo_builtin.go": f}
+		}
+	}
+	conf := &cl.Config{Fset: c.FileSet}
+	conf.Importer = c
+	conf.LookupClass = func(ext string) (c *cl.Project, ok bool) {
+		c, ok = projects[ext]
+		return
+	}
+	if c.Context.IsEvalMode() {
+		conf.NoSkipConstant = true
+	}
+	return cl.NewPackage("", apkg, conf)
 }

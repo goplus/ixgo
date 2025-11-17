@@ -628,19 +628,20 @@ func main() {
 `)
 }
 
-func TestTplPatch(t *testing.T) {
-	gopClTest(t, `import "gop/tpl"
+var (
+	tplDemo = `import "gop/tpl"
 
-cl := tpl`+"`"+`
+cl := tpl` + "`" + `
 expr = INT % "," => {
     return tpl.ListOp[int](self, v => {
         return v.(*tpl.Token).Lit.int!
     })
 }
-`+"`"+`!
+` + "`" + `!
 
 echo cl.parseExpr("1, 2, 3", nil)!
-`, `package main
+`
+	tplGo = `package main
 
 import (
 	"fmt"
@@ -656,13 +657,13 @@ func main() {
 //line main.xgo:3:1
 		var _xgo_err error
 //line main.xgo:3:1
-		_xgo_ret, _xgo_err = tpl.NewEx(`+"`"+`
+		_xgo_ret, _xgo_err = tpl.NewEx(` + "`" + `
 expr = INT % "," => {
     return tpl.ListOp[int](self, v => {
         return v.(*tpl.Token).Lit.int!
     })
 }
-`+"`"+`, "main.xgo", 3, 10, "expr", func(self []interface{}) interface{} {
+` + "`" + `, "main.xgo", 3, 10, "expr", func(self []interface{}) interface{} {
 //line main.xgo:5:1
 			return tpl.ListOp[int](self, func(v any) int {
 //line main.xgo:6:1
@@ -686,7 +687,7 @@ expr = INT % "," => {
 //line main.xgo:3:1
 		if _xgo_err != nil {
 //line main.xgo:3:1
-			_xgo_err = errors.NewFrame(_xgo_err, "tpl`+"`"+`\nexpr = INT % \",\" => {\n    return tpl.ListOp[int](self, v => {\n        return v.(*tpl.Token).Lit.int!\n    })\n}\n`+"`"+`", "main.xgo", 3, "main.main")
+			_xgo_err = errors.NewFrame(_xgo_err, "tpl` + "`" + `\nexpr = INT % \",\" => {\n    return tpl.ListOp[int](self, v => {\n        return v.(*tpl.Token).Lit.int!\n    })\n}\n` + "`" + `", "main.xgo", 3, "main.main")
 //line main.xgo:3:1
 			panic(_xgo_err)
 		}
@@ -710,24 +711,42 @@ expr = INT % "," => {
 		return
 	}())
 }
-`)
+`
+)
+
+func TestTplPatch(t *testing.T) {
+	gopClTest(t, tplDemo, tplGo)
 }
 
 func TestTplPatchRun(t *testing.T) {
 	ctx := ixgo.NewContext(0)
-	_, err := ctx.RunFile("main.xgo", `import "gop/tpl"
-
-cl := tpl`+"`"+`
-expr = INT % "," => {
-    return tpl.ListOp[int](self, v => {
-        return v.(*tpl.Token).Lit.int!
-    })
-}
-`+"`"+`!
-
-echo cl.parseExpr("1, 2, 3", nil)!
-`, nil)
+	_, err := ctx.RunFile("main.xgo", tplDemo, nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestTplPatchStaticLoad(t *testing.T) {
+	ctx := ixgo.NewContext(StaticLoad)
+	bctx := NewContext(ctx)
+	if bctx.Importer != nil {
+		t.Fatalf("bad static load")
+	}
+	for i := 0; i < 10; i++ {
+		pkg, err := bctx.ParseFile("main.xgo", tplDemo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := pkg.ToSource()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != tplGo {
+			t.Fatalf("bad result:\n%v", tplGo)
+		}
+		_, err = ctx.RunFile("main.go", data, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 }
