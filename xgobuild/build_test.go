@@ -501,6 +501,67 @@ dump(pt2)
 import (
 	"fmt"
 	"github.com/qiniu/x/gsh"
+	gsh1 "github.com/qiniu/x/gsh@patch"
+)
+
+type App struct {
+	gsh.App
+}
+//line main.gsh:2
+func (this *App) MainEntry() {
+//line main.gsh:2:1
+	gsh1.Gopt_App_Gopx_GetWidget[int](this, "info")
+//line main.gsh:3:1
+	pt := &gsh1.Point{100, 200}
+//line main.gsh:4:1
+	pt.Info()
+//line main.gsh:5:1
+	fmt.Println(pt.X)
+//line main.gsh:6:1
+	gsh1.Dump(pt)
+//line main.gsh:9:1
+	gsh1.Dump(gsh1.Zero)
+//line main.gsh:11:1
+	fmt.Println(gsh1.Version)
+//line main.gsh:13:1
+	pt2 := &gsh1.Point{1, 2}
+//line main.gsh:14:1
+	gsh1.Dump(pt2)
+}
+func (this *App) Main() {
+	gsh.Gopt_App_Main(this)
+}
+func main() {
+	new(App).Main()
+}
+`)
+}
+
+func TestPackagePatchNormalize(t *testing.T) {
+	ctx := ixgo.NewContext(NormalizeExport)
+	err := ctx.RegisterPatch("github.com/qiniu/x/gsh", patch_data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gopClTestWith(t, ctx, "main.gsh", `
+getWidget(int,"info")
+pt := &Point{100,200}
+pt.Info()
+println(pt.X)
+dump(pt)
+
+// var
+dump(Zero)
+// const
+println(Version)
+// alias
+pt2 := &MyPoint{1,2}
+dump(pt2)
+`, `package main
+
+import (
+	"fmt"
+	"github.com/qiniu/x/gsh"
 )
 
 type App struct {
@@ -565,13 +626,8 @@ func main() {
 `)
 }
 
-func TestPackagePatchRun(t *testing.T) {
-	ctx := ixgo.NewContext(0)
-	err := ctx.RegisterPatch("github.com/qiniu/x/gsh", patch_data)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = ctx.RunFile("main.gsh", `
+var (
+	gshDemo = `
 getWidget(int,"info")
 pt := &Point{100,200}
 pt.Info()
@@ -585,7 +641,28 @@ println(Version)
 // alias
 pt2 := &MyPoint{1,2}
 dump(pt2)
-`, nil)
+`
+)
+
+func TestPackagePatchRun(t *testing.T) {
+	ctx := ixgo.NewContext(0)
+	err := ctx.RegisterPatch("github.com/qiniu/x/gsh", patch_data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ctx.RunFile("main.gsh", gshDemo, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPackagePatchNormalizeRun(t *testing.T) {
+	ctx := ixgo.NewContext(NormalizeExport)
+	err := ctx.RegisterPatch("github.com/qiniu/x/gsh", patch_data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ctx.RunFile("main.gsh", gshDemo, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -715,7 +792,8 @@ expr = INT % "," => {
 )
 
 func TestTplPatch(t *testing.T) {
-	gopClTest(t, tplDemo, tplGo)
+	ctx := ixgo.NewContext(NormalizeExport)
+	gopClTestWith(t, ctx, "main.xgo", tplDemo, tplGo)
 }
 
 func TestTplPatchRun(t *testing.T) {
@@ -727,7 +805,7 @@ func TestTplPatchRun(t *testing.T) {
 }
 
 func TestTplPatchStaticLoad(t *testing.T) {
-	ctx := ixgo.NewContext(StaticLoad)
+	ctx := ixgo.NewContext(StaticLoad | NormalizeExport)
 	bctx := NewContext(ctx)
 	if bctx.Importer != nil {
 		t.Fatalf("bad static load")

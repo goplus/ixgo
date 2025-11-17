@@ -46,6 +46,12 @@ const (
 	// This mode is useful for scenarios where all packages are pre-loaded
 	// or when dynamic importing is not needed.
 	StaticLoad = ixgo.LastMode * 2
+	// NormalizeExport is a mode flag that normalizes package patch exports.
+	// When NormalizeExport is set, objects from package patches are re-exported
+	// with the base package as their owner, rather than the patch package.
+	// This allows patch symbols to appear as if they belong to the original package
+	// (e.g., gsh.Point instead of gsh@patch.Point), providing a cleaner API.
+	NormalizeExport = ixgo.LastMode * 4
 )
 
 var (
@@ -237,7 +243,7 @@ func RegisterPackagePatch(ctx *ixgo.Context, path string, src interface{}) error
 }
 
 func (c *Context) isOwnedPackage(path string) bool {
-	if c.Context.SourcePackage(path+"@patch") != nil {
+	if (c.Context.Mode&NormalizeExport != 0) && c.Context.SourcePackage(path+"@patch") != nil {
 		return true
 	}
 	if pkg, ok := ixgo.LookupPackage(path); ok {
@@ -275,55 +281,62 @@ func (c *Context) Import(path string) (*types.Package, error) {
 		scope := sp.Package.Scope()
 		names := scope.Names()
 		rscope := pkg.Scope()
-		rnames := make([]string, 0, len(names))
-		ralts := make([]types.Object, 0, len(names))
-		for _, name := range names {
-			obj := scope.Lookup(name)
-			switch v := obj.(type) {
-			case *types.Const:
-				obj = types.NewConst(obj.Pos(), pkg, obj.Name(), obj.Type(), v.Val())
-			case *types.Var:
-				obj = types.NewVar(obj.Pos(), pkg, obj.Name(), obj.Type())
-			case *types.Func:
-				obj = types.NewFunc(obj.Pos(), pkg, obj.Name(), obj.Type().(*types.Signature))
-			case *types.TypeName:
-				switch typ := obj.Type().(type) {
-				case *typesalias.Alias:
-					obj = types.NewTypeName(obj.Pos(), pkg, obj.Name(), nil)
-					typesalias.NewAlias(obj.(*types.TypeName), typesalias.Rhs(typ))
-				case *types.Named:
-					var methods []*types.Func
-					if n := typ.NumMethods(); n > 0 {
-						methods = make([]*types.Func, n)
-						for i := 0; i < n; i++ {
-							methods[i] = typ.Method(i)
-						}
-					}
-					obj = types.NewTypeName(obj.Pos(), pkg, obj.Name(), nil)
-					types.NewNamed(obj.(*types.TypeName), typ.Underlying(), methods)
-				}
-			default:
-				continue
-			}
-			alt := rscope.Insert(obj)
-			if alt == nil {
-				rnames = append(rnames, name)
-			} else if alt.Pkg() == sp.Package {
-				typesutil.ScopeDelete(rscope, name)
+		if c.Context.Mode&NormalizeExport == 0 {
+			for _, name := range names {
+				obj := scope.Lookup(name)
 				rscope.Insert(obj)
-				rnames = append(rnames, name)
-				ralts = append(ralts, alt)
 			}
+		} else {
+			rnames := make([]string, 0, len(names))
+			ralts := make([]types.Object, 0, len(names))
+			for _, name := range names {
+				obj := scope.Lookup(name)
+				switch v := obj.(type) {
+				case *types.Const:
+					obj = types.NewConst(obj.Pos(), pkg, obj.Name(), obj.Type(), v.Val())
+				case *types.Var:
+					obj = types.NewVar(obj.Pos(), pkg, obj.Name(), obj.Type())
+				case *types.Func:
+					obj = types.NewFunc(obj.Pos(), pkg, obj.Name(), obj.Type().(*types.Signature))
+				case *types.TypeName:
+					switch typ := obj.Type().(type) {
+					case *typesalias.Alias:
+						obj = types.NewTypeName(obj.Pos(), pkg, obj.Name(), nil)
+						typesalias.NewAlias(obj.(*types.TypeName), typesalias.Rhs(typ))
+					case *types.Named:
+						var methods []*types.Func
+						if n := typ.NumMethods(); n > 0 {
+							methods = make([]*types.Func, n)
+							for i := 0; i < n; i++ {
+								methods[i] = typ.Method(i)
+							}
+						}
+						obj = types.NewTypeName(obj.Pos(), pkg, obj.Name(), nil)
+						types.NewNamed(obj.(*types.TypeName), typ.Underlying(), methods)
+					}
+				default:
+					continue
+				}
+				alt := rscope.Insert(obj)
+				if alt == nil {
+					rnames = append(rnames, name)
+				} else if alt.Pkg() == sp.Package {
+					typesutil.ScopeDelete(rscope, name)
+					rscope.Insert(obj)
+					rnames = append(rnames, name)
+					ralts = append(ralts, alt)
+				}
+			}
+			c.resetPkgs = append(c.resetPkgs, func() {
+				for _, name := range rnames {
+					typesutil.ScopeDelete(rscope, name)
+				}
+				for _, alt := range ralts {
+					rscope.Insert(alt)
+				}
+				delete(c.pkgs, path)
+			})
 		}
-		c.resetPkgs = append(c.resetPkgs, func() {
-			for _, name := range rnames {
-				typesutil.ScopeDelete(rscope, name)
-			}
-			for _, alt := range ralts {
-				rscope.Insert(alt)
-			}
-			delete(c.pkgs, path)
-		})
 	}
 	return pkg, nil
 }
@@ -400,7 +413,9 @@ func (c *Context) ParseFile(fname string, src interface{}) (*Package, error) {
 }
 
 func (c *Context) loadPackages(srcDir string, apkgs map[string]*ast.Package) (*Package, error) {
-	defer c.rewindPkgs()
+	if c.Context.Mode&NormalizeExport != 0 {
+		defer c.rewindPkgs()
+	}
 	var pkgs []*gogen.Package
 	for _, apkg := range apkgs {
 		pkg, err := c.loadPackage(srcDir, apkg)
