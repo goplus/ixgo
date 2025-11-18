@@ -1022,6 +1022,10 @@ func (b *SSABuilder) BuildMain(sp *SourcePackage) (pkg *ssa.Package, err error) 
 	return
 }
 
+func (b *SSABuilder) Program() *ssa.Program {
+	return b.prog
+}
+
 func (ctx *Context) PrebuildSSA(pkgs ...string) (err error) {
 	if ctx.Mode&DisableRecover == 0 {
 		defer func() {

@@ -37,6 +37,8 @@ import (
 	_ "github.com/goplus/ixgo/pkg/bytes"
 	_ "github.com/goplus/ixgo/pkg/errors"
 	_ "github.com/goplus/ixgo/pkg/fmt"
+	_ "github.com/goplus/ixgo/pkg/io"
+	_ "github.com/goplus/ixgo/pkg/log"
 	_ "github.com/goplus/ixgo/pkg/math"
 	_ "github.com/goplus/ixgo/pkg/os"
 	_ "github.com/goplus/ixgo/pkg/path/filepath"
@@ -3026,4 +3028,60 @@ func main() {
 		t.Fatal(err)
 	}
 	interp2.UnsafeRelease()
+}
+
+func TestPrebuildSSA(t *testing.T) {
+	ctx := ixgo.NewContext(0)
+	ctx.RegisterPatch("fmt", `package fmt
+import "fmt"
+
+func Dump(v ...interface{}) {
+	fmt.Println(v...)
+}
+`)
+	ctx.RegisterPatch("log", `package log
+import "fmt"
+
+func Dump(v ...interface{}) {
+	fmt.Dump(v...)
+}
+`)
+	var src = `
+package main
+
+import "log"
+
+func main() {
+	log.Println("hello world")
+	log.Dump("hello world")
+}
+`
+	ctx.PrebuildSSA("log")
+	if ctx.Builder.Program().ImportedPackage("log") == nil {
+		t.Fatal("error imported log")
+	}
+	if ctx.Builder.Program().ImportedPackage("fmt") == nil {
+		t.Fatal("error imported fmt")
+	}
+	_, err := ctx.RunFile("main.go", src, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ctx.Builder.Program().ImportedPackage("log") != nil {
+		t.Fatal("not imported log")
+	}
+	if ctx.Builder.Program().ImportedPackage("fmt") != nil {
+		t.Fatal("not imported fmt")
+	}
+	ctx.PrebuildSSA("log")
+	if ctx.Builder.Program().ImportedPackage("log") == nil {
+		t.Fatal("error imported log")
+	}
+	if ctx.Builder.Program().ImportedPackage("fmt") == nil {
+		t.Fatal("error imported fmt")
+	}
+	_, err = ctx.RunFile("main.go", strings.Replace(src, "world", "xgo", 2), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 }
