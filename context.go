@@ -924,16 +924,21 @@ func (b *SSABuilder) PrebuildSSA(packages ...string) error {
 	return nil
 }
 
-func (b *SSABuilder) BuildImports(pkg *types.Package) {
-	b.BuildPackages(pkg.Imports())
-	if addin := b.checkPatch(pkg); addin != nil {
-		b.BuildPackages(addin)
+func (b *SSABuilder) BuildImports(pkg *types.Package, src bool) {
+	if src {
+		b.applyImportPatches(pkg)
 	}
+	b.BuildPackages(pkg.Imports())
 }
 
-func (b *SSABuilder) checkPatch(p *types.Package) (addin []*types.Package) {
+func (b *SSABuilder) applyImportPatches(p *types.Package) {
 	ctx := b.ctx
+	var addin []*types.Package
+	seen := make(map[*types.Package]bool)
 	for _, im := range p.Imports() {
+		if strings.HasSuffix(im.Path(), "@patch") {
+			seen[im] = true
+		}
 		patch := im.Path() + "@patch"
 		if p.Path() == patch {
 			// skip p.path is pkg@patch
@@ -943,7 +948,17 @@ func (b *SSABuilder) checkPatch(p *types.Package) (addin []*types.Package) {
 			addin = append(addin, pkg.Package)
 		}
 	}
-	return addin
+	if len(addin) > 0 {
+		var newAddin []*types.Package
+		for _, patch := range addin {
+			if !seen[patch] {
+				newAddin = append(newAddin, patch)
+			}
+		}
+		if len(newAddin) > 0 {
+			p.SetImports(append(p.Imports(), newAddin...))
+		}
+	}
 }
 
 func (b *SSABuilder) BuildPackages(pkgs []*types.Package) {
@@ -956,7 +971,7 @@ func (b *SSABuilder) BuildPackages(pkgs []*types.Package) {
 					continue
 				}
 				b.created[pkg.Package] = true
-				b.BuildImports(pkg.Package)
+				b.BuildImports(pkg.Package, true)
 				if ctx.Mode&EnableDumpImports != 0 {
 					if pkg.Dir != "" {
 						fmt.Println("# source", p.Path(), "<"+pkg.Dir+">")
@@ -971,7 +986,7 @@ func (b *SSABuilder) BuildPackages(pkgs []*types.Package) {
 				b.prog.CreatePackage(pkg.Package, pkg.Files, pkg.Info, true).Build()
 				ctx.checkNested(pkg.Package, pkg.Info)
 			} else {
-				b.BuildImports(p)
+				b.BuildImports(p, false)
 				var indirect bool
 				if !p.Complete() {
 					indirect = true
@@ -991,7 +1006,7 @@ func (b *SSABuilder) BuildPackages(pkgs []*types.Package) {
 }
 
 func (b *SSABuilder) BuildMain(sp *SourcePackage) (pkg *ssa.Package, err error) {
-	b.BuildImports(sp.Package)
+	b.BuildImports(sp.Package, true)
 	ctx := b.ctx
 	if ctx.Mode&EnableDumpImports != 0 {
 		if sp.Dir != "" {
@@ -1005,6 +1020,10 @@ func (b *SSABuilder) BuildMain(sp *SourcePackage) (pkg *ssa.Package, err error) 
 	pkg.Build()
 	ctx.checkNested(sp.Package, sp.Info)
 	return
+}
+
+func (b *SSABuilder) Program() *ssa.Program {
+	return b.prog
 }
 
 func (ctx *Context) PrebuildSSA(pkgs ...string) (err error) {
