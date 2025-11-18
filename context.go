@@ -99,6 +99,7 @@ type Context struct {
 	callForPool  int                                                      // least call count for enable function pool
 	Mode         Mode                                                     // mode
 	BuilderMode  ssa.BuilderMode                                          // ssa builder mode
+	Builder      *SSABuilder                                              // ssa builder
 	evalMode     bool                                                     // eval mode
 }
 
@@ -197,6 +198,7 @@ func NewContext(mode Mode) *Context {
 	ctx.sizes = types.SizesFor("gc", runtime.GOARCH)
 	ctx.Lookup = new(load.ListDriver).Lookup
 	ctx.Importer = NewImporter(ctx)
+	ctx.Builder = NewSSABuilder(ctx)
 
 	if mode&DisableAutoLoadPatchs == 0 {
 		for path, srcs := range registerPatchs {
@@ -885,107 +887,112 @@ func (ctx *Context) RunTest(dir string, args []string) error {
 	return ctx.TestPkg(pkg, dir, args)
 }
 
-func (ctx *Context) buildPackage(sp *SourcePackage) (pkg *ssa.Package, err error) {
-	if ctx.Mode&DisableRecover == 0 {
-		defer func() {
-			if e := recover(); e != nil {
-				err = fmt.Errorf("build SSA package error: %v", e)
-			}
-		}()
+// SSABuilder builds SSA (Static Single Assignment) form packages incrementally.
+// It maintains a program and tracks which packages have already been created
+// to avoid duplicate builds.
+type SSABuilder struct {
+	ctx     *Context
+	prog    *ssa.Program
+	created map[*types.Package]bool
+}
+
+func NewSSABuilder(ctx *Context) *SSABuilder {
+	return &SSABuilder{
+		ctx:     ctx,
+		prog:    ssa.NewProgram(ctx.FileSet, ctx.BuilderMode|ssa.InstantiateGenerics),
+		created: make(map[*types.Package]bool),
 	}
-	mode := ctx.BuilderMode
-	if enabledTypeParam {
-		mode |= ssa.InstantiateGenerics
-	}
-	prog := ssa.NewProgram(ctx.FileSet, mode)
-	// Create SSA packages for all imports.
-	// Order is not significant.
-	checkPatch := func(p *types.Package) {
-		var addin []*types.Package
-		for _, im := range p.Imports() {
-			patch := im.Path() + "@patch"
-			if p.Path() == patch {
-				// skip p.path is pkg@patch
-				continue
-			}
-			if pkg, ok := ctx.pkgs[patch]; ok && pkg.Loaded() {
-				addin = append(addin, pkg.Package)
-			}
+}
+
+func (b *SSABuilder) Reset() {
+	ctx := b.ctx
+	b.prog = ssa.NewProgram(ctx.FileSet, ctx.BuilderMode|ssa.InstantiateGenerics)
+	b.created = make(map[*types.Package]bool)
+}
+
+func (b *SSABuilder) PrebuildSSA(packages ...string) error {
+	ctx := b.ctx
+	var pkgs []*types.Package
+	for _, path := range packages {
+		pkg, err := ctx.Importer.Import(path)
+		if err != nil {
+			return err
 		}
-		if len(addin) > 0 {
-			p.SetImports(append(p.Imports(), addin...))
+		pkgs = append(pkgs, pkg)
+	}
+	b.BuildPackages(pkgs)
+	return nil
+}
+
+func (b *SSABuilder) BuildImports(pkg *types.Package) {
+	b.BuildPackages(pkg.Imports())
+	if addin := b.checkPatch(pkg); addin != nil {
+		b.BuildPackages(addin)
+	}
+}
+
+func (b *SSABuilder) checkPatch(p *types.Package) (addin []*types.Package) {
+	ctx := b.ctx
+	for _, im := range p.Imports() {
+		patch := im.Path() + "@patch"
+		if p.Path() == patch {
+			// skip p.path is pkg@patch
+			continue
+		}
+		if pkg, ok := ctx.pkgs[patch]; ok && pkg.Loaded() {
+			addin = append(addin, pkg.Package)
 		}
 	}
-	created := make(map[*types.Package]bool)
-	var createAll func(pkgs []*types.Package)
-	var create = func(pkg *types.Package) {
-		checkPatch(pkg)
-		createAll(pkg.Imports())
-	}
-	createAll = func(pkgs []*types.Package) {
-		for _, p := range pkgs {
-			if !created[p] {
-				created[p] = true
-				if pkg, ok := ctx.pkgs[p.Path()]; ok {
-					if !pkg.Loaded() {
-						continue
-					}
-					created[pkg.Package] = true
-					create(pkg.Package)
-					if ctx.Mode&EnableDumpImports != 0 {
-						if pkg.Dir != "" {
-							fmt.Println("# source", p.Path(), "<"+pkg.Dir+">")
-						} else if pkg.Register {
-							fmt.Println("# package", p.Path(), "<source>")
-						} else if strings.HasSuffix(p.Path(), "@patch") {
-							fmt.Println("# package", p.Path(), "<source>")
-						} else {
-							fmt.Println("# source", p.Path(), "<memory>")
-						}
-					}
-					prog.CreatePackage(pkg.Package, pkg.Files, pkg.Info, true).Build()
-					ctx.checkNested(pkg.Package, pkg.Info)
-				} else {
-					create(p)
-					var indirect bool
-					if !p.Complete() {
-						indirect = true
-						p.MarkComplete()
-					}
-					if ctx.Mode&EnableDumpImports != 0 {
-						if indirect {
-							fmt.Println("# virtual", p.Path())
-						} else {
-							fmt.Println("# package", p.Path())
-						}
-					}
-					prog.CreatePackage(p, nil, nil, true).Build()
+	return addin
+}
+
+func (b *SSABuilder) BuildPackages(pkgs []*types.Package) {
+	ctx := b.ctx
+	for _, p := range pkgs {
+		if !b.created[p] {
+			b.created[p] = true
+			if pkg, ok := ctx.pkgs[p.Path()]; ok {
+				if !pkg.Loaded() {
+					continue
 				}
+				b.created[pkg.Package] = true
+				b.BuildImports(pkg.Package)
+				if ctx.Mode&EnableDumpImports != 0 {
+					if pkg.Dir != "" {
+						fmt.Println("# source", p.Path(), "<"+pkg.Dir+">")
+					} else if pkg.Register {
+						fmt.Println("# package", p.Path(), "<source>")
+					} else if strings.HasSuffix(p.Path(), "@patch") {
+						fmt.Println("# package", p.Path(), "<source>")
+					} else {
+						fmt.Println("# source", p.Path(), "<memory>")
+					}
+				}
+				b.prog.CreatePackage(pkg.Package, pkg.Files, pkg.Info, true).Build()
+				ctx.checkNested(pkg.Package, pkg.Info)
+			} else {
+				b.BuildImports(p)
+				var indirect bool
+				if !p.Complete() {
+					indirect = true
+					p.MarkComplete()
+				}
+				if ctx.Mode&EnableDumpImports != 0 {
+					if indirect {
+						fmt.Println("# virtual", p.Path())
+					} else {
+						fmt.Println("# package", p.Path())
+					}
+				}
+				b.prog.CreatePackage(p, nil, nil, true).Build()
 			}
 		}
 	}
+}
 
-	if ctx.Mode&EnableLoadAllPackages != 0 {
-		var addin []*types.Package
-		for _, pkg := range ctx.Loader.Packages() {
-			path := pkg.Path()
-			if _, ok := ctx.pkgs[path]; ok && strings.HasSuffix(path, "@patch") {
-				addin = append(addin, pkg)
-				continue
-			}
-			if !pkg.Complete() {
-				addin = append(addin, pkg)
-			}
-		}
-		if len(addin) > 0 {
-			sort.Slice(addin, func(i, j int) bool {
-				return addin[i].Path() < addin[j].Path()
-			})
-			createAll(addin)
-		}
-	}
-
-	create(sp.Package)
+func (b *SSABuilder) BuildMain(sp *SourcePackage) (pkg *ssa.Package, err error) {
+	b.BuildImports(sp.Package)
+	ctx := b.ctx
 	if ctx.Mode&EnableDumpImports != 0 {
 		if sp.Dir != "" {
 			fmt.Println("# package", sp.Package.Path(), sp.Dir)
@@ -994,10 +1001,33 @@ func (ctx *Context) buildPackage(sp *SourcePackage) (pkg *ssa.Package, err error
 		}
 	}
 	// Create and build the primary package.
-	pkg = prog.CreatePackage(sp.Package, sp.Files, sp.Info, false)
+	pkg = b.prog.CreatePackage(sp.Package, sp.Files, sp.Info, false)
 	pkg.Build()
 	ctx.checkNested(sp.Package, sp.Info)
 	return
+}
+
+func (ctx *Context) PrebuildSSA(pkgs ...string) (err error) {
+	if ctx.Mode&DisableRecover == 0 {
+		defer func() {
+			if e := recover(); e != nil {
+				err = fmt.Errorf("prebuild SSA error: %v", e)
+			}
+		}()
+	}
+	return ctx.Builder.PrebuildSSA(pkgs...)
+}
+
+func (ctx *Context) buildPackage(sp *SourcePackage) (pkg *ssa.Package, err error) {
+	if ctx.Mode&DisableRecover == 0 {
+		defer func() {
+			if e := recover(); e != nil {
+				err = fmt.Errorf("build SSA package error: %v", e)
+			}
+		}()
+	}
+	defer ctx.Builder.Reset()
+	return ctx.Builder.BuildMain(sp)
 }
 
 func (ctx *Context) checkNested(pkg *types.Package, info *types.Info) {
