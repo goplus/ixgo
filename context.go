@@ -129,6 +129,7 @@ type SourcePackage struct {
 	Links    []*load.LinkSym
 	Dir      string
 	Register bool // register package
+	NoCache  bool // skip caching in importer
 }
 
 func (sp *SourcePackage) Loaded() bool {
@@ -572,6 +573,7 @@ func (ctx *Context) loadTestPackage(bp *build.Package, path string, dir string) 
 		Files:   files,
 		Dir:     dir,
 		Context: ctx,
+		NoCache: true,
 	}
 	ctx.pkgs[path] = tp
 	if len(bp.XTestGoFiles) > 0 {
@@ -591,6 +593,7 @@ func (ctx *Context) loadTestPackage(bp *build.Package, path string, dir string) 
 			Files:   files,
 			Dir:     dir,
 			Context: ctx,
+			NoCache: true,
 		}
 		ctx.pkgs[path+"_test"] = tp
 	}
