@@ -75,7 +75,9 @@ func (i *Importer) Import(path string) (ret *types.Package, err error) {
 				return nil, err
 			}
 		}
-		i.pkgs[path] = pkg.Package
+		if !pkg.NoCache {
+			i.pkgs[path] = pkg.Package
+		}
 		return pkg.Package, nil
 	}
 	if dir, found := i.ctx.lookupPath(path); found {
