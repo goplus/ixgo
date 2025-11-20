@@ -75,6 +75,7 @@ func (r *TypesRecord) typeId(typ types.Type, t reflect.Type) string {
 }
 
 func (r *TypesRecord) EnterInstance(fn *ssa.Function) {
+	r.ninst++
 	r.ncache = &typeutil.Map{}
 	tp := fn.TypeParams()
 	for i := 0; i < tp.Len(); i++ {
@@ -86,6 +87,7 @@ func (r *TypesRecord) EnterInstance(fn *ssa.Function) {
 }
 
 func (r *TypesRecord) LeaveInstance(fn *ssa.Function) {
+	r.ninst--
 	r.fntargs, r.ncache = r.nstack.Pop()
 }
 
@@ -142,10 +144,15 @@ func (r *TypesRecord) extractNamed(named *types.Named, totype bool) (pkgpath str
 func (r *TypesRecord) LookupReflect(typ types.Type) (rt reflect.Type, ok bool, nested bool) {
 	rt, ok = r.loader.LookupReflect(typ)
 	if !ok {
-		if r.ncache != nil {
-			if rt := r.ncache.At(typ); rt != nil {
-				return rt.(reflect.Type), true, true
-			}
+		return r.lookupCache(typ)
+	}
+	return
+}
+
+func (r *TypesRecord) lookupCache(typ types.Type) (rt reflect.Type, ok bool, nested bool) {
+	if r.ninst > 0 {
+		if rt := r.ncache.At(typ); rt != nil {
+			return rt.(reflect.Type), true, true
 		}
 		n := len(r.nstack.cache)
 		for i := n; i > 0; i-- {
@@ -153,9 +160,9 @@ func (r *TypesRecord) LookupReflect(typ types.Type) (rt reflect.Type, ok bool, n
 				return rt.(reflect.Type), true, true
 			}
 		}
-		if rt := r.tcache.At(typ); rt != nil {
-			return rt.(reflect.Type), true, false
-		}
+	}
+	if rt := r.tcache.At(typ); rt != nil {
+		return rt.(reflect.Type), true, false
 	}
 	return
 }

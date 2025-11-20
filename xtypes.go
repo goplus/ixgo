@@ -187,6 +187,7 @@ type TypesRecord struct {
 	fntargs string        //reflect type arguments used to instantiate the current func
 	nested  map[*types.Named]int
 	nstack  nestedStack
+	ninst   int // nested instance counter
 }
 
 type mfnKey struct {
@@ -256,7 +257,7 @@ func (r *TypesRecord) saveType(typ types.Type, rt reflect.Type, nested bool) {
 }
 
 func (r *TypesRecord) ToType(typ types.Type) (reflect.Type, bool) {
-	if rt, ok, nested := r.LookupReflect(typ); ok {
+	if rt, ok, nested := r.lookupCache(typ); ok {
 		return rt, nested
 	}
 	var nested bool
@@ -345,6 +346,9 @@ func (r *TypesRecord) toInterfaceType(t *types.Interface) (reflect.Type, bool) {
 }
 
 func (r *TypesRecord) toNamedType(t *types.Named) (reflect.Type, bool) {
+	if rt, ok := r.loader.LookupReflect(t); ok {
+		return rt, false
+	}
 	ut := t.Underlying()
 	pkgpath, name, typeargs, nested := r.extractNamed(t, false)
 	if pkgpath == "" {
@@ -353,20 +357,16 @@ func (r *TypesRecord) toNamedType(t *types.Named) (reflect.Type, bool) {
 		}
 		return r.ToType(ut)
 	}
-	methods := typeutil.IntuitiveMethodSet(t, nil)
-	hasMethod := len(methods) > 0
 	etyp := toMockType(ut)
 	typ := reflectx.NamedTypeOf(pkgpath, name, etyp)
-	if hasMethod {
-		var mcount, pcount int
-		for i := 0; i < len(methods); i++ {
-			sig := methods[i].Type().(*types.Signature)
-			if !isPointer(sig.Recv().Type()) {
-				mcount++
-			}
-			pcount++
+	var hasMethod bool
+	var methods []*types.Selection
+	if _, ok := ut.(*types.Interface); !ok {
+		var pcount, mcount int
+		methods, pcount, mcount = extractMethodSet(t)
+		if hasMethod = pcount > 0; hasMethod {
+			typ = r.rctx.NewMethodSet(typ, mcount, pcount)
 		}
-		typ = r.rctx.NewMethodSet(typ, mcount, pcount)
 	}
 	r.saveType(t, typ, nested)
 	var utype reflect.Type
@@ -380,10 +380,29 @@ func (r *TypesRecord) toNamedType(t *types.Named) (reflect.Type, bool) {
 		pkgpath, name, _, _ = r.extractNamed(t, true)
 		reflectx.SetTypeName(typ, pkgpath, name)
 	}
-	if hasMethod && typ.Kind() != reflect.Interface {
+	if hasMethod {
 		r.setMethods(typ, methods)
 	}
 	return typ, nested
+}
+
+func extractMethodSet(T types.Type) (methods []*types.Selection, pcount int, mcount int) {
+	pmset := types.NewMethodSet(types.NewPointer(T))
+	pcount = pmset.Len()
+	if pcount == 0 {
+		return
+	}
+	mset := types.NewMethodSet(T)
+	mcount = mset.Len()
+	methods = make([]*types.Selection, pcount)
+	for i := 0; i < pcount; i++ {
+		meth := pmset.At(i)
+		if m := mset.Lookup(meth.Obj().Pkg(), meth.Obj().Name()); m != nil {
+			meth = m
+		}
+		methods[i] = meth
+	}
+	return
 }
 
 func (r *TypesRecord) toStructType(t *types.Struct, mset bool) (reflect.Type, bool) {
@@ -403,17 +422,8 @@ func (r *TypesRecord) toStructType(t *types.Struct, mset bool) (reflect.Type, bo
 	}
 	typ := r.rctx.StructOf(flds)
 	if mset {
-		methods := typeutil.IntuitiveMethodSet(t, nil)
-		if numMethods := len(methods); numMethods != 0 {
-			// anonymous structs with methods. struct { T }
-			var mcount, pcount int
-			for i := 0; i < numMethods; i++ {
-				sig := methods[i].Type().(*types.Signature)
-				if !isPointer(sig.Recv().Type()) {
-					mcount++
-				}
-				pcount++
-			}
+		methods, pcount, mcount := extractMethodSet(t)
+		if pcount > 0 {
 			typ = r.rctx.NewMethodSet(typ, mcount, pcount)
 			r.setMethods(typ, methods)
 		}
@@ -510,7 +520,7 @@ func embedFunc(typ reflect.Type, name string, idx []int, pointer bool, indirect 
 
 func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 	numMethods := len(methods)
-	var ms []reflectx.Method
+	ms := make([]reflectx.Method, numMethods)
 	for i := 0; i < numMethods; i++ {
 		fn := methods[i].Obj().(*types.Func)
 		sig := methods[i].Type().(*types.Signature)
@@ -541,9 +551,8 @@ func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 		if pkg := fn.Pkg(); pkg != nil {
 			pkgpath = pkg.Path()
 		}
-		method := reflectx.MakeMethod(fn.Name(), pkgpath, pointer, mtyp, mfn)
-		method.FuncId = mid
-		ms = append(ms, method)
+		ms[i] = reflectx.MakeMethod(fn.Name(), pkgpath, pointer, mtyp, mfn)
+		ms[i].FuncId = mid
 	}
 	err := r.rctx.SetMethodSet(typ, ms, false)
 	if err != nil {
