@@ -54,7 +54,6 @@ const (
 	EnableTracing                                                     // Print a trace of all instructions as they are interpreted.
 	EnablePrintAny                                                    // Enable builtin print for any type ( struct/array )
 	EnableNoStrict                                                    // Enable no strict mode
-	EnableLoadAllPackages                                             // Enable load all loaded packages
 	ExperimentalSupportGC                                             // experimental support runtime.GC
 	SupportMultipleInterp                                             // Support multiple interp, must manual release interp reflectx icall.
 	CheckGopOverloadFunc                                              // Check and skip gop overload func
