@@ -66,6 +66,13 @@ func (r *TypesRecord) LookupReflect(typ types.Type) (rt reflect.Type, ok bool, n
 	return
 }
 
+func (r *TypesRecord) lookupCache(typ types.Type) (rt reflect.Type, ok bool, nested bool) {
+	if rt := r.tcache.At(typ); rt != nil {
+		return rt.(reflect.Type), true, false
+	}
+	return
+}
+
 func (r *TypesLoader) hasTypeArgs(rt reflect.Type) bool {
 	return false
 }
