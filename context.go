@@ -138,18 +138,19 @@ func (sp *SourcePackage) Loaded() bool {
 
 func (sp *SourcePackage) Load() (err error) {
 	if sp.Info == nil {
+		ctx := sp.Context
 		sp.Info = newTypesInfo()
 		conf := &types.Config{
-			Sizes:    sp.Context.sizes,
+			Sizes:    ctx.sizes,
 			Importer: sp.Importer,
 		}
 		if conf.Importer == nil {
-			conf.Importer = sp.Context.Importer
+			conf.Importer = ctx.Importer
 		}
-		if sp.Context.evalMode {
+		if ctx.evalMode {
 			conf.DisableUnusedImportCheck = true
 		}
-		if sp.Context.Mode&EnableNoStrict != 0 {
+		if ctx.Mode&EnableNoStrict != 0 {
 			conf.Error = func(e error) {
 				if te, ok := e.(types.Error); ok {
 					if hasTypesNotUsedError(te.Msg) {
@@ -168,9 +169,10 @@ func (sp *SourcePackage) Load() (err error) {
 				}
 			}
 		}
-		types.NewChecker(conf, sp.Context.FileSet, sp.Package, sp.Info).Files(sp.Files)
+		types.NewChecker(conf, ctx.FileSet, sp.Package, sp.Info).Files(sp.Files)
 		if err == nil {
-			sp.Links, err = load.ParseLinkname(sp.Context.FileSet, sp.Package.Path(), sp.Files)
+			sp.Links, err = load.ParseLinkname(ctx.FileSet, sp.Package.Path(), sp.Files)
+			ctx.checkNested(sp.Package, sp.Info)
 		}
 	}
 	return
@@ -987,7 +989,6 @@ func (b *SSABuilder) BuildPackages(pkgs []*types.Package) {
 					}
 				}
 				b.prog.CreatePackage(pkg.Package, pkg.Files, pkg.Info, true).Build()
-				ctx.checkNested(pkg.Package, pkg.Info)
 			} else {
 				b.BuildImports(p, false)
 				var indirect bool
@@ -1021,7 +1022,6 @@ func (b *SSABuilder) BuildMain(sp *SourcePackage) (pkg *ssa.Package, err error) 
 	// Create and build the primary package.
 	pkg = b.prog.CreatePackage(sp.Package, sp.Files, sp.Info, false)
 	pkg.Build()
-	ctx.checkNested(sp.Package, sp.Info)
 	return
 }
 
