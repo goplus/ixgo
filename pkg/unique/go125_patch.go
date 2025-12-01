@@ -9,6 +9,7 @@ import (
 	_ "unsafe"
 
 	_ "github.com/goplus/ixgo/pkg/github.com/goplus/ixgo/x/abi"
+	_ "github.com/goplus/ixgo/pkg/github.com/goplus/ixgo/x/goarch"
 	_ "github.com/goplus/ixgo/pkg/github.com/goplus/ixgo/x/isync"
 	_ "github.com/goplus/ixgo/pkg/github.com/goplus/ixgo/x/stringslite"
 
