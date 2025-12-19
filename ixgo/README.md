@@ -5,7 +5,7 @@
 - build use `-ldflags="-checklinkname=0"` for support linkname
 
 ### Install igxo for Go version >= 1.23
-`go install -ldflags="-checklinkname=0" github.com/goplus/ixgo/ixgo@v0.3.1`
+`go install -ldflags="-checklinkname=0" github.com/goplus/ixgo/ixgo@v0.3.4`
 
 
 ### Local development environment
