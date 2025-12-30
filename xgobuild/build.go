@@ -363,43 +363,12 @@ func (c *Context) ParseFSDir(fs parser.FileSystem, dir string) (*Package, error)
 
 func (c *Context) ParseFile(fname string, src interface{}) (*Package, error) {
 	srcDir, _ := filepath.Split(fname)
-	fnameRmGox := fname
-	ext := filepath.Ext(fname)
-	var err error
-	var isProj, isClass, isNormalGox, rmGox bool
-	switch ext {
-	case ".go", ".gop", ".xgo":
-	case ".gox":
-		isClass = true
-		t := fname[:len(fname)-4]
-		if c := filepath.Ext(t); c != "" {
-			ext, fnameRmGox, rmGox = c, t, true
-		} else {
-			isNormalGox = true
-		}
-		fallthrough
-	default:
-		if !isNormalGox {
-			if isProj, isClass = ClassKind(fnameRmGox); !isClass {
-				if rmGox {
-					return nil, fmt.Errorf("not found Go+ class by ext %q for %q", ext, fname)
-				}
-				return nil, nil
-			}
-		}
-	}
+	f, err := parser.ParseEntry(c.FileSet, fname, src, parser.Config{
+		ClassKind: ClassKind,
+	})
 	if err != nil {
 		return nil, err
 	}
-	mode := parser.ParseComments
-	if isClass {
-		mode |= parser.ParseGoPlusClass
-	}
-	f, err := parser.ParseFile(c.FileSet, fname, src, mode)
-	if err != nil {
-		return nil, err
-	}
-	f.IsProj, f.IsClass, f.IsNormalGox = isProj, isClass, isNormalGox
 	name := f.Name.Name
 	pkgs := map[string]*ast.Package{
 		name: &ast.Package{
