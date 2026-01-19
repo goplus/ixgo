@@ -3,12 +3,12 @@ module github.com/goplus/ixgo
 go 1.18
 
 require (
-	github.com/goplus/gogen v1.19.6
-	github.com/goplus/mod v0.17.2
+	github.com/goplus/gogen v1.20.2
+	github.com/goplus/mod v0.19.0
 	github.com/goplus/reflectx v1.5.0
-	github.com/goplus/xgo v1.5.3
+	github.com/goplus/xgo v1.6.0
 	github.com/peterh/liner v1.2.2
-	github.com/qiniu/x v1.15.2
+	github.com/qiniu/x v1.16.0
 	github.com/visualfc/funcval v0.1.4
 	github.com/visualfc/gid v0.3.0
 	github.com/visualfc/goembed v0.3.2

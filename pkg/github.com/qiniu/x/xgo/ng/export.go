@@ -35,10 +35,10 @@ func init() {
 			"UntypedBigrat":   reflect.TypeOf((*q.UntypedBigrat)(nil)).Elem(),
 		},
 		AliasTypes: map[string]reflect.Type{
-			"Gop_ninteger":            reflect.TypeOf((*uint)(nil)).Elem(),
 			"UntypedBigfloat_Default": reflect.TypeOf((*q.UntypedBigfloat_Default)(nil)).Elem(),
 			"UntypedBigint_Default":   reflect.TypeOf((*q.UntypedBigint_Default)(nil)).Elem(),
 			"UntypedBigrat_Default":   reflect.TypeOf((*q.UntypedBigrat_Default)(nil)).Elem(),
+			"XGo_ninteger":            reflect.TypeOf((*uint)(nil)).Elem(),
 		},
 		Vars: map[string]reflect.Value{},
 		Funcs: map[string]reflect.Value{
@@ -65,7 +65,6 @@ func init() {
 			"Bigrat_Init__2":        reflect.ValueOf(q.Bigrat_Init__2),
 			"FormatInt128":          reflect.ValueOf(q.FormatInt128),
 			"FormatUint128":         reflect.ValueOf(q.FormatUint128),
-			"Gop_istmp":             reflect.ValueOf(q.Gop_istmp),
 			"Int128_Cast__0":        reflect.ValueOf(q.Int128_Cast__0),
 			"Int128_Cast__1":        reflect.ValueOf(q.Int128_Cast__1),
 			"Int128_Cast__2":        reflect.ValueOf(q.Int128_Cast__2),
@@ -99,16 +98,17 @@ func init() {
 			"UntypedBigint_Init__0": reflect.ValueOf(q.UntypedBigint_Init__0),
 			"UntypedBigrat_Init__0": reflect.ValueOf(q.UntypedBigrat_Init__0),
 			"UntypedBigrat_Init__1": reflect.ValueOf(q.UntypedBigrat_Init__1),
+			"XGo_istmp":             reflect.ValueOf(q.XGo_istmp),
 		},
 		TypedConsts: map[string]ixgo.TypedConst{},
 		UntypedConsts: map[string]ixgo.UntypedConst{
-			"GopPackage":        {"untyped bool", constant.MakeBool(bool(q.GopPackage))},
 			"Int128_IsUntyped":  {"untyped bool", constant.MakeBool(bool(q.Int128_IsUntyped))},
 			"Int128_Max":        {"untyped int", constant.MakeFromLiteral("170141183460469231731687303715884105727", token.INT, 0)},
 			"Int128_Min":        {"untyped int", constant.MakeFromLiteral("-170141183460469231731687303715884105728", token.INT, 0)},
 			"Uint128_IsUntyped": {"untyped bool", constant.MakeBool(bool(q.Uint128_IsUntyped))},
 			"Uint128_Max":       {"untyped int", constant.MakeFromLiteral("340282366920938463463374607431768211455", token.INT, 0)},
 			"Uint128_Min":       {"untyped int", constant.MakeInt64(int64(q.Uint128_Min))},
+			"XGoPackage":        {"untyped bool", constant.MakeBool(bool(q.XGoPackage))},
 		},
 	})
 }
