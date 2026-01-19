@@ -250,6 +250,9 @@ func (c *Context) isOwnedPackage(path string) bool {
 		if _, ok := pkg.UntypedConsts["GopPackage"]; ok {
 			return true
 		}
+		if _, ok := pkg.UntypedConsts["XGoPackage"]; ok {
+			return true
+		}
 	}
 	return false
 }

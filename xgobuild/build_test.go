@@ -61,6 +61,42 @@ func main() {
 `)
 }
 
+func TestXGoInit(t *testing.T) {
+	gopClTestEx(t, `Rect.gox`, `
+var (
+	w,h = 10,20
+	color int
+	border float64 = 1.2
+)
+
+echo *this
+`, `package main
+
+import "fmt"
+
+type Rect struct {
+	w      int
+	h      int
+	color  int
+	border float64
+}
+//line Rect.gox:8
+func (this *Rect) Main() {
+	this.XGo_Init()
+//line Rect.gox:8:1
+	fmt.Println(*this)
+}
+func (this *Rect) XGo_Init() *Rect {
+	this.w, this.h = 10, 20
+	this.border = 1.2
+	return this
+}
+func main() {
+	new(Rect).Main()
+}
+`)
+}
+
 func TestGox(t *testing.T) {
 	gopClTestEx(t, "Rect.gox", `
 println "Go+"
@@ -209,7 +245,7 @@ func main() {
 //line main.xgo:2:1
 	a := ng.Bigrat_Init__2(big.NewRat(1, 2))
 //line main.xgo:3:1
-	fmt.Println((ng.Bigrat).Gop_Add(a, ng.Bigrat_Init__2(big.NewRat(1, 2))))
+	fmt.Println((ng.Bigrat).XGo_Add(a, ng.Bigrat_Init__2(big.NewRat(1, 2))))
 }
 `)
 }
@@ -253,7 +289,7 @@ var r io.Reader
 //line main.xgo:6
 func main() {
 //line main.xgo:6:1
-	for _xgo_it := osx.Lines(r).Gop_Enum(); ; {
+	for _xgo_it := osx.Lines(r).XGo_Enum(); ; {
 		var _xgo_ok bool
 		line, _xgo_ok := _xgo_it.Next()
 		if !_xgo_ok {
@@ -415,7 +451,7 @@ type exec struct {
 //line exec.gsh:2
 func (this *exec) MainEntry() {
 //line exec.gsh:2:1
-	this.Gop_Exec("gop", "run", "./foo")
+	this.XGo_Exec("gop", "run", "./foo")
 //line exec.gsh:3:1
 	this.Exec__1("gop run ./foo")
 //line exec.gsh:4:1
@@ -427,10 +463,10 @@ func (this *exec) MainEntry() {
 //line exec.gsh:7:1
 	this.Exec__1("ls $HOME")
 //line exec.gsh:8:1
-	this.Gop_Exec("ls", this.Gop_Env("HOME"))
+	this.XGo_Exec("ls", this.XGo_Env("HOME"))
 }
 func (this *exec) Main() {
-	gsh.Gopt_App_Main(this)
+	gsh.XGot_App_Main(this)
 }
 func main() {
 	new(exec).Main()
@@ -470,7 +506,7 @@ func Dump(i Info) {
 	i.Info()
 }
 
-func Gopt_App_Gopx_GetWidget[T any](app any, name string) {
+func XGot_App_XGox_GetWidget[T any](app any, name string) {
 	var _ gsh.App
 	fmt.Printf("%T, %T, %v\n", app, (*T)(nil), name)
 }
@@ -510,7 +546,7 @@ type App struct {
 //line main.gsh:2
 func (this *App) MainEntry() {
 //line main.gsh:2:1
-	gsh1.Gopt_App_Gopx_GetWidget[int](this, "info")
+	gsh1.XGot_App_XGox_GetWidget[int](this, "info")
 //line main.gsh:3:1
 	pt := &gsh1.Point{100, 200}
 //line main.gsh:4:1
@@ -529,7 +565,7 @@ func (this *App) MainEntry() {
 	gsh1.Dump(pt2)
 }
 func (this *App) Main() {
-	gsh.Gopt_App_Main(this)
+	gsh.XGot_App_Main(this)
 }
 func main() {
 	new(App).Main()
@@ -570,7 +606,7 @@ type App struct {
 //line main.gsh:2
 func (this *App) MainEntry() {
 //line main.gsh:2:1
-	gsh.Gopt_App_Gopx_GetWidget[int](this, "info")
+	gsh.XGot_App_XGox_GetWidget[int](this, "info")
 //line main.gsh:3:1
 	pt := &gsh.Point{100, 200}
 //line main.gsh:4:1
@@ -589,7 +625,7 @@ func (this *App) MainEntry() {
 	gsh.Dump(pt2)
 }
 func (this *App) Main() {
-	gsh.Gopt_App_Main(this)
+	gsh.XGot_App_Main(this)
 }
 func main() {
 	new(App).Main()
@@ -615,10 +651,10 @@ type App struct {
 //line main.gsh:2
 func (this *App) MainEntry() {
 //line main.gsh:2:1
-	this.Gop_Exec("ls", this.Gop_Env("HOME"))
+	this.XGo_Exec("ls", this.XGo_Env("HOME"))
 }
 func (this *App) Main() {
-	gsh.Gopt_App_Main(this)
+	gsh.XGot_App_Main(this)
 }
 func main() {
 	new(App).Main()

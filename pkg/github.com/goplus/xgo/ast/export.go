@@ -108,6 +108,7 @@ func init() {
 			"StringLitEx":       reflect.TypeOf((*q.StringLitEx)(nil)).Elem(),
 			"StructType":        reflect.TypeOf((*q.StructType)(nil)).Elem(),
 			"SwitchStmt":        reflect.TypeOf((*q.SwitchStmt)(nil)).Elem(),
+			"TupleType":         reflect.TypeOf((*q.TupleType)(nil)).Elem(),
 			"TypeAssertExpr":    reflect.TypeOf((*q.TypeAssertExpr)(nil)).Elem(),
 			"TypeSpec":          reflect.TypeOf((*q.TypeSpec)(nil)).Elem(),
 			"TypeSwitchStmt":    reflect.TypeOf((*q.TypeSwitchStmt)(nil)).Elem(),
