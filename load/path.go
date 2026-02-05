@@ -51,7 +51,11 @@ func GetImportPath(pkgName string, dir string) (string, error) {
 	if !found {
 		return pkgName, nil
 	}
-	f, err := ParseModFile(mod)
+	data, err := ioutil.ReadFile(mod)
+	if err != nil {
+		return "", err
+	}
+	f, err := ParseModFile(mod, data)
 	if err != nil {
 		return "", err
 	}
@@ -88,11 +92,7 @@ func findModule(dir string) (file string, found bool) {
 }
 
 // ParseModFile parse go.mod
-func ParseModFile(file string) (*modfile.File, error) {
-	data, err := ioutil.ReadFile(file)
-	if err != nil {
-		return nil, err
-	}
+func ParseModFile(file string, data []byte) (*modfile.File, error) {
 	fix := func(path, vers string) (resolved string, err error) {
 		// do nothing
 		return vers, nil
