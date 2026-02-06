@@ -57,8 +57,7 @@ type fileSystem struct {
 }
 
 func (f *fileSystem) ReadDir(dirname string) ([]fs.DirEntry, error) {
-	dirs, err := fs.ReadDir(f.Sys, dirname)
-	return dirs, err
+	return fs.ReadDir(f.Sys, dirname)
 }
 
 func (f *fileSystem) ReadFile(filename string) ([]byte, error) {

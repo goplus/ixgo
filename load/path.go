@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
@@ -51,7 +50,7 @@ func GetImportPath(pkgName string, dir string) (string, error) {
 	if !found {
 		return pkgName, nil
 	}
-	data, err := ioutil.ReadFile(mod)
+	data, err := os.ReadFile(mod)
 	if err != nil {
 		return "", err
 	}
@@ -99,7 +98,7 @@ func ParseModFile(file string, data []byte) (*modfile.File, error) {
 	}
 	f, err := modfile.Parse(file, data, fix)
 	if err != nil {
-		return nil, fmt.Errorf("parse go.mod error %w", err)
+		return nil, fmt.Errorf("parse go.mod %w", err)
 	}
 	if f.Module == nil {
 		return nil, errors.New("no module declaration in go.mod")

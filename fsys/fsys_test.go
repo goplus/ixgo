@@ -8,6 +8,7 @@ import (
 	"github.com/goplus/ixgo"
 	"github.com/goplus/ixgo/fsys"
 	"github.com/goplus/ixgo/fsys/txtar"
+	"github.com/goplus/ixgo/fsys/xgofsys"
 	_ "github.com/goplus/ixgo/pkg/fmt"
 )
 
@@ -51,7 +52,7 @@ echo "xgo"
 foo.Bar()
 -- go.mod --
 module play.ground
--- foo/foo.go --
+-- foo/foo.xgo --
 package foo
 
 import "fmt"
@@ -59,11 +60,10 @@ import "play.ground/foo/bar"
 
 func Bar() {
 	bar.Demo()
-	fmt.Println("this is a foo!")
+	echo "this is a foo!"
 }
 -- foo/bar/bar.go --
 package bar
-
 import "fmt"
 
 func Demo() {
@@ -126,21 +126,25 @@ func TestFileSystem(t *testing.T) {
 }
 
 func TestXGoFileSystem(t *testing.T) {
-	fset, err := txtar.SplitFiles([]byte(data), "prog.xgo")
+	fset, err := txtar.SplitFiles([]byte(xgo_data), "prog.xgo")
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx := ixgo.NewContext(0)
-	fs, err := txtar.FileSystem(fset, nil)
+	txtfs, err := txtar.FileSystem(fset, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = fsys.SetBuildFileSystem(ctx, fs, true)
+	xctx := xgobuild.NewContext(ctx)
+	err = xgofsys.SetBuildFileSystem(ctx, xctx, txtfs, true)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	data, err := xgobuild.BuildFSDir(ctx, fs, ".")
+	xpkg, err := xctx.ParseFSDir(txtfs, ".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := xpkg.ToSource()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +152,6 @@ func TestXGoFileSystem(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	code, _ := ctx.RunPkg(pkg, "", nil)
 	if code != 0 {
 		t.Fatal("error")

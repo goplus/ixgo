@@ -130,7 +130,8 @@ func SetBuildFS(ctx *ixgo.Context, fsys fs.FS, parseGoMod bool) error {
 		}
 		for _, dir := range dirs {
 			if dir.IsDir() {
-				alldirs[path.Join(root, dir.Name())] = true
+				name := dir.Name()
+				alldirs[path.Join(root, name)] = true
 				continue
 			}
 			info, err := dir.Info()
