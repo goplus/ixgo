@@ -27,7 +27,6 @@ import (
 	"go/token"
 	"go/types"
 	"io"
-	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -315,84 +314,6 @@ func (ctx *Context) writeOutput(data []byte) (n int, err error) {
 		return ctx.output.Write(data)
 	}
 	return os.Stdout.Write(data)
-}
-
-// FileSystem represents a file system.
-type FileSystem interface {
-	ReadDir(dirname string) ([]fs.DirEntry, error)
-	ReadFile(filename string) ([]byte, error)
-	Join(elem ...string) string
-
-	// Base returns the last element of path.
-	// Trailing path separators are removed before extracting the last element.
-	// If the path is empty, Base returns ".".
-	// If the path consists entirely of separators, Base returns a single separator.
-	Base(filename string) string
-
-	// Abs returns an absolute representation of path.
-	Abs(path string) (string, error)
-}
-
-func (ctx *Context) LoadFileSystem(fsys FileSystem, test bool, getImportPath func(pkgName string, dir string) (string, bool)) (pkg *ssa.Package, err error) {
-	ctx.BuildContext.JoinPath = fsys.Join
-	ctx.BuildContext.IsDir = func(path string) bool {
-		return path == "."
-	}
-	ctx.BuildContext.ReadDir = func(dir string) (infos []fs.FileInfo, err error) {
-		dirs, err := fsys.ReadDir(dir)
-		if err != nil {
-			return nil, err
-		}
-		for _, dir := range dirs {
-			if dir.IsDir() {
-				continue
-			}
-			info, err := dir.Info()
-			if err != nil {
-				continue
-			}
-			infos = append(infos, info)
-		}
-		return
-	}
-	ctx.BuildContext.OpenFile = func(name string) (io.ReadCloser, error) {
-		data, err := fsys.ReadFile(name)
-		if err != nil {
-			return nil, err
-		}
-		return io.NopCloser(bytes.NewReader(data)), nil
-	}
-	return ctx.LoadDirEx(".", test, getImportPath)
-}
-
-func (ctx *Context) LoadFS(fsys fs.FS, test bool, getImportPath func(pkgName string, dir string) (string, bool)) (pkg *ssa.Package, err error) {
-	ctx.BuildContext.JoinPath = func(elem ...string) string {
-		return filepath.Join(elem...)
-	}
-	ctx.BuildContext.IsDir = func(path string) bool {
-		return path == "."
-	}
-	ctx.BuildContext.ReadDir = func(dir string) (infos []fs.FileInfo, err error) {
-		dirs, err := fs.ReadDir(fsys, dir)
-		if err != nil {
-			return nil, err
-		}
-		for _, dir := range dirs {
-			if dir.IsDir() {
-				continue
-			}
-			info, err := dir.Info()
-			if err != nil {
-				continue
-			}
-			infos = append(infos, info)
-		}
-		return
-	}
-	ctx.BuildContext.OpenFile = func(name string) (io.ReadCloser, error) {
-		return fsys.Open(name)
-	}
-	return ctx.LoadDirEx(".", test, getImportPath)
 }
 
 func (ctx *Context) LoadDir(dir string, test bool) (pkg *ssa.Package, err error) {
