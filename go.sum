@@ -35,8 +35,8 @@ github.com/visualfc/funcval v0.1.4 h1:lAI88zQYfRzmC7mKF4+swXeCZvb8wb1f3lMSDRAY2m
 github.com/visualfc/funcval v0.1.4/go.mod h1:3Izv+irhArmrTvy+lmL6pIq16gSOzx73CIka51J9eR0=
 github.com/visualfc/gid v0.3.0 h1:TloAZslV/S7CosoWjSyqaXUtoCKlZ8Fc+MhRIH9seU8=
 github.com/visualfc/gid v0.3.0/go.mod h1:nzdGt/X2YXpNJjn03QS8P+Z9peCDxF1FWrekfl+nBUE=
-github.com/visualfc/goembed v0.3.2 h1:a9m6o9VTzNk3mEF98C8cHp8f8P8BblyjsjajXGfTp8w=
-github.com/visualfc/goembed v0.3.2/go.mod h1:jCVCz/yTJGyslo6Hta+pYxWWBuq9ADCcIVZBTQ0/iVI=
+github.com/visualfc/goembed v0.3.4 h1:foORJ0KT/pKwA23dStPFOtxaW7F96PnNSiLXHVXrfVk=
+github.com/visualfc/goembed v0.3.4/go.mod h1:jCVCz/yTJGyslo6Hta+pYxWWBuq9ADCcIVZBTQ0/iVI=
 github.com/visualfc/xtype v0.2.0 h1:0ESNXyWHtK01kaOzOyqHsR1ZjEPdNu/IWPZkf0VOHl8=
 github.com/visualfc/xtype v0.2.0/go.mod h1:183MDtzLqyDkCm5zCH42vJGq/aQE5W25k3Z6UOZxLF0=
 golang.org/x/mod v0.20.0 h1:utOm6MM3R3dnawAiJgn0y+xvuYRsm1RKM/4giyfDgV0=
