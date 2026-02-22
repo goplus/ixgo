@@ -63,7 +63,6 @@ func init() {
 			"NE":             {reflect.TypeOf(q.NE), constant.MakeInt64(int64(q.NE))},
 			"NoPos":          {reflect.TypeOf(q.NoPos), constant.MakeInt64(int64(q.NoPos))},
 			"OR_ASSIGN":      {reflect.TypeOf(q.OR_ASSIGN), constant.MakeInt64(int64(q.OR_ASSIGN))},
-			"POW":            {reflect.TypeOf(q.POW), constant.MakeInt64(int64(q.POW))},
 			"QUO_ASSIGN":     {reflect.TypeOf(q.QUO_ASSIGN), constant.MakeInt64(int64(q.QUO_ASSIGN))},
 			"RAT":            {reflect.TypeOf(q.RAT), constant.MakeInt64(int64(q.RAT))},
 			"REM_ASSIGN":     {reflect.TypeOf(q.REM_ASSIGN), constant.MakeInt64(int64(q.REM_ASSIGN))},

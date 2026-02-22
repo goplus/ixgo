@@ -1,9 +1,9 @@
 // export by github.com/goplus/ixgo/cmd/qexp
 
-package regexp
+package regexposix
 
 import (
-	q "github.com/goplus/xgo/tpl/encoding/regexp"
+	q "github.com/goplus/xgo/encoding/regexposix"
 
 	"reflect"
 
@@ -12,15 +12,17 @@ import (
 
 func init() {
 	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "regexp",
-		Path: "github.com/goplus/xgo/tpl/encoding/regexp",
+		Name: "regexposix",
+		Path: "github.com/goplus/xgo/encoding/regexposix",
 		Deps: map[string]string{
 			"regexp": "regexp",
 		},
 		Interfaces: map[string]reflect.Type{},
 		NamedTypes: map[string]reflect.Type{},
-		AliasTypes: map[string]reflect.Type{},
-		Vars:       map[string]reflect.Value{},
+		AliasTypes: map[string]reflect.Type{
+			"Object": reflect.TypeOf((*q.Object)(nil)).Elem(),
+		},
+		Vars: map[string]reflect.Value{},
 		Funcs: map[string]reflect.Value{
 			"New": reflect.ValueOf(q.New),
 		},

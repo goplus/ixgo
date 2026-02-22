@@ -34,6 +34,7 @@ func init() {
 			"Visitor": reflect.TypeOf((*q.Visitor)(nil)).Elem(),
 		},
 		NamedTypes: map[string]reflect.Type{
+			"AnySelectorExpr":   reflect.TypeOf((*q.AnySelectorExpr)(nil)).Elem(),
 			"ArrayType":         reflect.TypeOf((*q.ArrayType)(nil)).Elem(),
 			"AssignStmt":        reflect.TypeOf((*q.AssignStmt)(nil)).Elem(),
 			"BadDecl":           reflect.TypeOf((*q.BadDecl)(nil)).Elem(),
@@ -51,6 +52,7 @@ func init() {
 			"CommentMap":        reflect.TypeOf((*q.CommentMap)(nil)).Elem(),
 			"CompositeLit":      reflect.TypeOf((*q.CompositeLit)(nil)).Elem(),
 			"ComprehensionExpr": reflect.TypeOf((*q.ComprehensionExpr)(nil)).Elem(),
+			"CondExpr":          reflect.TypeOf((*q.CondExpr)(nil)).Elem(),
 			"DeclStmt":          reflect.TypeOf((*q.DeclStmt)(nil)).Elem(),
 			"DeferStmt":         reflect.TypeOf((*q.DeferStmt)(nil)).Elem(),
 			"DomainTextLit":     reflect.TypeOf((*q.DomainTextLit)(nil)).Elem(),
@@ -108,6 +110,7 @@ func init() {
 			"StringLitEx":       reflect.TypeOf((*q.StringLitEx)(nil)).Elem(),
 			"StructType":        reflect.TypeOf((*q.StructType)(nil)).Elem(),
 			"SwitchStmt":        reflect.TypeOf((*q.SwitchStmt)(nil)).Elem(),
+			"TupleLit":          reflect.TypeOf((*q.TupleLit)(nil)).Elem(),
 			"TupleType":         reflect.TypeOf((*q.TupleType)(nil)).Elem(),
 			"TypeAssertExpr":    reflect.TypeOf((*q.TypeAssertExpr)(nil)).Elem(),
 			"TypeSpec":          reflect.TypeOf((*q.TypeSpec)(nil)).Elem(),

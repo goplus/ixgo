@@ -23,6 +23,8 @@ import (
 
 	"github.com/goplus/ixgo"
 	_ "github.com/goplus/ixgo/pkg/bytes"
+	_ "github.com/goplus/ixgo/xgobuild/pkg/dql"
+	_ "github.com/goplus/ixgo/xgobuild/pkg/encoding"
 	_ "github.com/goplus/ixgo/xgobuild/pkg/gsh"
 	_ "github.com/goplus/ixgo/xgobuild/pkg/tpl"
 )
@@ -862,5 +864,26 @@ func TestTplPatchStaticLoad(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+var dqlXGo = `
+doc := xgo` + "`" + `
+x, y := "Hi", 123
+echo x
+print y
+` + "`" + `!
+
+stmts := doc.shadowEntry.body.list.*@(self.class == "ExprStmt")
+for fn in stmts.x@(self.class == "CallExpr").fun@(self.class == "Ident") {
+	echo fn.$name
+}
+`
+
+func TestDqlXGo(t *testing.T) {
+	ctx := ixgo.NewContext(0)
+	_, err := ctx.RunFile("main.xgo", dqlXGo, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
 }

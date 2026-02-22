@@ -38,7 +38,7 @@ func init() {
 			"UntypedBigfloat_Default": reflect.TypeOf((*q.UntypedBigfloat_Default)(nil)).Elem(),
 			"UntypedBigint_Default":   reflect.TypeOf((*q.UntypedBigint_Default)(nil)).Elem(),
 			"UntypedBigrat_Default":   reflect.TypeOf((*q.UntypedBigrat_Default)(nil)).Elem(),
-			"XGo_ninteger":            reflect.TypeOf((*uint)(nil)).Elem(),
+			"XGo_ninteger":            reflect.TypeOf((*q.XGo_ninteger)(nil)).Elem(),
 		},
 		Vars: map[string]reflect.Value{},
 		Funcs: map[string]reflect.Value{

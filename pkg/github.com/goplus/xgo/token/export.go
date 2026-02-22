@@ -49,6 +49,7 @@ func init() {
 			"AND_NOT_ASSIGN": {reflect.TypeOf(q.AND_NOT_ASSIGN), constant.MakeInt64(int64(q.AND_NOT_ASSIGN))},
 			"ARROW":          {reflect.TypeOf(q.ARROW), constant.MakeInt64(int64(q.ARROW))},
 			"ASSIGN":         {reflect.TypeOf(q.ASSIGN), constant.MakeInt64(int64(q.ASSIGN))},
+			"AT":             {reflect.TypeOf(q.AT), constant.MakeInt64(int64(q.AT))},
 			"BIDIARROW":      {reflect.TypeOf(q.BIDIARROW), constant.MakeInt64(int64(q.BIDIARROW))},
 			"BREAK":          {reflect.TypeOf(q.BREAK), constant.MakeInt64(int64(q.BREAK))},
 			"CASE":           {reflect.TypeOf(q.CASE), constant.MakeInt64(int64(q.CASE))},
@@ -129,7 +130,6 @@ func init() {
 			"SWITCH":         {reflect.TypeOf(q.SWITCH), constant.MakeInt64(int64(q.SWITCH))},
 			"TILDE":          {reflect.TypeOf(q.TILDE), constant.MakeInt64(int64(q.TILDE))},
 			"TYPE":           {reflect.TypeOf(q.TYPE), constant.MakeInt64(int64(q.TYPE))},
-			"UNIT":           {reflect.TypeOf(q.UNIT), constant.MakeInt64(int64(q.UNIT))},
 			"VAR":            {reflect.TypeOf(q.VAR), constant.MakeInt64(int64(q.VAR))},
 			"XOR":            {reflect.TypeOf(q.XOR), constant.MakeInt64(int64(q.XOR))},
 			"XOR_ASSIGN":     {reflect.TypeOf(q.XOR_ASSIGN), constant.MakeInt64(int64(q.XOR_ASSIGN))},
@@ -138,6 +138,7 @@ func init() {
 			"HighestPrec": {"untyped int", constant.MakeInt64(int64(q.HighestPrec))},
 			"LowestPrec":  {"untyped int", constant.MakeInt64(int64(q.LowestPrec))},
 			"PYSTRING":    {"untyped int", constant.MakeInt64(int64(q.PYSTRING))},
+			"UNIT":        {"untyped int", constant.MakeInt64(int64(q.UNIT))},
 			"UnaryPrec":   {"untyped int", constant.MakeInt64(int64(q.UnaryPrec))},
 		},
 	})
