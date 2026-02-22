@@ -197,9 +197,9 @@ func eq(a, b interface{}) string {
 }
 `
 	out := `0,3: main.T[int;int]
-4,7: main.T[int;main.U[int;int]·3]
+4,7: main.T[int;main.U[int;int]]
 22,23: main.T[main.Int;main.Int]
-26,27: main.T[main.Int;main.U[main.Int;main.Int]·3]
+26,27: main.T[main.Int;main.U[main.Int;main.Int]]
 `
 	ctx := ixgo.NewContext(0)
 	var buf bytes.Buffer

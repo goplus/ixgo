@@ -560,7 +560,7 @@ func (this *App) MainEntry() {
 //line main.gsh:11:1
 	fmt.Println(gsh1.Version)
 //line main.gsh:13:1
-	pt2 := &gsh1.Point{1, 2}
+	pt2 := &gsh1.MyPoint{1, 2}
 //line main.gsh:14:1
 	gsh1.Dump(pt2)
 }
