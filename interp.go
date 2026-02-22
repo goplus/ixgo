@@ -60,7 +60,7 @@ import (
 	"github.com/goplus/ixgo/internal/typesalias"
 	"github.com/goplus/ixgo/load"
 	"github.com/goplus/reflectx"
-	"github.com/visualfc/gid"
+	"github.com/timandy/routine"
 	"github.com/visualfc/xtype"
 	"golang.org/x/tools/go/ssa"
 )
@@ -1574,5 +1574,5 @@ func deref(typ types.Type) types.Type {
 }
 
 func goroutineID() uint64 {
-	return gid.Get()
+	return routine.Goid()
 }

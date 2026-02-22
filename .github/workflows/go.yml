@@ -1,0 +1,40 @@
+name: Go
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  Test:
+    strategy:
+      matrix:
+        go-version: [1.24.x, 1.25.x]
+        os: [ubuntu-latest, windows-latest,macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: ${{ matrix.go-version }}
+
+    - name: Test ixgo
+      run: go test -race -v .
+
+    - name: Test xgobuild
+      run: go test -race -v ./xgobuild
+
+    - name: Install ixgo
+      run: go install -v ./cmd/ixgo
+
+    - name: Test $GOROOT/test
+      run: go run ./cmd/ixgotest
+
+    - name: Install ixgo linknamefix
+      run: go install -tags linknamefix -ldflags="-checklinkname=0" -v ./cmd/ixgo
+
+    - name: Test $GOROOT/test
+      run: go run ./cmd/ixgotest
