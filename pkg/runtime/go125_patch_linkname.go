@@ -1,5 +1,5 @@
-//go:build go1.25
-// +build go1.25
+//go:build go1.25 && linknamefix
+// +build go1.25,linknamefix
 
 package runtime
 
