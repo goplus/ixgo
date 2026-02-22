@@ -1,5 +1,5 @@
-//go:build go1.24 && !go1.25
-// +build go1.24,!go1.25
+//go:build go1.25 && linknamefix
+// +build go1.25,linknamefix
 
 package runtime
 
@@ -12,7 +12,7 @@ import (
 	_ "github.com/goplus/ixgo/pkg/github.com/goplus/ixgo/x/abi"
 )
 
-//go:embed _patch/mcleanup_go124.go
+//go:embed _patch/mcleanup_go125.go
 var patch_data []byte
 
 func init() {
@@ -21,6 +21,7 @@ func init() {
 	ixgo.RegisterExternal("runtime.createfing", createfing)
 	ixgo.RegisterExternal("runtime.addCleanup", addCleanup)
 	ixgo.RegisterExternal("runtime.isGoPointerWithoutSpan", isGoPointerWithoutSpan)
+	ixgo.RegisterExternal("runtime.createGIfNecessary", createGIfNecessary)
 	ixgo.RegisterPatch("runtime", patch_data)
 }
 
@@ -51,3 +52,25 @@ type funcval struct {
 	fn uintptr
 	// variable-size, fn-specific data here
 }
+
+// Create another G if necessary.
+// if gcCleanups.needG() {
+// 	gcCleanups.createGs()
+// }
+
+func createGIfNecessary() {
+	if cleanupQueueNeedG(&gcCleanups) {
+		cleanupQueueCreateGs(&gcCleanups)
+	}
+}
+
+type cleanupQueue struct{}
+
+//go:linkname gcCleanups runtime.gcCleanups
+var gcCleanups cleanupQueue
+
+//go:linkname cleanupQueueNeedG runtime.(*cleanupQueue).needG
+func cleanupQueueNeedG(*cleanupQueue) bool
+
+//go:linkname cleanupQueueCreateGs runtime.(*cleanupQueue).createGs
+func cleanupQueueCreateGs(*cleanupQueue) bool
