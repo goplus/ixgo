@@ -110,6 +110,10 @@ func init() {
 			gorootTestSkips["fixedbugs/issue72844.go"] = "BUG, range for nil *op[N]"
 			gorootTestSkips["fixedbugs/issue73476.go"] = "BUG, range for nil *op[N]"
 		}
+		if ver >= 26 {
+			gorootTestSkips["range4.go"] = "BUG, range"
+			gorootTestSkips["rangegen.go"] = "BUG, range"
+		}
 	case ver == 16:
 		gorootTestSkips["fixedbugs/issue7740.go"] = "BUG, const float"
 	case ver == 15:

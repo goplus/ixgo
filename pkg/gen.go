@@ -49,8 +49,12 @@ func main() {
 	var name string
 	var fname string
 	switch gover {
+	case "go1.26":
+		tags = "//+build go1.26"
+		name = "go126_export"
+		fname = "go126_pkgs.go"
 	case "go1.25":
-		tags = "//+build go1.25"
+		tags = "//+build go1.25,!go1.26"
 		name = "go125_export"
 		fname = "go125_pkgs.go"
 	case "go1.24":
@@ -162,20 +166,6 @@ func main() {
 			panic(err)
 		}
 	}
-
-	if minorVer >= 23 {
-		for _, pkg := range []string{"iter"} {
-			log.Printf("export %v: %v patch", pkg, pkg+"/"+fname)
-			data, err := os.ReadFile("./_" + strings.Replace(gover, ".", "", -1) + "/" + pkg + "_export.go")
-			if err != nil {
-				panic(err)
-			}
-			err = os.WriteFile("./"+pkg+"/"+name+".go", data, 0666)
-			if err != nil {
-				panic(err)
-			}
-		}
-	}
 }
 
 func normalPkgs(std []string) (pkgs []string) {
@@ -193,9 +183,10 @@ func normalPkgs(std []string) (pkgs []string) {
 	return
 }
 
+// skip iter (patch mode)
 func isGeneric(pkg string) bool {
 	switch pkg {
-	case "maps", "slices", "cmp", "iter":
+	case "maps", "slices", "cmp":
 		return true
 	}
 	return false
@@ -291,20 +282,25 @@ func checkRegAbi(list []string, ver string) (regabi []string, noregabi []string)
 		if len(ar) != 2 {
 			continue
 		}
-		switch ver {
-		case "go1.17":
+		switch {
+		case minorVer == 17:
 			if ar[1] == "amd64" {
 				regabi = append(regabi, v)
 				continue
 			}
-		case "go1.18":
+		case minorVer == 18:
 			switch ar[1] {
 			case "amd64", "arm64", "ppc64", "ppc64le":
 				regabi = append(regabi, v)
 				continue
 			}
-		case "go1.19":
+		case minorVer >= 19:
 			switch ar[1] {
+			case "loong64":
+				if minorVer >= 22 {
+					regabi = append(regabi, v)
+					continue
+				}
 			case "amd64", "arm64", "ppc64", "ppc64le", "riscv64":
 				regabi = append(regabi, v)
 				continue
