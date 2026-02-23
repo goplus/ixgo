@@ -36,5 +36,5 @@ jobs:
     - name: Install ixgo linknamefix
       run: go install -tags linknamefix -ldflags="-checklinkname=0" -v ./cmd/ixgo
 
-    - name: Test $GOROOT/test
-      run: go run ./cmd/ixgotest
+    - name: Test linknamefix
+      run: ixgo run ./cmd/ixgotest/_data/linkname.go
