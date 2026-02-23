@@ -12,7 +12,7 @@ import (
 	_ "github.com/goplus/ixgo/pkg/github.com/goplus/ixgo/x/race"
 )
 
-//go:embed _patch/iter.go
+//go:embed _patch/iter_linkname.go
 var patch_data []byte
 
 func init() {

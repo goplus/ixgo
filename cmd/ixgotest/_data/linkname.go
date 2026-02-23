@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"iter"
 	"runtime"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 func main() {
 	cleanup()
 	iterPull()
+	iterPull2()
 }
 
 func cleanup() {
@@ -67,5 +69,30 @@ func iterPull() {
 	}
 	if r != "54321" {
 		panic("error: " + r)
+	}
+}
+
+func rangeMap(m map[string]int) iter.Seq2[string, int] {
+	return func(yield func(string, int) bool) {
+		for k, v := range m {
+			if !yield(k, v) {
+				return
+			}
+		}
+	}
+}
+
+func iterPull2() {
+	m := map[string]int{"a": 1, "b": 2, "c": 3}
+
+	next, stop := iter.Pull2(rangeMap(m))
+	defer stop()
+
+	for {
+		k, v, ok := next()
+		if !ok {
+			break
+		}
+		fmt.Printf("%s: %d\n", k, v)
 	}
 }
