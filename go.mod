@@ -5,12 +5,12 @@ go 1.24.0
 toolchain go1.24.1
 
 require (
-	github.com/goplus/gogen v1.20.2
-	github.com/goplus/mod v0.19.0
+	github.com/goplus/gogen v1.21.2
+	github.com/goplus/mod v0.19.3
 	github.com/goplus/reflectx v1.6.0
-	github.com/goplus/xgo v1.6.0
+	github.com/goplus/xgo v1.6.5
 	github.com/peterh/liner v1.2.2
-	github.com/qiniu/x v1.16.0
+	github.com/qiniu/x v1.16.2
 	github.com/timandy/routine v1.1.5
 	github.com/visualfc/funcval v0.1.4
 	github.com/visualfc/goembed v0.3.4
@@ -20,6 +20,8 @@ require (
 )
 
 require (
+	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/mattn/go-runewidth v0.0.3 // indirect
-	golang.org/x/sys v0.37.0 // indirect
+	golang.org/x/net v0.50.0 // indirect
+	golang.org/x/sys v0.41.0 // indirect
 )

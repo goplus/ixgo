@@ -1,9 +1,9 @@
 // export by github.com/goplus/ixgo/cmd/qexp
 
-package json
+package fs
 
 import (
-	q "github.com/goplus/xgo/tpl/encoding/json"
+	q "github.com/goplus/xgo/encoding/fs"
 
 	"reflect"
 
@@ -12,11 +12,10 @@ import (
 
 func init() {
 	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "json",
-		Path: "github.com/goplus/xgo/tpl/encoding/json",
+		Name: "fs",
+		Path: "github.com/goplus/xgo/encoding/fs",
 		Deps: map[string]string{
-			"encoding/json": "json",
-			"strings":       "strings",
+			"github.com/goplus/xgo/dql/fs": "fs",
 		},
 		Interfaces: map[string]reflect.Type{},
 		NamedTypes: map[string]reflect.Type{},

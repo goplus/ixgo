@@ -1,9 +1,9 @@
 // export by github.com/goplus/ixgo/cmd/qexp
 
-package xml
+package csv
 
 import (
-	q "github.com/goplus/xgo/tpl/encoding/xml"
+	q "github.com/goplus/xgo/encoding/csv"
 
 	"reflect"
 
@@ -12,16 +12,18 @@ import (
 
 func init() {
 	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "xml",
-		Path: "github.com/goplus/xgo/tpl/encoding/xml",
+		Name: "csv",
+		Path: "github.com/goplus/xgo/encoding/csv",
 		Deps: map[string]string{
-			"encoding/xml": "xml",
+			"encoding/csv": "csv",
 			"strings":      "strings",
 		},
 		Interfaces: map[string]reflect.Type{},
 		NamedTypes: map[string]reflect.Type{},
-		AliasTypes: map[string]reflect.Type{},
-		Vars:       map[string]reflect.Value{},
+		AliasTypes: map[string]reflect.Type{
+			"Object": reflect.TypeOf((*q.Object)(nil)).Elem(),
+		},
+		Vars: map[string]reflect.Value{},
 		Funcs: map[string]reflect.Value{
 			"New": reflect.ValueOf(q.New),
 		},
