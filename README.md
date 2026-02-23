@@ -42,7 +42,7 @@ unsupport
 ### install ixgo command line fully mode
 
 ```shell
-go install go install -tags linknamefix -ldflags="-checklinkname=0" github.com/goplus/ixgo/cmd/ixgo@latest
+go install -tags linknamefix -ldflags="-checklinkname=0" github.com/goplus/ixgo/cmd/ixgo@latest
 ```
 
 ### install ixgo export command line
