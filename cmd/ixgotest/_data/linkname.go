@@ -18,17 +18,17 @@ func cleanup() {
 		data []byte
 	}
 
-	b := &Blob{data: make([]byte, 1000)}
-	now := time.Now()
 	var since time.Duration
 	var done atomic.Bool
+	b := &Blob{data: make([]byte, 1000)}
+	now := time.Now()
 	runtime.AddCleanup(b, func(created time.Time) {
 		since = time.Since(created) / time.Millisecond
 		done.Store(true)
 	}, now)
 
-	time.Sleep(10 * time.Millisecond)
 	b = nil
+	time.Sleep(10 * time.Millisecond)
 
 	deadline := time.Now().Add(2 * time.Second)
 	for !done.Load() && time.Now().Before(deadline) {

@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -462,8 +463,7 @@ func main() {
 	}
 }
 
-func TestBuiltinPrintln(t *testing.T) {
-	src := `// run
+var builtin_src = `// run
 
 // Copyright 2014 The Go Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style
@@ -518,7 +518,8 @@ func main() {
 	defer println("one", "two")
 }
 `
-	out := `(0x0,0x0)
+
+var builtin_out = `(0x0,0x0)
 (0x0,0x0)
 0x0
 [0/0]0x0
@@ -553,15 +554,63 @@ true
 (0x0,0x0)
 (0x0,0x0)
 `
+
+var builtin_out26 = `(0x0,0x0)
+(0x0,0x0)
+0x0
+[0/0]0x0
+-7
+7
+7
+7
+7
+7
+7
+8
+(9+10i)
+true
+false
+hello
+one two
+one two
+hello
+false
+true
+(14+15i)
+13
+12
+12
+12
+12
+12
+12
+-11
+[0/0]0x0
+0x0
+(0x0,0x0)
+(0x0,0x0)
+`
+
+var (
+	gover, _ = strconv.Atoi(runtime.Version()[4:6])
+)
+
+func TestBuiltinPrintln(t *testing.T) {
+	var out string
+	if gover >= 26 {
+		out = builtin_out26
+	} else {
+		out = builtin_out
+	}
 	ctx := ixgo.NewContext(0)
 	var buf bytes.Buffer
 	ctx.SetPrintOutput(&buf)
-	_, err := ctx.RunFile("main.go", src, nil)
+	_, err := ctx.RunFile("main.go", builtin_src, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if buf.String() != out {
-		t.Fatal("error")
+		t.Fatal("error", buf.String())
 	}
 }
 
@@ -571,15 +620,29 @@ type panicinfo struct {
 }
 
 func TestPanicInfo(t *testing.T) {
-	infos := []panicinfo{
-		{`panic(100)`, `100`},
-		{`panic(100.0)`, `+1.000000e+002`},
-		{`panic("hello")`, `hello`},
-		{`panic((*interface{})(nil))`, `(*interface {}) 0x0`},
-		{`type T int; panic(T(100))`, `main.T(100)`},
-		{`type T float64; panic(T(100.0))`, `main.T(+1.000000e+002)`},
-		{`type T string; panic(T("hello"))`, `main.T("hello")`},
-		{`type T struct{}; panic((*T)(nil))`, `(*main.T) 0x0`},
+	var infos []panicinfo
+	if gover >= 26 {
+		infos = []panicinfo{
+			{`panic(100)`, `100`},
+			{`panic(100.0)`, `100`},
+			{`panic("hello")`, `hello`},
+			{`panic((*interface{})(nil))`, `(*interface {}) 0x0`},
+			{`type T int; panic(T(100))`, `main.T(100)`},
+			{`type T float64; panic(T(100.0))`, `main.T(100)`},
+			{`type T string; panic(T("hello"))`, `main.T("hello")`},
+			{`type T struct{}; panic((*T)(nil))`, `(*main.T) 0x0`},
+		}
+	} else {
+		infos = []panicinfo{
+			{`panic(100)`, `100`},
+			{`panic(100.0)`, `+1.000000e+002`},
+			{`panic("hello")`, `hello`},
+			{`panic((*interface{})(nil))`, `(*interface {}) 0x0`},
+			{`type T int; panic(T(100))`, `main.T(100)`},
+			{`type T float64; panic(T(100.0))`, `main.T(+1.000000e+002)`},
+			{`type T string; panic(T("hello"))`, `main.T("hello")`},
+			{`type T struct{}; panic((*T)(nil))`, `(*main.T) 0x0`},
+		}
 	}
 	ctx := ixgo.NewContext(0)
 	for _, info := range infos {

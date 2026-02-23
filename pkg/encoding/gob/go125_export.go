@@ -1,7 +1,7 @@
 // export by github.com/goplus/ixgo/cmd/qexp
 
-//go:build go1.25
-// +build go1.25
+//go:build go1.25 && !go1.26
+// +build go1.25,!go1.26
 
 package gob
 

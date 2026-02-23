@@ -36,7 +36,6 @@ go install github.com/goplus/ixgo/cmd/ixgo@latest
 ```
 
 unsupport
-- runtime.AddCleanup
 - iter.Pull/iter.Pull2
 
 ### install ixgo command line fully mode
