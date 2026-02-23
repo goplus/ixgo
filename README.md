@@ -29,14 +29,6 @@ A fast and fully compatible Go language interpreter.
 go install github.com/goplus/ixgo/cmd/ixgo@latest
 ```
 
-### install ixgo command line linkname mode
-
-```shell
-go install -tags linknamefix -ldflags="-checklinkname=0" github.com/goplus/ixgo/cmd/ixgo@latest
-```
-
-use runtime linkname for faster performance `iter.Pull/iter.Pull2`
-
 ### install ixgo export command line
 ```shell
 go install github.com/goplus/ixgo/cmd/qexp@latest
@@ -151,6 +143,14 @@ func main() {
 	}
 }
 ```
+
+#### install ixgo command line linkname mode
+
+```shell
+go install -tags linknamefix -ldflags="-checklinkname=0" github.com/goplus/ixgo/cmd/ixgo@latest
+```
+
+use runtime linkname for faster performance `iter.Pull/iter.Pull2`
 
 #### ixgo more demo
 
