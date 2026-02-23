@@ -6,7 +6,7 @@ package ixgo
 import "bytes"
 
 func writefloat32(out *bytes.Buffer, v float32) {
-	return writefloat32(out, float64(v))
+	writefloat64(out, float64(v))
 }
 
 func writecomplex64(out *bytes.Buffer, c complex64) {
