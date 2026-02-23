@@ -33,11 +33,11 @@ jobs:
     - name: Test $GOROOT/test
       run: go run ./cmd/ixgotest
 
-    - name: Test iter pull
-      run: ixgo run ./cmd/ixgotest/_data/linkname.go
+    - name: Test iter
+      run: ixgo test -v ./cmd/ixgotest/_data/iter
 
     - name: Install ixgo linknamefix
       run: go install -tags linknamefix -ldflags="-checklinkname=0" -v ./cmd/ixgo
 
-    - name: Test iter pull
-      run: ixgo run ./cmd/ixgotest/_data/linkname.go
+    - name: Test iter
+      run: ixgo test -v ./cmd/ixgotest/_data/iter
