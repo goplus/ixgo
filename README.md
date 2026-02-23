@@ -15,19 +15,13 @@ A fast and fully compatible Go language interpreter.
 - ABI0 stack-based ABI
 - ABIInternal [register-based Go calling convention proposal](https://golang.org/design/40724-register-calling)
 
-    - Go1.24 ~ Go1.26: amd64 arm64 ppc64/ppc64le riscv64 loong64
+    - amd64 arm64 ppc64/ppc64le riscv64 loong64
 
 
 ### Generics
 
 - support typeparams
 - support alias typeparams
-
-### runtime.GC
-
-`ixgo.Mode ExperimentalSupportGC`
-
-experimental support runtime.GC and runtime.SetFinalizer
 
 ### install ixgo command line
 
@@ -41,9 +35,7 @@ go install github.com/goplus/ixgo/cmd/ixgo@latest
 go install -tags linknamefix -ldflags="-checklinkname=0" github.com/goplus/ixgo/cmd/ixgo@latest
 ```
 
-use runtime linkname for faster performance
-- iter.Pull
-- iter.Pull2
+use runtime linkname for faster performance `iter.Pull/iter.Pull2`
 
 ### install ixgo export command line
 ```shell
@@ -103,9 +95,6 @@ ixgo repl -go              # run repl mode, disable XGo syntax
 - <https://repl.xgo.dev/>
 - <https://github.com/goplusjs/repl>
 
-#### ispx
-
-[ispx](https://github.com/goplus/spx/tree/dev/cmd/igox)
 
 #### run simple Go source demo
 
