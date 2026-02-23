@@ -41,6 +41,7 @@ func init() {
 			"CoverSnapshotFunc":           reflect.ValueOf(&q.CoverSnapshotFunc),
 			"Covered":                     reflect.ValueOf(&q.Covered),
 			"ImportPath":                  reflect.ValueOf(&q.ImportPath),
+			"ModulePath":                  reflect.ValueOf(&q.ModulePath),
 		},
 		Funcs:         map[string]reflect.Value{},
 		TypedConsts:   map[string]ixgo.TypedConst{},
