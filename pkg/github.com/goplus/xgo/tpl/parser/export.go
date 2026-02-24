@@ -15,10 +15,10 @@ func init() {
 		Name: "parser",
 		Path: "github.com/goplus/xgo/tpl/parser",
 		Deps: map[string]string{
-			"github.com/goplus/xgo/parser/iox":  "iox",
 			"github.com/goplus/xgo/tpl/ast":     "ast",
 			"github.com/goplus/xgo/tpl/scanner": "scanner",
 			"github.com/goplus/xgo/tpl/token":   "token",
+			"github.com/qiniu/x/stream":         "stream",
 		},
 		Interfaces: map[string]reflect.Type{},
 		NamedTypes: map[string]reflect.Type{

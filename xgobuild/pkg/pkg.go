@@ -20,6 +20,7 @@ package pkg
 //go:generate go run ../../cmd/qexp -outdir ../../pkg github.com/goplus/xgo/dql/yaml
 //go:generate go run ../../cmd/qexp -code -outdir ../../pkg github.com/goplus/xgo/dql
 //go:generate go run ../../cmd/qexp -outdir ../../pkg github.com/goplus/xgo/test
+//go:generate go run ../../cmd/qexp -outdir ../../pkg github.com/goplus/xgo/doc
 
 import (
 	_ "github.com/goplus/ixgo/xgobuild/pkg/dql"
