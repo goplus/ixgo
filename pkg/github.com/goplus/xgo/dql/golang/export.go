@@ -19,6 +19,7 @@ func init() {
 			"bytes":                              "bytes",
 			"github.com/goplus/xgo/dql":          "dql",
 			"github.com/goplus/xgo/dql/reflects": "reflects",
+			"github.com/qiniu/x/stream":          "stream",
 			"go/ast":                             "ast",
 			"go/parser":                          "parser",
 			"go/token":                           "token",

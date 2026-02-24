@@ -16,7 +16,6 @@ func init() {
 		Path: "github.com/goplus/xgo/tpl",
 		Deps: map[string]string{
 			"fmt":                               "fmt",
-			"github.com/goplus/xgo/parser/iox":  "iox",
 			"github.com/goplus/xgo/tpl/ast":     "ast",
 			"github.com/goplus/xgo/tpl/cl":      "cl",
 			"github.com/goplus/xgo/tpl/matcher": "matcher",
@@ -25,6 +24,7 @@ func init() {
 			"github.com/goplus/xgo/tpl/token":   "token",
 			"github.com/goplus/xgo/tpl/types":   "types",
 			"github.com/qiniu/x/errors":         "errors",
+			"github.com/qiniu/x/stream":         "stream",
 			"io":                                "io",
 			"os":                                "os",
 			"reflect":                           "reflect",

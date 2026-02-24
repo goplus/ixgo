@@ -30,13 +30,11 @@ func init() {
 		},
 		Interfaces: map[string]reflect.Type{},
 		NamedTypes: map[string]reflect.Type{
-			"File":    reflect.TypeOf((*q.File)(nil)).Elem(),
+			"Node":    reflect.TypeOf((*q.Node)(nil)).Elem(),
 			"NodeSet": reflect.TypeOf((*q.NodeSet)(nil)).Elem(),
 		},
-		AliasTypes: map[string]reflect.Type{
-			"Node": reflect.TypeOf((*q.Node)(nil)).Elem(),
-		},
-		Vars: map[string]reflect.Value{},
+		AliasTypes: map[string]reflect.Type{},
+		Vars:       map[string]reflect.Value{},
 		Funcs: map[string]reflect.Value{
 			"New":          reflect.ValueOf(q.New),
 			"NodeSet_Cast": reflect.ValueOf(q.NodeSet_Cast),
