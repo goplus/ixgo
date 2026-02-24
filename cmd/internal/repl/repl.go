@@ -69,7 +69,7 @@ func (u *LinerUI) Printf(format string, a ...interface{}) {
 }
 
 var (
-	welcomeGo string = fmt.Sprintf("iXGo v0.9.9 (build %v %v/%v)", runtime.Version(), runtime.GOOS, runtime.GOARCH)
+	welcomeGo string = fmt.Sprintf("iXGo v1.0.0 (build %v %v/%v)", runtime.Version(), runtime.GOOS, runtime.GOARCH)
 )
 
 var helpGo string = `Use ?expr to dump expr information
