@@ -21,6 +21,8 @@ package pkg
 //go:generate go run ../../cmd/qexp -code -outdir ../../pkg github.com/goplus/xgo/dql
 //go:generate go run ../../cmd/qexp -outdir ../../pkg github.com/goplus/xgo/test
 //go:generate go run ../../cmd/qexp -outdir ../../pkg github.com/goplus/xgo/doc
+//go:generate go run ../../cmd/qexp -outdir ../../pkg github.com/goplus/xgo/format
+//go:generate go run ../../cmd/qexp -outdir ../../pkg github.com/goplus/xgo/env
 
 import (
 	_ "github.com/goplus/ixgo/xgobuild/pkg/dql"
