@@ -7,7 +7,7 @@ toolchain go1.24.1
 require (
 	github.com/goplus/gogen v1.21.2
 	github.com/goplus/mod v0.19.4-0.20260222111422-56104f99b604
-	github.com/goplus/reflectx v1.6.0
+	github.com/goplus/reflectx v1.6.1
 	github.com/goplus/xgo v1.6.6
 	github.com/peterh/liner v1.2.2
 	github.com/qiniu/x v1.16.3
