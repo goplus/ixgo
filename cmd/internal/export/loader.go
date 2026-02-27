@@ -394,9 +394,9 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 		case *types.Const:
 			named := pkgName + "." + t.Name()
 			if typ := t.Type().String(); strings.HasPrefix(typ, "untyped ") {
-				e.UntypedConsts = append(e.UntypedConsts, fmt.Sprintf("%q: {%q, %v}", t.Name(), t.Type().String(), p.constToLit(named, t.Val())))
+				e.UntypedConsts = append(e.UntypedConsts, fmt.Sprintf("%q: {Typ: %q, Value: %v}", t.Name(), t.Type().String(), p.constToLit(named, t.Val())))
 			} else {
-				e.TypedConsts = append(e.TypedConsts, fmt.Sprintf("%q : {reflect.TypeOf(%v), %v}", t.Name(), pkgName+"."+t.Name(), p.constToLit(named, t.Val())))
+				e.TypedConsts = append(e.TypedConsts, fmt.Sprintf("%q: {Typ: reflect.TypeOf(%v), Value: %v}", t.Name(), pkgName+"."+t.Name(), p.constToLit(named, t.Val())))
 			}
 			e.usedPkg = true
 		case *types.Var:
