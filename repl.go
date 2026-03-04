@@ -27,7 +27,7 @@ import (
 	"runtime"
 	"strings"
 
-	xconst "github.com/goplus/ixgo/constant"
+	xconst "github.com/goplus/ixgo/internal/constant"
 	"golang.org/x/tools/go/ssa"
 )
 
