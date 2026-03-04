@@ -397,7 +397,8 @@ func extractMethodSet(T types.Type) (methods []*types.Selection, pcount int, mco
 	methods = make([]*types.Selection, pcount)
 	for i := 0; i < pcount; i++ {
 		meth := pmset.At(i)
-		if m := mset.Lookup(meth.Obj().Pkg(), meth.Obj().Name()); m != nil {
+		obj := meth.Obj()
+		if m := mset.Lookup(obj.Pkg(), obj.Name()); m != nil {
 			meth = m
 		}
 		methods[i] = meth
@@ -472,49 +473,61 @@ func isPointer(typ types.Type) bool {
 	return ok
 }
 
-func embedFunc(typ reflect.Type, name string, idx []int, pointer bool, indirect bool, variadic bool) func([]reflect.Value) []reflect.Value {
+func embedFunc(typ reflect.Type, name string, idx []int, pointer bool, indirect bool, variadic bool) (func([]reflect.Value) []reflect.Value, bool) {
 	switch kind := typ.Kind(); kind {
 	case reflect.Interface:
 		if variadic {
 			return func(args []reflect.Value) []reflect.Value {
 				v := reflectx.FieldByIndexX(args[0], idx[:len(idx)-1])
 				return v.MethodByName(name).CallSlice(args[1:])
-			}
+			}, true
 		}
 		return func(args []reflect.Value) []reflect.Value {
 			v := reflectx.FieldByIndexX(args[0], idx[:len(idx)-1])
 			return v.MethodByName(name).Call(args[1:])
-		}
+		}, true
 	case reflect.Ptr:
 		if pointer {
-			m, _ := reflectx.MethodByName(typ, name)
+			m, ok := reflectx.MethodByName(typ, name)
+			if !ok {
+				return invalidMethod(typ, name), false
+			}
 			if variadic {
 				return func(args []reflect.Value) []reflect.Value {
 					args[0] = reflectx.FieldByIndexX(args[0].Elem(), idx[:len(idx)-1]).Addr()
 					return m.Func.CallSlice(args)
-				}
+				}, true
 			}
 			return func(args []reflect.Value) []reflect.Value {
 				args[0] = reflectx.FieldByIndexX(args[0].Elem(), idx[:len(idx)-1]).Addr()
 				return m.Func.Call(args)
-			}
+			}, true
 		}
 		fallthrough
 	default:
 		if indirect && kind != reflect.Ptr {
 			typ = reflect.PointerTo(typ)
 		}
-		m, _ := reflectx.MethodByName(typ, name)
+		m, ok := reflectx.MethodByName(typ, name)
+		if !ok {
+			return invalidMethod(typ, name), false
+		}
 		if variadic {
 			return func(args []reflect.Value) []reflect.Value {
 				args[0] = reflectx.FieldByIndexX(args[0], idx[:len(idx)-1])
 				return m.Func.CallSlice(args)
-			}
+			}, true
 		}
 		return func(args []reflect.Value) []reflect.Value {
 			args[0] = reflectx.FieldByIndexX(args[0], idx[:len(idx)-1])
 			return m.Func.Call(args)
-		}
+		}, true
+	}
+}
+
+func invalidMethod(typ reflect.Type, name string) func([]reflect.Value) []reflect.Value {
+	return func([]reflect.Value) []reflect.Value {
+		panic("invalid method: " + typ.String() + "." + name)
 	}
 }
 
@@ -539,9 +552,14 @@ func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 				mid = v.id
 			} else {
 				variadic := mtyp.IsVariadic()
-				r.ctx.mfnid++
-				mid = r.ctx.mfnid
-				mfn = embedFunc(rt, fn.Name(), idx, pointer, indirect, variadic)
+				var ok bool
+				mfn, ok = embedFunc(rt, fn.Name(), idx, pointer, indirect, variadic)
+				if ok {
+					r.ctx.mfnid++
+					mid = r.ctx.mfnid
+				} else {
+					mid = -1
+				}
 				r.ctx.mfnmap[key] = mfnValue{fn: mfn, id: mid}
 			}
 		} else {
