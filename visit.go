@@ -93,6 +93,7 @@ func (visit *visitor) program() {
 		}
 		mmap := make(map[string]*ssa.Function)
 		mset := visit.prog.MethodSets.MethodSet(T)
+		checkXGo := visit.intp.ctx.Mode&CheckGopOverloadFunc != 0
 		for i, n := 0, mset.Len(); i < n; i++ {
 			sel := mset.At(i)
 			obj := sel.Obj()
@@ -101,7 +102,7 @@ func (visit *visitor) program() {
 				if !chks[pkg.Path()] {
 					continue
 				}
-				if visit.intp.ctx.Mode&CheckGopOverloadFunc != 0 && obj.Pos() == token.NoPos {
+				if checkXGo && isXGoOverloadFunc(obj.Type().(*types.Signature)) {
 					continue
 				}
 			}
