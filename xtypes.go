@@ -473,67 +473,56 @@ func isPointer(typ types.Type) bool {
 	return ok
 }
 
-func embedFunc(typ reflect.Type, name string, idx []int, pointer bool, indirect bool, variadic bool) (func([]reflect.Value) []reflect.Value, bool) {
+func embedFunc(typ reflect.Type, name string, idx []int, pointer bool, indirect bool, variadic bool) func([]reflect.Value) []reflect.Value {
 	switch kind := typ.Kind(); kind {
 	case reflect.Interface:
 		if variadic {
 			return func(args []reflect.Value) []reflect.Value {
 				v := reflectx.FieldByIndexX(args[0], idx[:len(idx)-1])
 				return v.MethodByName(name).CallSlice(args[1:])
-			}, true
+			}
 		}
 		return func(args []reflect.Value) []reflect.Value {
 			v := reflectx.FieldByIndexX(args[0], idx[:len(idx)-1])
 			return v.MethodByName(name).Call(args[1:])
-		}, true
+		}
 	case reflect.Ptr:
 		if pointer {
-			m, ok := reflectx.MethodByName(typ, name)
-			if !ok {
-				return invalidMethod(typ, name), false
-			}
+			m, _ := reflectx.MethodByName(typ, name)
 			if variadic {
 				return func(args []reflect.Value) []reflect.Value {
 					args[0] = reflectx.FieldByIndexX(args[0].Elem(), idx[:len(idx)-1]).Addr()
 					return m.Func.CallSlice(args)
-				}, true
+				}
 			}
 			return func(args []reflect.Value) []reflect.Value {
 				args[0] = reflectx.FieldByIndexX(args[0].Elem(), idx[:len(idx)-1]).Addr()
 				return m.Func.Call(args)
-			}, true
+			}
 		}
 		fallthrough
 	default:
 		if indirect && kind != reflect.Ptr {
 			typ = reflect.PointerTo(typ)
 		}
-		m, ok := reflectx.MethodByName(typ, name)
-		if !ok {
-			return invalidMethod(typ, name), false
-		}
+		m, _ := reflectx.MethodByName(typ, name)
 		if variadic {
 			return func(args []reflect.Value) []reflect.Value {
 				args[0] = reflectx.FieldByIndexX(args[0], idx[:len(idx)-1])
 				return m.Func.CallSlice(args)
-			}, true
+			}
 		}
 		return func(args []reflect.Value) []reflect.Value {
 			args[0] = reflectx.FieldByIndexX(args[0], idx[:len(idx)-1])
 			return m.Func.Call(args)
-		}, true
-	}
-}
-
-func invalidMethod(typ reflect.Type, name string) func([]reflect.Value) []reflect.Value {
-	return func([]reflect.Value) []reflect.Value {
-		panic("invalid method: " + typ.String() + "." + name)
+		}
 	}
 }
 
 func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 	numMethods := len(methods)
 	ms := make([]reflectx.Method, numMethods)
+	checkXGo := r.ctx.Mode&CheckGopOverloadFunc != 0
 	for i := 0; i < numMethods; i++ {
 		fn := methods[i].Obj().(*types.Func)
 		sig := methods[i].Type().(*types.Signature)
@@ -542,7 +531,9 @@ func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 		var mfn func(args []reflect.Value) []reflect.Value
 		idx := methods[i].Index()
 		var mid int
-		if len(idx) > 1 {
+		if checkXGo && isXGoOverloadFunc(sig) {
+			mid = -1
+		} else if len(idx) > 1 {
 			indirect := methods[i].Indirect()
 			rtyp := fn.Type().Underlying().(*types.Signature).Recv().Type()
 			rt, _ := r.ToType(rtyp)
@@ -552,14 +543,9 @@ func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 				mid = v.id
 			} else {
 				variadic := mtyp.IsVariadic()
-				var ok bool
-				mfn, ok = embedFunc(rt, fn.Name(), idx, pointer, indirect, variadic)
-				if ok {
-					r.ctx.mfnid++
-					mid = r.ctx.mfnid
-				} else {
-					mid = -1
-				}
+				mfn = embedFunc(rt, fn.Name(), idx, pointer, indirect, variadic)
+				r.ctx.mfnid++
+				mid = r.ctx.mfnid
 				r.ctx.mfnmap[key] = mfnValue{fn: mfn, id: mid}
 			}
 		} else {
@@ -603,4 +589,23 @@ func (r *TypesRecord) Load(pkg *ssa.Package) {
 		}
 		r.ToType(typ)
 	}
+}
+
+const (
+	overloadArgs = "__xgo_overload_args__"
+)
+
+func isXGoOverloadFunc(sig *types.Signature) bool {
+	if sig.Params().Len() == 1 {
+		if param := sig.Params().At(0); param.Name() == overloadArgs {
+			if typ, ok := param.Type().(*types.Interface); ok && typ.NumExplicitMethods() == 1 {
+				if sig, ok := typ.ExplicitMethod(0).Type().(*types.Signature); ok {
+					if recv := sig.Recv(); recv != nil {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
 }
