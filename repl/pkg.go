@@ -26,7 +26,7 @@ import (
 	"strings"
 
 	"github.com/goplus/ixgo"
-	"github.com/goplus/ixgo/constant"
+	"github.com/goplus/ixgo/internal/constant"
 )
 
 // parseSymbol breaks str apart into a pkg, symbol and method

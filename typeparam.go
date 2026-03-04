@@ -1,6 +1,3 @@
-//go:build go1.18
-// +build go1.18
-
 /*
  * Copyright (c) 2022 The GoPlus Authors (goplus.org). All rights reserved.
  *
@@ -29,10 +26,6 @@ import (
 	"github.com/goplus/ixgo/internal/typesalias"
 	"golang.org/x/tools/go/ssa"
 	"golang.org/x/tools/go/types/typeutil"
-)
-
-const (
-	enabledTypeParam = true
 )
 
 func hasTypeParam(typ types.Type) bool {
