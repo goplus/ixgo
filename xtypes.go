@@ -558,9 +558,9 @@ func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 		ms[i] = reflectx.MakeMethod(fn.Name(), pkgpath, pointer, mtyp, mfn)
 		ms[i].FuncId = mid
 	}
-	err := r.rctx.SetMethodSet(typ, ms, false)
+	err := r.rctx.SetRawMethods(typ, ms)
 	if err != nil {
-		log.Fatalf("SetMethodSet %v err, %v\n", typ, err)
+		log.Fatalf("SetRawMethods %v err, %v\n", typ, err)
 	}
 }
 
