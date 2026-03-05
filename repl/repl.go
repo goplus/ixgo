@@ -25,7 +25,7 @@ import (
 	"strings"
 
 	"github.com/goplus/ixgo"
-	"github.com/goplus/ixgo/constant"
+	"github.com/goplus/ixgo/internal/constant"
 	"golang.org/x/tools/go/ssa"
 )
 

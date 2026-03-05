@@ -541,7 +541,7 @@ func (r *TypesLoader) ToType(rt reflect.Type) types.Type {
 		pkg := r.GetPackage(pkgPath)
 		for i := 0; i < n; i++ {
 			f := rt.Field(i)
-			if enabledTypeParam && r.hasTypeArgs(f.Type) {
+			if r.hasTypeArgs(f.Type) {
 				continue
 			}
 			ft := r.ToType(f.Type)
