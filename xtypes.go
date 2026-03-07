@@ -179,6 +179,7 @@ type FindMethod interface {
 type TypesRecord struct {
 	ctx     *Context
 	rctx    *reflectx.Context // reflectx context
+	prog    *ssa.Program
 	loader  Loader
 	finder  FindMethod
 	rcache  map[reflect.Type]types.Type
@@ -221,10 +222,11 @@ func (r *TypesRecord) Release() {
 	r.nested = nil
 }
 
-func NewTypesRecord(ctx *Context, rctx *reflectx.Context, loader Loader, finder FindMethod, nested map[*types.Named]int) *TypesRecord {
+func NewTypesRecord(ctx *Context, rctx *reflectx.Context, prog *ssa.Program, loader Loader, finder FindMethod, nested map[*types.Named]int) *TypesRecord {
 	return &TypesRecord{
 		ctx:    ctx,
 		rctx:   rctx,
+		prog:   prog,
 		loader: loader,
 		finder: finder,
 		rcache: make(map[reflect.Type]types.Type),
@@ -363,7 +365,7 @@ func (r *TypesRecord) toNamedType(t *types.Named) (reflect.Type, bool) {
 	var methods []*types.Selection
 	if _, ok := ut.(*types.Interface); !ok {
 		var pcount, mcount int
-		methods, pcount, mcount = extractMethodSet(t)
+		methods, pcount, mcount = r.extractMethodSet(t)
 		if hasMethod = pcount > 0; hasMethod {
 			typ = r.rctx.NewMethodSet(typ, mcount, pcount)
 		}
@@ -386,13 +388,13 @@ func (r *TypesRecord) toNamedType(t *types.Named) (reflect.Type, bool) {
 	return typ, nested
 }
 
-func extractMethodSet(T types.Type) (methods []*types.Selection, pcount int, mcount int) {
-	pmset := types.NewMethodSet(types.NewPointer(T))
+func (r *TypesRecord) extractMethodSet(T types.Type) (methods []*types.Selection, pcount int, mcount int) {
+	pmset := r.prog.MethodSets.MethodSet(types.NewPointer(T))
 	pcount = pmset.Len()
 	if pcount == 0 {
 		return
 	}
-	mset := types.NewMethodSet(T)
+	mset := r.prog.MethodSets.MethodSet(T)
 	mcount = mset.Len()
 	methods = make([]*types.Selection, pcount)
 	for i := 0; i < pcount; i++ {
@@ -423,7 +425,7 @@ func (r *TypesRecord) toStructType(t *types.Struct, mset bool) (reflect.Type, bo
 	}
 	typ := r.rctx.StructOf(flds)
 	if mset {
-		methods, pcount, mcount := extractMethodSet(t)
+		methods, pcount, mcount := r.extractMethodSet(t)
 		if pcount > 0 {
 			typ = r.rctx.NewMethodSet(typ, mcount, pcount)
 			r.setMethods(typ, methods)

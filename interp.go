@@ -1222,8 +1222,7 @@ func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{
 			return false
 		})
 	}
-
-	i.record = NewTypesRecord(ctx, rctx, ctx.Loader, i, ctx.nestedMap)
+	i.record = NewTypesRecord(ctx, rctx, mainpkg.Prog, ctx.Loader, i, ctx.nestedMap)
 	i.record.Load(mainpkg)
 
 	var pkgs []*ssa.Package

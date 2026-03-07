@@ -364,7 +364,7 @@ func (ctx *Context) LoadDirEx(dir string, test bool, getImportPath func(pkgName 
 	if err != nil {
 		return nil, err
 	}
-	return ctx.buildPackage(sp)
+	return ctx.buildMain(sp)
 }
 
 func RegisterFileProcess(ext string, fn SourceProcessFunc) {
@@ -633,7 +633,7 @@ func (ctx *Context) LoadAstFile(path string, file *ast.File) (*ssa.Package, erro
 		return nil, err
 	}
 	ctx.pkgs[path] = sp
-	return ctx.buildPackage(sp)
+	return ctx.buildMain(sp)
 }
 
 func (ctx *Context) LoadAstPackage(path string, apkg *ast.Package) (*ssa.Package, error) {
@@ -655,7 +655,7 @@ func (ctx *Context) LoadAstPackage(path string, apkg *ast.Package) (*ssa.Package
 	if err != nil {
 		return nil, err
 	}
-	return ctx.buildPackage(sp)
+	return ctx.buildMain(sp)
 }
 
 func (ctx *Context) RunPkg(mainPkg *ssa.Package, input string, args []string) (exitCode int, err error) {
@@ -960,7 +960,7 @@ func (ctx *Context) PrebuildSSA(pkgs ...string) (err error) {
 	return ctx.Builder.PrebuildSSA(pkgs...)
 }
 
-func (ctx *Context) buildPackage(sp *SourcePackage) (pkg *ssa.Package, err error) {
+func (ctx *Context) buildMain(sp *SourcePackage) (pkg *ssa.Package, err error) {
 	if ctx.Mode&DisableRecover == 0 {
 		defer func() {
 			if e := recover(); e != nil {
