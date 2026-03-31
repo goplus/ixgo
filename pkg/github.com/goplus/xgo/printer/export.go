@@ -45,13 +45,13 @@ func init() {
 			"SetDebug": reflect.ValueOf(q.SetDebug),
 		},
 		TypedConsts: map[string]ixgo.TypedConst{
-			"RawFormat": {reflect.TypeOf(q.RawFormat), constant.MakeInt64(int64(q.RawFormat))},
-			"SourcePos": {reflect.TypeOf(q.SourcePos), constant.MakeInt64(int64(q.SourcePos))},
-			"TabIndent": {reflect.TypeOf(q.TabIndent), constant.MakeInt64(int64(q.TabIndent))},
-			"UseSpaces": {reflect.TypeOf(q.UseSpaces), constant.MakeInt64(int64(q.UseSpaces))},
+			"RawFormat": {Typ: reflect.TypeOf(q.RawFormat), Value: constant.MakeInt64(int64(q.RawFormat))},
+			"SourcePos": {Typ: reflect.TypeOf(q.SourcePos), Value: constant.MakeInt64(int64(q.SourcePos))},
+			"TabIndent": {Typ: reflect.TypeOf(q.TabIndent), Value: constant.MakeInt64(int64(q.TabIndent))},
+			"UseSpaces": {Typ: reflect.TypeOf(q.UseSpaces), Value: constant.MakeInt64(int64(q.UseSpaces))},
 		},
 		UntypedConsts: map[string]ixgo.UntypedConst{
-			"DbgFlagAll": {"untyped int", constant.MakeInt64(int64(q.DbgFlagAll))},
+			"DbgFlagAll": {Typ: "untyped int", Value: constant.MakeInt64(int64(q.DbgFlagAll))},
 		},
 	})
 }

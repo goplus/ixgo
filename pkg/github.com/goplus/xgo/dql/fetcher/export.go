@@ -26,13 +26,14 @@ func init() {
 			"Conv": reflect.TypeOf((*q.Conv)(nil)).Elem(),
 		},
 		Vars: map[string]reflect.Value{
-			"ErrUnknownPageType": reflect.ValueOf(&q.ErrUnknownPageType),
+			"ErrUnknownFetchType": reflect.ValueOf(&q.ErrUnknownFetchType),
 		},
 		Funcs: map[string]reflect.Value{
 			"Do":       reflect.ValueOf(q.Do),
 			"From":     reflect.ValueOf(q.From),
 			"List":     reflect.ValueOf(q.List),
 			"Register": reflect.ValueOf(q.Register),
+			"URL":      reflect.ValueOf(q.URL),
 		},
 		TypedConsts:   map[string]ixgo.TypedConst{},
 		UntypedConsts: map[string]ixgo.UntypedConst{},

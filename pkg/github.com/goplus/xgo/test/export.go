@@ -32,7 +32,7 @@ func init() {
 		},
 		TypedConsts: map[string]ixgo.TypedConst{},
 		UntypedConsts: map[string]ixgo.UntypedConst{
-			"GopPackage": {"untyped bool", constant.MakeBool(bool(q.GopPackage))},
+			"GopPackage": {Typ: "untyped bool", Value: constant.MakeBool(bool(q.GopPackage))},
 		},
 	})
 }

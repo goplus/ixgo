@@ -36,7 +36,7 @@ func init() {
 		},
 		TypedConsts: map[string]ixgo.TypedConst{},
 		UntypedConsts: map[string]ixgo.UntypedConst{
-			"XGoPackage": {"untyped string", constant.MakeString(string(q.XGoPackage))},
+			"XGoPackage": {Typ: "untyped string", Value: constant.MakeString(string(q.XGoPackage))},
 		},
 	})
 }

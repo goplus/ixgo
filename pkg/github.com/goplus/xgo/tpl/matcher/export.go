@@ -58,8 +58,8 @@ func init() {
 			"WhiteSpace": reflect.ValueOf(q.WhiteSpace),
 		},
 		TypedConsts: map[string]ixgo.TypedConst{
-			"DbgFlagAll":      {reflect.TypeOf(q.DbgFlagAll), constant.MakeInt64(int64(q.DbgFlagAll))},
-			"DbgFlagMatchVar": {reflect.TypeOf(q.DbgFlagMatchVar), constant.MakeInt64(int64(q.DbgFlagMatchVar))},
+			"DbgFlagAll":      {Typ: reflect.TypeOf(q.DbgFlagAll), Value: constant.MakeInt64(int64(q.DbgFlagAll))},
+			"DbgFlagMatchVar": {Typ: reflect.TypeOf(q.DbgFlagMatchVar), Value: constant.MakeInt64(int64(q.DbgFlagMatchVar))},
 		},
 		UntypedConsts: map[string]ixgo.UntypedConst{},
 	})
