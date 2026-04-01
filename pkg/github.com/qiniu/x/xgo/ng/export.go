@@ -102,13 +102,13 @@ func init() {
 		},
 		TypedConsts: map[string]ixgo.TypedConst{},
 		UntypedConsts: map[string]ixgo.UntypedConst{
-			"Int128_IsUntyped":  {"untyped bool", constant.MakeBool(bool(q.Int128_IsUntyped))},
-			"Int128_Max":        {"untyped int", constant.MakeFromLiteral("170141183460469231731687303715884105727", token.INT, 0)},
-			"Int128_Min":        {"untyped int", constant.MakeFromLiteral("-170141183460469231731687303715884105728", token.INT, 0)},
-			"Uint128_IsUntyped": {"untyped bool", constant.MakeBool(bool(q.Uint128_IsUntyped))},
-			"Uint128_Max":       {"untyped int", constant.MakeFromLiteral("340282366920938463463374607431768211455", token.INT, 0)},
-			"Uint128_Min":       {"untyped int", constant.MakeInt64(int64(q.Uint128_Min))},
-			"XGoPackage":        {"untyped bool", constant.MakeBool(bool(q.XGoPackage))},
+			"Int128_IsUntyped":  {Typ: "untyped bool", Value: constant.MakeBool(bool(q.Int128_IsUntyped))},
+			"Int128_Max":        {Typ: "untyped int", Value: constant.MakeFromLiteral("170141183460469231731687303715884105727", token.INT, 0)},
+			"Int128_Min":        {Typ: "untyped int", Value: constant.MakeFromLiteral("-170141183460469231731687303715884105728", token.INT, 0)},
+			"Uint128_IsUntyped": {Typ: "untyped bool", Value: constant.MakeBool(bool(q.Uint128_IsUntyped))},
+			"Uint128_Max":       {Typ: "untyped int", Value: constant.MakeFromLiteral("340282366920938463463374607431768211455", token.INT, 0)},
+			"Uint128_Min":       {Typ: "untyped int", Value: constant.MakeInt64(int64(q.Uint128_Min))},
+			"XGoPackage":        {Typ: "untyped bool", Value: constant.MakeBool(bool(q.XGoPackage))},
 		},
 	})
 }

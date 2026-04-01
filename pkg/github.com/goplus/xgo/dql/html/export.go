@@ -25,10 +25,11 @@ func init() {
 			"io":                         "io",
 			"iter":                       "iter",
 			"os":                         "os",
-			"strings":                    "strings",
 			"unsafe":                     "unsafe",
 		},
-		Interfaces: map[string]reflect.Type{},
+		Interfaces: map[string]reflect.Type{
+			"NodeFilter": reflect.TypeOf((*q.NodeFilter)(nil)).Elem(),
+		},
 		NamedTypes: map[string]reflect.Type{
 			"Node":    reflect.TypeOf((*q.Node)(nil)).Elem(),
 			"NodeSet": reflect.TypeOf((*q.NodeSet)(nil)).Elem(),
@@ -45,7 +46,7 @@ func init() {
 		},
 		TypedConsts: map[string]ixgo.TypedConst{},
 		UntypedConsts: map[string]ixgo.UntypedConst{
-			"XGoPackage": {"untyped bool", constant.MakeBool(bool(q.XGoPackage))},
+			"XGoPackage": {Typ: "untyped bool", Value: constant.MakeBool(bool(q.XGoPackage))},
 		},
 	})
 }

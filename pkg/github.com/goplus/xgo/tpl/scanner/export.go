@@ -42,8 +42,8 @@ func init() {
 			"PrintError": reflect.ValueOf(q.PrintError),
 		},
 		TypedConsts: map[string]ixgo.TypedConst{
-			"NoInsertSemis": {reflect.TypeOf(q.NoInsertSemis), constant.MakeInt64(int64(q.NoInsertSemis))},
-			"ScanComments":  {reflect.TypeOf(q.ScanComments), constant.MakeInt64(int64(q.ScanComments))},
+			"NoInsertSemis": {Typ: reflect.TypeOf(q.NoInsertSemis), Value: constant.MakeInt64(int64(q.NoInsertSemis))},
+			"ScanComments":  {Typ: reflect.TypeOf(q.ScanComments), Value: constant.MakeInt64(int64(q.ScanComments))},
 		},
 		UntypedConsts: map[string]ixgo.UntypedConst{},
 	})

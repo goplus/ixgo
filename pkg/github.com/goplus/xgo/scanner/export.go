@@ -43,7 +43,7 @@ func init() {
 			"PrintError": reflect.ValueOf(q.PrintError),
 		},
 		TypedConsts: map[string]ixgo.TypedConst{
-			"ScanComments": {reflect.TypeOf(q.ScanComments), constant.MakeInt64(int64(q.ScanComments))},
+			"ScanComments": {Typ: reflect.TypeOf(q.ScanComments), Value: constant.MakeInt64(int64(q.ScanComments))},
 		},
 		UntypedConsts: map[string]ixgo.UntypedConst{},
 	})
