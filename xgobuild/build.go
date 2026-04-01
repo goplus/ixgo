@@ -23,6 +23,7 @@ import (
 	"go/types"
 	"os"
 	"path/filepath"
+	"unsafe"
 
 	"github.com/goplus/gogen"
 	"github.com/goplus/ixgo"
@@ -52,6 +53,8 @@ const (
 	// This allows patch symbols to appear as if they belong to the original package
 	// (e.g., gsh.Point instead of gsh@patch.Point), providing a cleaner API.
 	NormalizeExport = ixgo.LastMode * 4
+
+	FixOverload = ixgo.LastMode * 8
 )
 
 var (
@@ -257,6 +260,15 @@ func (c *Context) isOwnedPackage(path string) bool {
 	return false
 }
 
+func (c *Context) isXGoPackage(path string) bool {
+	if pkg, ok := ixgo.LookupPackage(path); ok {
+		if _, ok := pkg.UntypedConsts["XGoPackage"]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Context) importPath(path string) (pkg *types.Package, err error) {
 	if c.Importer == nil || c.isOwnedPackage(path) {
 		pkg, err = c.Loader.Import(path)
@@ -275,6 +287,33 @@ func (c *Context) Import(path string) (*types.Package, error) {
 		return pkg, err
 	}
 	c.pkgs[path] = pkg
+	if c.Context.Mode&FixOverload != 0 && c.isXGoPackage(path) {
+		c.resetPkgs = append(c.resetPkgs, func() {
+			scope := pkg.Scope()
+			for _, name := range scope.Names() {
+				obj := scope.Lookup(name)
+				switch obj.(type) {
+				case *types.TypeName:
+					switch typ := obj.Type().(type) {
+					case *types.Named:
+						n := typ.NumMethods()
+						for i := 0; i < n; i++ {
+							m := typ.Method(i)
+							ms, ok := gogen.CheckOverloadMethod(m.Type().(*types.Signature))
+							if ok {
+								for _, o := range ms {
+									if o.Name() == m.Name() {
+										(*object)(unsafe.Pointer(m)).typ = o.Type()
+										break
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		})
+	}
 	if sp := c.Context.SourcePackage(path + "@patch"); sp != nil {
 		sp.Importer = c
 		err := sp.Load()
@@ -385,7 +424,7 @@ func (c *Context) ParseFile(fname string, src interface{}) (*Package, error) {
 }
 
 func (c *Context) loadPackages(srcDir string, apkgs map[string]*ast.Package) (*Package, error) {
-	if c.Context.Mode&NormalizeExport != 0 {
+	if c.Context.Mode&NormalizeExport != 0 || c.Context.Mode&FixOverload != 0 {
 		defer c.rewindPkgs()
 	}
 	var pkgs []*gogen.Package
@@ -415,4 +454,14 @@ func (c *Context) loadPackage(srcDir string, apkg *ast.Package) (*gogen.Package,
 		conf.NoSkipConstant = true
 	}
 	return cl.NewPackage("", apkg, conf)
+}
+
+type object struct {
+	parent    *types.Scope
+	pos       token.Pos
+	pkg       *types.Package
+	name      string
+	typ       types.Type
+	order_    uint32
+	scopePos_ token.Pos
 }
