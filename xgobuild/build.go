@@ -193,6 +193,7 @@ type Context struct {
 	Loader    ixgo.Loader
 	pkgs      map[string]*types.Package
 	resetPkgs []func()
+	overPkgs  map[string][]func()
 }
 
 func ClassKind(fname string) (isProj, ok bool) {
@@ -235,7 +236,6 @@ func NewContext(ctx *ixgo.Context) *Context {
 // to restore them to their original state. It's idempotent.
 func (p *Context) rewindPkgs() {
 	fns := p.resetPkgs
-	p.resetPkgs = nil
 	for _, fn := range fns {
 		fn()
 	}
@@ -279,6 +279,12 @@ func (c *Context) importPath(path string) (pkg *types.Package, err error) {
 }
 
 func (c *Context) Import(path string) (*types.Package, error) {
+	chkOverload := c.Context.Mode&FixOverload != 0 && c.isXGoPackage(path)
+	if chkOverload {
+		for _, fn := range c.overPkgs[path] {
+			fn()
+		}
+	}
 	if pkg, ok := c.pkgs[path]; ok {
 		return pkg, nil
 	}
@@ -287,8 +293,12 @@ func (c *Context) Import(path string) (*types.Package, error) {
 		return pkg, err
 	}
 	c.pkgs[path] = pkg
-	if c.Context.Mode&FixOverload != 0 && c.isXGoPackage(path) {
+	if chkOverload {
+		if c.overPkgs == nil {
+			c.overPkgs = make(map[string][]func())
+		}
 		c.resetPkgs = append(c.resetPkgs, func() {
+			c.overPkgs[path] = nil
 			scope := pkg.Scope()
 			for _, name := range scope.Names() {
 				obj := scope.Lookup(name)
@@ -303,7 +313,11 @@ func (c *Context) Import(path string) (*types.Package, error) {
 							if ok {
 								for _, o := range ms {
 									if o.Name() == m.Name() {
+										old := m.Type()
 										(*object)(unsafe.Pointer(m)).typ = o.Type()
+										c.overPkgs[path] = append(c.overPkgs[path], func() {
+											(*object)(unsafe.Pointer(m)).typ = old
+										})
 										break
 									}
 								}
