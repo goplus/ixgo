@@ -26,7 +26,6 @@ func init() {
 		Funcs: map[string]reflect.Value{
 			"Capitalize": reflect.ValueOf(q.Capitalize),
 			"Concat":     reflect.ValueOf(q.Concat),
-			"Contains":   reflect.ValueOf(q.Contains),
 			"Diff":       reflect.ValueOf(q.Diff),
 			"String":     reflect.ValueOf(q.String),
 		},
