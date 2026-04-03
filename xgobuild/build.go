@@ -22,7 +22,6 @@ import (
 	goast "go/ast"
 	"go/types"
 	"os"
-	"path/filepath"
 
 	"github.com/goplus/gogen"
 	"github.com/goplus/ixgo"
@@ -195,10 +194,8 @@ type Context struct {
 func ClassKind(fname string) (isProj, ok bool) {
 	ext := modfile.ClassExt(fname)
 	switch ext {
-	case ".gmx", ".gsh":
+	case ".gsh":
 		return true, true
-	case ".spx":
-		return fname == "main.spx", true
 	default:
 		if c, ok := projects[ext]; ok {
 			for _, w := range c.Works {
@@ -351,7 +348,7 @@ func (c *Context) ParseDir(dir string) (*Package, error) {
 	if err != nil {
 		return nil, err
 	}
-	return c.loadPackages(dir, pkgs)
+	return c.LoadPackages(pkgs)
 }
 
 func (c *Context) ParseFSDir(fs parser.FileSystem, dir string) (*Package, error) {
@@ -361,11 +358,10 @@ func (c *Context) ParseFSDir(fs parser.FileSystem, dir string) (*Package, error)
 	if err != nil {
 		return nil, err
 	}
-	return c.loadPackages(dir, pkgs)
+	return c.LoadPackages(pkgs)
 }
 
 func (c *Context) ParseFile(fname string, src interface{}) (*Package, error) {
-	srcDir, _ := filepath.Split(fname)
 	f, err := parser.ParseEntry(c.FileSet, fname, src, parser.Config{
 		ClassKind: ClassKind,
 	})
@@ -381,16 +377,26 @@ func (c *Context) ParseFile(fname string, src interface{}) (*Package, error) {
 			},
 		},
 	}
-	return c.loadPackages(srcDir, pkgs)
+	return c.LoadPackages(pkgs)
 }
 
-func (c *Context) loadPackages(srcDir string, apkgs map[string]*ast.Package) (*Package, error) {
+func (c *Context) ParseFiles(files []string) (*Package, error) {
+	pkgs, err := parser.ParseEntries(c.FileSet, files, parser.Config{
+		ClassKind: ClassKind,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return c.LoadPackages(pkgs)
+}
+
+func (c *Context) LoadPackages(apkgs map[string]*ast.Package) (*Package, error) {
 	if c.Context.Mode&NormalizeExport != 0 {
 		defer c.rewindPkgs()
 	}
 	var pkgs []*gogen.Package
 	for _, apkg := range apkgs {
-		pkg, err := c.loadPackage(srcDir, apkg)
+		pkg, err := c.loadPackage(apkg)
 		if err != nil {
 			return nil, err
 		}
@@ -399,7 +405,7 @@ func (c *Context) loadPackages(srcDir string, apkgs map[string]*ast.Package) (*P
 	return &Package{c.FileSet, pkgs}, nil
 }
 
-func (c *Context) loadPackage(srcDir string, apkg *ast.Package) (*gogen.Package, error) {
+func (c *Context) loadPackage(apkg *ast.Package) (*gogen.Package, error) {
 	if c.Context.Mode&ixgo.DisableCustomBuiltin == 0 {
 		if f, err := ixgo.ParseBuiltin(c.FileSet, apkg.Name); err == nil {
 			apkg.GoFiles = map[string]*goast.File{"_ixgo_builtin.go": f}
