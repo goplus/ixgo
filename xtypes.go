@@ -24,6 +24,8 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"unsafe"
 
 	"github.com/goplus/ixgo/internal/typesalias"
@@ -531,6 +533,14 @@ func embedFunc(typ reflect.Type, name string, idx []int, pointer bool, indirect 
 	}
 }
 
+// mfnMap and mfnId are process-global: they cache embed-func closures across
+// all Context instances. Entries are never evicted. Closures stored here must
+// not capture any per-Context state.
+var (
+	mfnId  int64
+	mfnMap sync.Map
+)
+
 func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 	numMethods := len(methods)
 	ms := make([]reflectx.Method, numMethods)
@@ -550,16 +560,18 @@ func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 			rtyp := fn.Type().Underlying().(*types.Signature).Recv().Type()
 			rt, _ := r.ToType(rtyp)
 			key := mfnKey{typ: rt, name: fn.Name(), indexs: indexsToString(idx), pointer: pointer, indirect: indirect}
-			if v, ok := r.ctx.mfnmap[key]; ok {
-				mfn = v.fn
-				mid = v.id
-			} else {
+			actual, ok := mfnMap.Load(key)
+			if !ok {
 				variadic := mtyp.IsVariadic()
-				mfn = embedFunc(rt, fn.Name(), idx, pointer, indirect, variadic)
-				r.ctx.mfnid++
-				mid = r.ctx.mfnid
-				r.ctx.mfnmap[key] = mfnValue{fn: mfn, id: mid}
+				v := &mfnValue{
+					fn: embedFunc(rt, fn.Name(), idx, pointer, indirect, variadic),
+					id: int(atomic.AddInt64(&mfnId, 1)),
+				}
+				actual, _ = mfnMap.LoadOrStore(key, v)
 			}
+			v := actual.(*mfnValue)
+			mfn = v.fn
+			mid = v.id
 		} else {
 			mfn = r.finder.FindMethod(mtyp, fn)
 		}
