@@ -703,13 +703,19 @@ func (p *Context) runInterpWithContext(interp *Interp, input string, args []stri
 	return exitCode, err
 }
 
+var (
+	commandLock sync.Mutex
+)
+
 func (ctx *Context) runInterp(interp *Interp, input string, args []string) (exitCode int, err error) {
 	// reset os args and flag
+	commandLock.Lock()
 	os.Args = []string{input}
 	if args != nil {
 		os.Args = append(os.Args, args...)
 	}
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	commandLock.Unlock()
 	if err = interp.RunInit(); err != nil {
 		return 2, err
 	}

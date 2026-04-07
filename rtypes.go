@@ -26,6 +26,7 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"sync"
 	"unsafe"
 
 	"golang.org/x/tools/go/types/typeutil"
@@ -213,7 +214,11 @@ func (r *TypesLoader) Import(path string) (*types.Package, error) {
 	return p, nil
 }
 
+var pkgLock sync.Mutex
+
 func (r *TypesLoader) installPackage(pkg *Package) (err error) {
+	pkgLock.Lock()
+	defer pkgLock.Unlock()
 	defer func() {
 		if e := recover(); e != nil {
 			err = e.(error)
