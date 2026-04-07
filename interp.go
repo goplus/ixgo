@@ -1431,7 +1431,9 @@ func (i *Interp) ResetIcall() {
 // UnsafeRelease is unsafe release interp. interp all invalid.
 func (i *Interp) UnsafeRelease() {
 	if i.ctx.Mode&SupportMultipleInterp != 0 {
+		methodLock.Lock()
 		i.rctx.Reset()
+		methodLock.Unlock()
 	}
 	i.record.Release()
 	for _, v := range i.funcs {
