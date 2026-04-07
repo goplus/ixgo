@@ -36,6 +36,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/goplus/ixgo/load"
@@ -91,24 +92,26 @@ type Context struct {
 	override     map[string]reflect.Value                                 // override function
 	evalInit     map[string]bool                                          // eval init check
 	nestedMap    map[*types.Named]int                                     // nested named index
-	root         string                                                   // project root
+	root         atomic.Pointer[string]                                   // project root
 	callForPool  int                                                      // least call count for enable function pool
 	Mode         Mode                                                     // mode
 	BuilderMode  ssa.BuilderMode                                          // ssa builder mode
 	Builder      *SSABuilder                                              // ssa builder
 	evalMode     bool                                                     // eval mode
+	loadPkgMu    sync.Mutex                                               // load pkg mutex
 }
 
 func (ctx *Context) setRoot(root string) {
-	ctx.root = root
+	ctx.root.Store(&root)
 }
 
 func (ctx *Context) lookupPath(path string) (dir string, found bool) {
+	root := *ctx.root.Load()
 	if ctx.Lookup != nil {
-		dir, found = ctx.Lookup(ctx.root, path)
+		dir, found = ctx.Lookup(root, path)
 	}
 	if !found {
-		bp, err := ctx.BuildContext.Import(path, ctx.root, build.FindOnly)
+		bp, err := ctx.BuildContext.Import(path, root, build.FindOnly)
 		if err == nil && bp.ImportPath == path {
 			return bp.Dir, true
 		}
@@ -626,6 +629,8 @@ func (ctx *Context) LoadAstFile(path string, file *ast.File) (*ssa.Package, erro
 		Package: types.NewPackage(path, file.Name.Name),
 		Files:   files,
 	}
+	ctx.loadPkgMu.Lock()
+	defer ctx.loadPkgMu.Unlock()
 	if err := sp.Load(); err != nil {
 		return nil, err
 	}
@@ -648,6 +653,8 @@ func (ctx *Context) LoadAstPackage(path string, apkg *ast.Package) (*ssa.Package
 		Package: types.NewPackage(path, apkg.Name),
 		Files:   files,
 	}
+	ctx.loadPkgMu.Lock()
+	defer ctx.loadPkgMu.Unlock()
 	err := sp.Load()
 	if err != nil {
 		return nil, err
@@ -704,18 +711,18 @@ func (p *Context) runInterpWithContext(interp *Interp, input string, args []stri
 }
 
 var (
-	commandLock sync.Mutex
+	commandMu sync.Mutex // command args mutex
 )
 
 func (ctx *Context) runInterp(interp *Interp, input string, args []string) (exitCode int, err error) {
 	// reset os args and flag
-	commandLock.Lock()
+	commandMu.Lock()
 	os.Args = []string{input}
 	if args != nil {
 		os.Args = append(os.Args, args...)
 	}
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-	commandLock.Unlock()
+	commandMu.Unlock()
 	if err = interp.RunInit(); err != nil {
 		return 2, err
 	}

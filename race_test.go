@@ -94,7 +94,7 @@ func main() {
 	wg.Wait()
 }
 
-func _TestInterpreter_ConcurrentRun2(t *testing.T) {
+func TestInterpreter_ConcurrentRun3(t *testing.T) {
 	source := `
 package main
 
@@ -124,6 +124,50 @@ func main() {
 			_, err := ctx.RunFile("main.go", source, nil)
 			if err != nil {
 				t.Errorf("goroutine %d: RunFile failed: %v", id, err)
+			}
+		}(i)
+	}
+
+	wg.Wait()
+}
+
+func TestInterpreter_ConcurrentRun4(t *testing.T) {
+	source := `
+package main
+
+import (
+	"fmt"
+	"bytes"
+)
+
+type T struct {
+	*bytes.Buffer
+}
+
+func main() {
+	t := &T{ bytes.NewBufferString("Hello World") }
+	fmt.Println(t)
+}
+`
+	ctx := ixgo.NewContext(ixgo.SupportMultipleInterp)
+	var wg sync.WaitGroup
+	numGoroutines := 100
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			pkg, err := ctx.LoadFile("main.go", source)
+			if err != nil {
+				t.Errorf("goroutine %d: Load failed: %v", id, err)
+			}
+			interp, err := ctx.NewInterp(pkg)
+			if err != nil {
+				t.Errorf("goroutine %d: NewInterp failed: %v", id, err)
+			}
+			defer interp.UnsafeRelease()
+			_, err = interp.RunMain()
+			if err != nil {
+				t.Errorf("goroutine %d: RunMain failed: %v", id, err)
 			}
 		}(i)
 	}

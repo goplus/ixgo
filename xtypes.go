@@ -582,16 +582,16 @@ func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 		ms[i] = reflectx.MakeMethod(fn.Name(), pkgpath, pointer, mtyp, mfn)
 		ms[i].FuncId = mid
 	}
-	methodLock.Lock()
+	methodMu.Lock()
 	err := r.rctx.SetRawMethods(typ, ms)
-	methodLock.Unlock()
+	methodMu.Unlock()
 	if err != nil {
 		log.Fatalf("SetRawMethods %v err, %v\n", typ, err)
 	}
 }
 
 var (
-	methodLock sync.Mutex
+	methodMu sync.Mutex // reflectx set method mutex
 )
 
 func toReflectChanDir(d types.ChanDir) reflect.ChanDir {

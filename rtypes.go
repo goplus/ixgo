@@ -214,17 +214,19 @@ func (r *TypesLoader) Import(path string) (*types.Package, error) {
 	return p, nil
 }
 
-var pkgLock sync.Mutex
+var (
+	packageMu sync.Mutex // install package mutex
+)
 
 func (r *TypesLoader) installPackage(pkg *Package) (err error) {
-	pkgLock.Lock()
-	defer pkgLock.Unlock()
 	defer func() {
 		if e := recover(); e != nil {
 			err = e.(error)
 		}
 		r.curpkg = nil
 	}()
+	packageMu.Lock()
+	defer packageMu.Unlock()
 	r.curpkg = pkg
 	r.installed[pkg.Path] = pkg
 	p, ok := r.packages[pkg.Path]
