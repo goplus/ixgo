@@ -2,6 +2,9 @@ package ixgo_test
 
 import (
 	"context"
+	"log"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -31,7 +34,6 @@ func main() {
 	fmt.Println(t)
 }
 `
-
 	var wg sync.WaitGroup
 	numGoroutines := 100
 	for i := 0; i < numGoroutines; i++ {
@@ -212,5 +214,48 @@ func main() {
 	time.Sleep(5 * time.Millisecond)
 	cancel()
 
+	wg.Wait()
+}
+
+// TestTestdataFiles runs the interpreter on testdata/*.go.
+func TestTestdataFilesRace1(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		log.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	for _, input := range testdataTests {
+		wg.Add(1)
+		go func() {
+			file := filepath.Join(cwd, "testdata", input)
+			_, err := ixgo.Run(file, nil, ixgo.SupportMultipleInterp)
+			if err != nil {
+				t.Error(err)
+			}
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+}
+
+// TestTestdataFiles runs the interpreter on testdata/*.go.
+func TestTestdataFilesRace2(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		log.Fatal(err)
+	}
+	ctx := ixgo.NewContext(ixgo.SupportMultipleInterp)
+	var wg sync.WaitGroup
+	for _, input := range testdataTests {
+		wg.Add(1)
+		go func() {
+			file := filepath.Join(cwd, "testdata", input)
+			_, err := ctx.Run(file, nil)
+			if err != nil {
+				t.Error(err)
+			}
+			wg.Done()
+		}()
+	}
 	wg.Wait()
 }

@@ -1222,6 +1222,10 @@ func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{
 			return false
 		})
 	}
+
+	ctx.loadPkgMu.Lock()
+	defer ctx.loadPkgMu.Unlock()
+
 	i.record = NewTypesRecord(ctx, rctx, mainpkg.Prog, ctx.Loader, i, ctx.nestedMap)
 	i.record.Load(mainpkg)
 
@@ -1248,7 +1252,6 @@ func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{
 			}
 		}
 	}
-	ctx.loadPkgMu.Lock()
 	// check linkname var
 	var links []*load.LinkSym
 	for _, sp := range i.ctx.pkgs {
@@ -1268,7 +1271,6 @@ func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{
 			}
 		}
 	}
-	ctx.loadPkgMu.Unlock()
 	// check globals for repl
 	if globals != nil {
 		for k := range i.globals {
@@ -1433,9 +1435,9 @@ func (i *Interp) ResetIcall() {
 // UnsafeRelease is unsafe release interp. interp all invalid.
 func (i *Interp) UnsafeRelease() {
 	if i.ctx.Mode&SupportMultipleInterp != 0 {
-		methodMu.Lock()
+		rctxMethodMu.Lock()
 		i.rctx.Reset()
-		methodMu.Unlock()
+		rctxMethodMu.Unlock()
 	}
 	i.record.Release()
 	for _, v := range i.funcs {

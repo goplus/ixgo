@@ -346,6 +346,8 @@ func (r *TypesRecord) toInterfaceType(t *types.Interface) (reflect.Type, bool) {
 			ms[i].PkgPath = pkg.Path()
 		}
 	}
+	rctxInterfaceOfMu.Lock()
+	defer rctxInterfaceOfMu.Unlock()
 	return r.rctx.InterfaceOf(nil, ms), nested
 }
 
@@ -435,7 +437,7 @@ func (r *TypesRecord) toStructType(t *types.Struct, mset bool) (reflect.Type, bo
 		}
 		flds[i] = r.toStructField(f, typ, t.Tag(i))
 	}
-	typ := r.rctx.StructOf(flds)
+	typ := r.toStruct(flds)
 	if mset {
 		methods, pcount, mcount := r.extractMethodSet(t)
 		if pcount > 0 {
@@ -444,6 +446,12 @@ func (r *TypesRecord) toStructType(t *types.Struct, mset bool) (reflect.Type, bo
 		}
 	}
 	return typ, nested
+}
+
+func (r *TypesRecord) toStruct(flds []reflect.StructField) reflect.Type {
+	rctxStructOfMu.Lock()
+	defer rctxStructOfMu.Unlock()
+	return r.rctx.StructOf(flds)
 }
 
 func (r *TypesRecord) toStructField(v *types.Var, typ reflect.Type, tag string) reflect.StructField {
@@ -541,6 +549,12 @@ var (
 	mfnMap sync.Map
 )
 
+var (
+	rctxMethodMu      sync.Mutex // reflectx set method mutex
+	rctxInterfaceOfMu sync.Mutex // reflectx interfaceof mutex
+	rctxStructOfMu    sync.Mutex // reflectx structof mutex
+)
+
 func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 	numMethods := len(methods)
 	ms := make([]reflectx.Method, numMethods)
@@ -582,17 +596,13 @@ func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 		ms[i] = reflectx.MakeMethod(fn.Name(), pkgpath, pointer, mtyp, mfn)
 		ms[i].FuncId = mid
 	}
-	methodMu.Lock()
+	rctxMethodMu.Lock()
 	err := r.rctx.SetRawMethods(typ, ms)
-	methodMu.Unlock()
+	rctxMethodMu.Unlock()
 	if err != nil {
 		log.Fatalf("SetRawMethods %v err, %v\n", typ, err)
 	}
 }
-
-var (
-	methodMu sync.Mutex // reflectx set method mutex
-)
 
 func toReflectChanDir(d types.ChanDir) reflect.ChanDir {
 	switch d {

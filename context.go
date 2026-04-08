@@ -92,7 +92,7 @@ type Context struct {
 	override     map[string]reflect.Value                                 // override function
 	evalInit     map[string]bool                                          // eval init check
 	nestedMap    map[*types.Named]int                                     // nested named index
-	root         atomic.Pointer[string]                                   // project root
+	rootp        atomic.Pointer[string]                                   // project root
 	callForPool  int                                                      // least call count for enable function pool
 	Mode         Mode                                                     // mode
 	BuilderMode  ssa.BuilderMode                                          // ssa builder mode
@@ -102,11 +102,18 @@ type Context struct {
 }
 
 func (ctx *Context) setRoot(root string) {
-	ctx.root.Store(&root)
+	ctx.rootp.Store(&root)
+}
+
+func (ctx *Context) root() (root string) {
+	if p := ctx.rootp.Load(); p != nil {
+		root = *p
+	}
+	return
 }
 
 func (ctx *Context) lookupPath(path string) (dir string, found bool) {
-	root := *ctx.root.Load()
+	root := ctx.root()
 	if ctx.Lookup != nil {
 		dir, found = ctx.Lookup(root, path)
 	}
@@ -756,12 +763,14 @@ func (ctx *Context) TestPkg(pkg *ssa.Package, input string, args []string) error
 			fmt.Fprintf(os.Stdout, "ok\t%s %0.3fs\n", pkg.Pkg.Path(), sec)
 		}
 	}()
+	commandMu.Lock()
 	os.Args = []string{input}
 	if args != nil && !testInit {
 		os.Args = append(os.Args, args...)
 	}
 	testInit = true
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	commandMu.Unlock()
 	interp, err := NewInterp(ctx, pkg)
 	if err != nil {
 		failed = true

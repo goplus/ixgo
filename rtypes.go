@@ -66,7 +66,6 @@ type TypesLoader struct {
 	pkgloads  map[string]func() error
 	rcache    map[reflect.Type]types.Type
 	mode      Mode
-	packageMu sync.Mutex
 }
 
 // NewTypesLoader install package and readonly
@@ -226,8 +225,6 @@ func (r *TypesLoader) installPackage(pkg *Package) (err error) {
 		}
 		r.curpkg = nil
 	}()
-	r.packageMu.Lock()
-	defer r.packageMu.Unlock()
 	r.curpkg = pkg
 	r.installed[pkg.Path] = pkg
 	p, ok := r.packages[pkg.Path]
