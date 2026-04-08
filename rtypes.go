@@ -66,6 +66,7 @@ type TypesLoader struct {
 	pkgloads  map[string]func() error
 	rcache    map[reflect.Type]types.Type
 	mode      Mode
+	packageMu sync.Mutex
 }
 
 // NewTypesLoader install package and readonly
@@ -215,7 +216,7 @@ func (r *TypesLoader) Import(path string) (*types.Package, error) {
 }
 
 var (
-	packageMu sync.Mutex // install package mutex
+	typesMu sync.Mutex // types.NewInterfaceType mutex
 )
 
 func (r *TypesLoader) installPackage(pkg *Package) (err error) {
@@ -225,8 +226,8 @@ func (r *TypesLoader) installPackage(pkg *Package) (err error) {
 		}
 		r.curpkg = nil
 	}()
-	packageMu.Lock()
-	defer packageMu.Unlock()
+	r.packageMu.Lock()
+	defer r.packageMu.Unlock()
 	r.curpkg = pkg
 	r.installed[pkg.Path] = pkg
 	p, ok := r.packages[pkg.Path]
@@ -503,7 +504,9 @@ func (r *TypesLoader) ToType(rt reflect.Type) types.Type {
 			pkg := r.GetPackage(im.PkgPath)
 			imethods[i] = types.NewFunc(token.NoPos, pkg, im.Name, sig)
 		}
+		typesMu.Lock()
 		typ = types.NewInterfaceType(imethods, nil)
+		typesMu.Unlock()
 	case reflect.Map:
 		key := r.ToType(rt.Key())
 		elem := r.ToType(rt.Elem())
