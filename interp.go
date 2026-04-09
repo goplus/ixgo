@@ -1432,6 +1432,15 @@ func (i *Interp) ResetIcall() {
 	i.rctx.Reset()
 }
 
+// Release is release interp refletx context icall.
+func (i *Interp) Release() {
+	if i.ctx.Mode&SupportMultipleInterp != 0 {
+		rctxMethodMu.Lock()
+		i.rctx.Reset()
+		rctxMethodMu.Unlock()
+	}
+}
+
 // UnsafeRelease is unsafe release interp. interp all invalid.
 func (i *Interp) UnsafeRelease() {
 	if i.ctx.Mode&SupportMultipleInterp != 0 {

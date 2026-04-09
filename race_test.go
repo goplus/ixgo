@@ -244,6 +244,29 @@ func TestTestdataFilesRace2(t *testing.T) {
 	if err != nil {
 		log.Fatal(err)
 	}
+	var wg sync.WaitGroup
+	for _, input := range testdataTests {
+		wg.Add(1)
+		go func() {
+			file := filepath.Join(cwd, "testdata", input)
+			ctx := ixgo.NewContext(ixgo.SupportMultipleInterp)
+			ctx.RunContext = context.TODO()
+			_, err := ctx.Run(file, nil)
+			if err != nil {
+				t.Error(err)
+			}
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+}
+
+// TestTestdataFiles runs the interpreter on testdata/*.go.
+func TestTestdataFilesRace3(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		log.Fatal(err)
+	}
 	ctx := ixgo.NewContext(ixgo.SupportMultipleInterp)
 	var wg sync.WaitGroup
 	for _, input := range testdataTests {
@@ -251,6 +274,60 @@ func TestTestdataFilesRace2(t *testing.T) {
 		go func() {
 			file := filepath.Join(cwd, "testdata", input)
 			_, err := ctx.Run(file, nil)
+			if err != nil {
+				t.Error(err)
+			}
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+}
+
+// TestTestdataFiles runs the interpreter on testdata/*.go.
+func TestTestdataFilesRace4(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		log.Fatal(err)
+	}
+	ctx := ixgo.NewContext(ixgo.SupportMultipleInterp)
+	ctx.RunContext = context.TODO()
+	var wg sync.WaitGroup
+	for _, input := range testdataTests {
+		wg.Add(1)
+		go func() {
+			file := filepath.Join(cwd, "testdata", input)
+			_, err := ctx.Run(file, nil)
+			if err != nil {
+				t.Error(err)
+			}
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+}
+
+// TestTestdataFiles runs the interpreter on testdata/*.go.
+func TestTestdataFilesRace5(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		log.Fatal(err)
+	}
+	ctx := ixgo.NewContext(ixgo.SupportMultipleInterp)
+	var wg sync.WaitGroup
+	for _, input := range testdataTests {
+		wg.Add(1)
+		go func() {
+			file := filepath.Join(cwd, "testdata", input)
+			pkg, err := ctx.LoadFile(file, nil)
+			if err != nil {
+				t.Error(err)
+			}
+			interp, err := ixgo.NewInterp(ctx, pkg)
+			if err != nil {
+				t.Error(err)
+			}
+			defer interp.Release()
+			_, err = ctx.RunInterp(interp, input, nil)
 			if err != nil {
 				t.Error(err)
 			}
