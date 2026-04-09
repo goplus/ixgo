@@ -64,7 +64,7 @@ type TypesLoader struct {
 	packages  map[string]*types.Package
 	installed map[string]*Package
 	pkgloads  map[string]func() error
-	rcache    map[reflect.Type]types.Type
+	rcache    sync.Map // map[reflect.Type]types.Type
 	mode      Mode
 }
 
@@ -74,14 +74,13 @@ func NewTypesLoader(ctx *Context, mode Mode) Loader {
 		packages:  make(map[string]*types.Package),
 		installed: make(map[string]*Package),
 		pkgloads:  make(map[string]func() error),
-		rcache:    make(map[reflect.Type]types.Type),
 		tcache:    &typeutil.Map{},
 		ctx:       ctx,
 		mode:      mode,
 	}
 	r.packages["unsafe"] = types.Unsafe
-	r.rcache[tyErrorInterface] = typesError
-	r.rcache[tyEmptyInterface] = typesEmptyInterface
+	r.rcache.Store(tyErrorInterface, typesError)
+	r.rcache.Store(tyEmptyInterface, typesEmptyInterface)
 	r.importer = importer.Default()
 	return r
 }
@@ -157,8 +156,10 @@ func (r *TypesLoader) LookupReflect(typ types.Type) (reflect.Type, bool) {
 }
 
 func (r *TypesLoader) LookupTypes(typ reflect.Type) (types.Type, bool) {
-	t, ok := r.rcache[typ]
-	return t, ok
+	if t, ok := r.rcache.Load(typ); ok {
+		return t.(types.Type), true
+	}
+	return nil, false
 }
 
 func (r *TypesLoader) Import(path string) (*types.Package, error) {
@@ -409,7 +410,7 @@ func (r *TypesLoader) toFunc(pkg *types.Package, rt reflect.Type) *types.Signatu
 		out[i] = types.NewVar(token.NoPos, pkg, "", typesDummyStruct)
 	}
 	typ := types.NewSignature(nil, types.NewTuple(in...), types.NewTuple(out...), variadic)
-	r.rcache[rt] = typ
+	r.rcache.Store(rt, typ)
 	r.tcache.Set(typ, rt)
 	// real type
 	for i := 0; i < numIn; i++ {
@@ -424,8 +425,8 @@ func (r *TypesLoader) toFunc(pkg *types.Package, rt reflect.Type) *types.Signatu
 }
 
 func (r *TypesLoader) ToType(rt reflect.Type) types.Type {
-	if t, ok := r.rcache[rt]; ok {
-		return t
+	if t, ok := r.rcache.Load(rt); ok {
+		return t.(types.Type)
 	}
 	var isNamed bool
 	var pkgPath string
@@ -434,7 +435,7 @@ func (r *TypesLoader) ToType(rt reflect.Type) types.Type {
 		if pkg, ok := r.packages[pkgPath]; ok && pkg.Complete() {
 			if obj := pkg.Scope().Lookup(rt.Name()); obj != nil {
 				typ := obj.Type()
-				r.rcache[rt] = typ
+				r.rcache.Store(rt, typ)
 				return typ
 			}
 		}
@@ -541,7 +542,7 @@ func (r *TypesLoader) ToType(rt reflect.Type) types.Type {
 		typ = named
 		pkg.Scope().Insert(obj)
 	}
-	r.rcache[rt] = typ
+	r.rcache.Store(rt, typ)
 	r.tcache.Set(typ, rt)
 	if kind == reflect.Struct {
 		n := rt.NumField()
