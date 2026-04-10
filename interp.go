@@ -1163,7 +1163,7 @@ func NewInterp(ctx *Context, mainpkg *ssa.Package) (*Interp, error) {
 func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{}) (*Interp, error) {
 	var rctx *reflectx.Context
 	if ctx.Mode&SupportMultipleInterp == 0 {
-		reflectx.ResetAll()
+		//reflectx.ResetAll()
 		rctx = reflectx.Default
 		rctx.Reset()
 	} else {

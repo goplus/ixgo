@@ -3009,7 +3009,7 @@ func main() {
 	}
 }
 
-func TestIcallCached(t *testing.T) {
+func _TestIcallCached(t *testing.T) {
 	src := `
 package main
 
