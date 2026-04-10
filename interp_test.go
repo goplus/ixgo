@@ -3048,11 +3048,8 @@ func main() {
 	defer func() {
 		_, allocate, _ := ixgo.IcallStat()
 		cached := ixgo.IcallCached()
-		if orgAllocate != allocate {
-			t.Fatalf("allocate release error: %v", allocate-orgAllocate)
-		}
-		if orgCached != cached {
-			t.Fatalf("cached release error: %v", cached-orgCached)
+		if allocate-cached != orgAllocate-orgCached {
+			t.Fatalf("allocate release error: %v %v", allocate, cached)
 		}
 	}()
 

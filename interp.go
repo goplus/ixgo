@@ -1222,6 +1222,10 @@ func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{
 			return false
 		})
 	}
+
+	ctx.loadPkgMu.Lock()
+	defer ctx.loadPkgMu.Unlock()
+
 	i.record = NewTypesRecord(ctx, rctx, mainpkg.Prog, ctx.Loader, i, ctx.nestedMap)
 	i.record.Load(mainpkg)
 
@@ -1428,10 +1432,21 @@ func (i *Interp) ResetIcall() {
 	i.rctx.Reset()
 }
 
+// Release is release interp refletx context icall.
+func (i *Interp) Release() {
+	if i.ctx.Mode&SupportMultipleInterp != 0 {
+		rctxMethodMu.Lock()
+		i.rctx.Reset()
+		rctxMethodMu.Unlock()
+	}
+}
+
 // UnsafeRelease is unsafe release interp. interp all invalid.
 func (i *Interp) UnsafeRelease() {
 	if i.ctx.Mode&SupportMultipleInterp != 0 {
+		rctxMethodMu.Lock()
 		i.rctx.Reset()
+		rctxMethodMu.Unlock()
 	}
 	i.record.Release()
 	for _, v := range i.funcs {
