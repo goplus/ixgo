@@ -101,6 +101,7 @@ type Interp struct {
 	deferCount   int32                                       // fast has defer check
 	goexited     int32                                       // is call runtime.Goexit
 	exited       int32                                       // is call os.Exit
+	rundefer     int32
 }
 
 func (i *Interp) MainPkg() *ssa.Package {
@@ -549,13 +550,15 @@ func (fr *frame) runDefers() {
 	atomic.AddInt32(&interp.deferCount, 1)
 	fr.deferid = goroutineID()
 	interp.deferMap.Store(fr.deferid, fr)
+	defer func() {
+		interp.deferMap.Delete(fr.deferid)
+		atomic.AddInt32(&interp.deferCount, -1)
+		fr.deferid = 0
+		fr._defer = nil
+	}()
 	for d := fr._defer; d != nil; d = d.tail {
 		fr.runDefer(d)
 	}
-	interp.deferMap.Delete(fr.deferid)
-	atomic.AddInt32(&interp.deferCount, -1)
-	fr.deferid = 0
-	fr._defer = nil
 	// runtime.Goexit() fr.panic == nil
 	if !fr._panic.isNil() {
 		panic(fr._panic.arg) // new panic, or still panicking
@@ -1079,7 +1082,9 @@ func (i *Interp) callExternalWithFrameByStack(caller *frame, fn reflect.Value, i
 // control.
 func (fr *frame) run() {
 	if fr.pfn.Recover != nil {
+		atomic.AddInt32(&fr.interp.rundefer, 1)
 		defer func() {
+			atomic.AddInt32(&fr.interp.rundefer, -1)
 			if fr.ipc == -1 || fr._defer == nil {
 				return // normal return
 			}
@@ -1434,6 +1439,7 @@ func (i *Interp) ResetIcall() {
 
 // Release is release interp refletx context icall.
 func (i *Interp) Release() {
+	println("~~~~~~", atomic.LoadInt32(&i.deferCount), atomic.LoadInt32(&i.rundefer))
 	if i.ctx.Mode&SupportMultipleInterp != 0 {
 		rctxMethodMu.Lock()
 		i.rctx.Reset()

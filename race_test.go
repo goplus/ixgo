@@ -326,6 +326,7 @@ func TestTestdataFilesRace5(t *testing.T) {
 			if err != nil {
 				t.Error(err)
 			}
+			defer interp.Release()
 			_, err = ctx.RunInterp(interp, input, nil)
 			if err != nil {
 				t.Error(err)
