@@ -76,7 +76,6 @@ func main() {
 		go func(id int) {
 			defer wg.Done()
 			ctx := ixgo.NewContext(ixgo.SupportMultipleInterp)
-			defer ctx.UnsafeRelease()
 			pkg, err := ctx.LoadFile("main.go", source)
 			if err != nil {
 				t.Errorf("goroutine %d: Load failed: %v", id, err)
@@ -313,10 +312,8 @@ func TestTestdataFilesRace5(t *testing.T) {
 		log.Fatal(err)
 	}
 	ctx := ixgo.NewContext(ixgo.SupportMultipleInterp)
-	var wg sync.WaitGroup
 	for _, input := range testdataTests {
-		wg.Add(1)
-		go func() {
+		t.Run(input, func(t *testing.T) {
 			file := filepath.Join(cwd, "testdata", input)
 			pkg, err := ctx.LoadFile(file, nil)
 			if err != nil {
@@ -326,12 +323,11 @@ func TestTestdataFilesRace5(t *testing.T) {
 			if err != nil {
 				t.Error(err)
 			}
+			defer interp.UnsafeRelease()
 			_, err = ctx.RunInterp(interp, input, nil)
 			if err != nil {
 				t.Error(err)
 			}
-			wg.Done()
-		}()
+		})
 	}
-	wg.Wait()
 }

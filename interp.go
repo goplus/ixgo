@@ -1432,31 +1432,24 @@ func (i *Interp) ResetIcall() {
 	i.rctx.Reset()
 }
 
-// Release is release interp refletx context icall.
-func (i *Interp) Release() {
-	if i.ctx.Mode&SupportMultipleInterp != 0 {
-		rctxMethodMu.Lock()
-		i.rctx.Reset()
-		rctxMethodMu.Unlock()
-	}
-}
-
-// UnsafeRelease is unsafe release interp. interp all invalid.
+// UnsafeRelease is unsafe release relectx icall.
 func (i *Interp) UnsafeRelease() {
 	if i.ctx.Mode&SupportMultipleInterp != 0 {
 		rctxMethodMu.Lock()
 		i.rctx.Reset()
 		rctxMethodMu.Unlock()
 	}
-	i.record.Release()
-	for _, v := range i.funcs {
-		v.UnsafeRelease()
-	}
-	i.funcs = nil
-	i.msets = nil
-	i.globals = nil
-	i.preloadTypes = nil
-	i.record = nil
+	/*
+		i.record.Release()
+		for _, v := range i.funcs {
+			v.UnsafeRelease()
+		}
+		i.funcs = nil
+		i.msets = nil
+		i.globals = nil
+		i.preloadTypes = nil
+		i.record = nil
+	*/
 }
 
 func (i *Interp) Abort() {
