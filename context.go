@@ -221,11 +221,11 @@ func NewContext(mode Mode) *Context {
 	return ctx
 }
 
-func (ctx *Context) UnsafeRelease() {
-	ctx.pkgs = nil
-	ctx.Loader = nil
-	ctx.override = nil
-}
+// func (ctx *Context) UnsafeRelease() {
+// 	ctx.pkgs = nil
+// 	ctx.Loader = nil
+// 	ctx.override = nil
+// }
 
 func (ctx *Context) IsEvalMode() bool {
 	return ctx.evalMode
