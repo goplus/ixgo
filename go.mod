@@ -3,10 +3,10 @@ module github.com/goplus/ixgo
 go 1.24.0
 
 require (
-	github.com/goplus/gogen v1.22.0
-	github.com/goplus/mod v0.20.1
+	github.com/goplus/gogen v1.23.0-pre.3
+	github.com/goplus/mod v0.20.2
 	github.com/goplus/reflectx v1.6.4
-	github.com/goplus/xgo v1.7.0
+	github.com/goplus/xgo v1.7.1
 	github.com/peterh/liner v1.2.2
 	github.com/qiniu/x v1.17.0
 	github.com/timandy/routine v1.1.5
