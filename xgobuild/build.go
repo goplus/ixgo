@@ -267,6 +267,13 @@ func (c *Context) Import(path string) (*types.Package, error) {
 	if pkg, ok := c.pkgs[path]; ok {
 		return pkg, nil
 	}
+	// import types and skip patch
+	if p, ok := ixgo.LookupPackage(path); ok && p.Import != nil {
+		if pkg, err := p.Import(c.FileSet, c.pkgs); err == nil {
+			c.pkgs[path] = pkg
+			return pkg, nil
+		}
+	}
 	pkg, err := c.importPath(path)
 	if err != nil {
 		return pkg, err
