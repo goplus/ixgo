@@ -39,6 +39,7 @@ var (
 	flagExportFileName string
 	flagExportSource   bool
 	flagExportCode     bool
+	flagExportTypes    bool
 )
 
 func init() {
@@ -50,6 +51,7 @@ func init() {
 	flag.StringVar(&flagExportFileName, "filename", "export", "set export file name")
 	flag.BoolVar(&flagExportSource, "src", false, "export generic source mode")
 	flag.BoolVar(&flagExportCode, "code", false, "export full source code mode")
+	flag.BoolVar(&flagExportTypes, "types", false, "export types data")
 }
 
 // Cmd - ixgo build
@@ -196,7 +198,13 @@ func ExportPkg(prog *Program, pkg string, ctx *build.Context) (string, error) {
 	if flagCustomTags != "" {
 		tags = strings.Split(flagCustomTags, ";")
 	}
-	data, err := exportPkg(e, "q", "", tags)
+	var fname string
+	if ctx != nil {
+		fname = flagExportFileName + "_" + ctx.GOOS + "_" + ctx.GOARCH
+	} else {
+		fname = flagExportFileName
+	}
+	data, err := exportPkg(e, "q", "", tags, fname)
 	if err != nil {
 		return "", err
 	}
@@ -208,14 +216,11 @@ func ExportPkg(prog *Program, pkg string, ctx *build.Context) (string, error) {
 		pkg = flagCustomPkg
 	}
 	fpath := filepath.Join(flagExportDir, pkg)
-	var fname string
-	if ctx != nil {
-		fname = flagExportFileName + "_" + ctx.GOOS + "_" + ctx.GOARCH + ".go"
-	} else {
-		fname = flagExportFileName + ".go"
+	if len(e.TypesData) != 0 {
+		err = writeFile(fpath, fname+".types", e.TypesData)
 	}
-	err = writeFile(fpath, fname, data)
-	return filepath.Join(fpath, fname), err
+	err = writeFile(fpath, fname+".go", data)
+	return filepath.Join(fpath, fname+".go"), err
 }
 
 func parserContextList(list string) (ctxs []*build.Context) {

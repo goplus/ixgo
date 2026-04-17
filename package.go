@@ -18,6 +18,8 @@ package ixgo
 
 import (
 	"go/constant"
+	"go/token"
+	"go/types"
 	"log"
 	"reflect"
 	"sort"
@@ -80,6 +82,7 @@ type Package struct {
 	Name          string
 	Path          string
 	Source        string
+	Import        func(fset *token.FileSet, pkgs map[string]*types.Package) (*types.Package, error)
 }
 
 // merge same package
@@ -98,6 +101,9 @@ func (p *Package) merge(same *Package) {
 	}
 	for k, v := range same.UntypedConsts {
 		p.UntypedConsts[k] = v
+	}
+	if p.Import == nil && same.Import != nil {
+		p.Import = same.Import
 	}
 }
 
