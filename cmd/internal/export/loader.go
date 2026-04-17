@@ -29,6 +29,8 @@ import (
 	"strconv"
 	"strings"
 
+	"golang.org/x/tools/go/gcexportdata"
+
 	"golang.org/x/tools/go/loader"
 )
 
@@ -184,6 +186,7 @@ type Package struct {
 	Links         []string
 	Source        string
 	usedPkg       bool
+	TypesData     []byte
 }
 
 func (p *Package) IsEmpty() bool {
@@ -449,5 +452,22 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 			return nil, fmt.Errorf("export source for %q failed: %w", e.Path, err)
 		}
 	}
+	if flagExportTypes {
+		data, err := p.exportTypes(pkg)
+		if err != nil {
+			return nil, fmt.Errorf("export types for %q failed: %w", path, err)
+		}
+		e.TypesData = data
+	}
+
 	return e, nil
+}
+
+func (p *Program) exportTypes(pkg *types.Package) ([]byte, error) {
+	var buf bytes.Buffer
+	err := gcexportdata.Write(&buf, p.fset, pkg)
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }

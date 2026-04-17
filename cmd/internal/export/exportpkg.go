@@ -55,7 +55,7 @@ var (
 	errEmptyPackage = errors.New(EmptyPackage)
 )
 
-func exportPkg(pkg *Package, sname string, id string, tagList []string) ([]byte, error) {
+func exportPkg(pkg *Package, sname string, id string, tagList []string, fname string) ([]byte, error) {
 	var imports []string
 	if pkg.usedPkg {
 		imports = append(imports, fmt.Sprintf("q %q", pkg.Path))
@@ -90,6 +90,8 @@ func exportPkg(pkg *Package, sname string, id string, tagList []string) ([]byte,
 	tmpl := template_pkg
 	if pkg.IsEmpty() {
 		tmpl = template_empty_pkg
+	} else if pkg.TypesData != nil {
+		tmpl = template_pkg_types
 	}
 	if len(pkg.Source) > 0 {
 		tmpl = template_link_pkg
@@ -118,7 +120,9 @@ func exportPkg(pkg *Package, sname string, id string, tagList []string) ([]byte,
 		"$TAGS", strings.Join(tagList, "\n"),
 		"$SOURCE", pkg.Source,
 		"$LINKS", strings.Join(pkg.Links, "\n"),
-		"$ID", id)
+		"$ID", id,
+		"$TYPESNAME", fname+"TypesData",
+		"$TYPESFILE", fname+".types")
 	src := r.Replace(tmpl)
 	data, err := format.Source([]byte(src))
 	if err != nil {
@@ -151,6 +155,40 @@ func init() {
 		Funcs: map[string]reflect.Value{$FUNCS},
 		TypedConsts: map[string]ixgo.TypedConst{$TYPEDCONSTS},
 		UntypedConsts: map[string]ixgo.UntypedConst{$UNTYPEDCONSTS},
+	})
+}
+`
+
+var template_pkg_types = `// export by github.com/goplus/ixgo/cmd/qexp
+
+$TAGS
+
+package $PKGNAME
+
+import (
+	$IMPORTS
+
+	"github.com/goplus/ixgo"
+	"github.com/goplus/ixgo/xgobuild/typesdata"
+	_ "embed"
+)
+
+//go:embed $TYPESFILE
+var $TYPESNAME []byte
+
+func init() {
+	ixgo.RegisterPackage(&ixgo.Package {
+		Name: "$PKGNAME",
+		Path: "$PKGPATH",
+		Deps: map[string]string{$DEPS},
+		Interfaces: map[string]reflect.Type{$INTERFACES},
+		NamedTypes: map[string]reflect.Type{$NAMEDTYPES},
+		AliasTypes: map[string]reflect.Type{$ALIASTYPES},
+		Vars: map[string]reflect.Value{$VARS},
+		Funcs: map[string]reflect.Value{$FUNCS},
+		TypedConsts: map[string]ixgo.TypedConst{$TYPEDCONSTS},
+		UntypedConsts: map[string]ixgo.UntypedConst{$UNTYPEDCONSTS},
+		Import: typesdata.ImportFunc("$PKGPATH", $TYPESNAME),
 	})
 }
 `
