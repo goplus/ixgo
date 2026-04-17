@@ -455,7 +455,7 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 	if flagExportTypes {
 		data, err := p.exportTypes(pkg)
 		if err != nil {
-			log.Println("write types error", err)
+			return nil, fmt.Errorf("export types for %q failed: %w", path, err)
 		}
 		e.TypesData = data
 	}
