@@ -184,6 +184,7 @@ type Package struct {
 	TypedConsts   []string
 	UntypedConsts []string
 	Links         []string
+	Alias         []string
 	Source        string
 	usedPkg       bool
 	TypesData     []byte
@@ -401,9 +402,15 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 			} else {
 				e.TypedConsts = append(e.TypedConsts, fmt.Sprintf("%q: {Typ: reflect.TypeOf(%v), Value: %v}", t.Name(), pkgName+"."+t.Name(), p.constToLit(named, t.Val())))
 			}
+			if alias, ok := aliasType(t.Type(), pkg); ok {
+				e.Alias = append(e.Alias, fmt.Sprintf("%q: %v", t.Name(), alias))
+			}
 			e.usedPkg = true
 		case *types.Var:
 			e.Vars = append(e.Vars, fmt.Sprintf("%q : reflect.ValueOf(&%v)", t.Name(), pkgName+"."+t.Name()))
+			if alias, ok := aliasType(t.Type(), pkg); ok {
+				e.Alias = append(e.Alias, fmt.Sprintf("%q: %v", t.Name(), alias))
+			}
 			e.usedPkg = true
 		case *types.Func:
 			if hasTypeParam(t.Type()) {
@@ -414,6 +421,9 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 				continue
 			}
 			e.Funcs = append(e.Funcs, fmt.Sprintf("%q : reflect.ValueOf(%v)", t.Name(), pkgName+"."+t.Name()))
+			if alias, ok := aliasType(t.Type(), pkg); ok {
+				e.Alias = append(e.Alias, fmt.Sprintf("%q: %v", t.Name(), alias))
+			}
 			e.usedPkg = true
 		case *types.TypeName:
 			if hasTypeParam(t.Type()) {
@@ -442,6 +452,11 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 			} else {
 				e.NamedTypes = append(e.NamedTypes, fmt.Sprintf("%q : reflect.TypeOf((*%v.%v)(nil)).Elem()", typeName, pkgName, typeName))
 			}
+			if named, ok := t.Type().(*types.Named); ok {
+				if alias, ok := aliasNamed(named, pkg); ok {
+					e.Alias = append(e.Alias, fmt.Sprintf("%q: %v", t.Name(), alias))
+				}
+			}
 			e.usedPkg = true
 		default:
 			log.Panicf("unreachable %v %T\n", name, t)
@@ -459,7 +474,9 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 		}
 		e.TypesData = data
 	}
-
+	for _, alias := range e.Alias {
+		fmt.Println(alias)
+	}
 	return e, nil
 }
 
@@ -470,4 +487,124 @@ func (p *Program) exportTypes(pkg *types.Package) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+func aliasNamed(t *types.Named, pkg *types.Package) (string, bool) {
+	var list []string
+	for i := 0; i < t.NumMethods(); i++ {
+		fn := t.Method(i)
+		if s, ok := aliasType(fn.Type(), pkg); ok {
+			list = append(list, fmt.Sprintf("%q: %v", fn.Name(), s))
+		}
+	}
+	under, ok := aliasType(t.Underlying(), pkg)
+	if len(list) == 0 && !ok {
+		return "nil", false
+	}
+
+	if len(list) == 0 {
+		return fmt.Sprintf(`&alias.Named{
+	Underlying: %v,
+}`, under), true
+	}
+
+	return fmt.Sprintf(`&alias.Named{
+	Underlying: %v,
+	Methods: map[string]*alias.Func{
+		%v,
+	},
+}`,
+		under, strings.Join(list, ",\n")), true
+}
+
+func aliasType(t types.Type, pkg *types.Package) (string, bool) {
+	switch t := t.(type) {
+	case *types.Named:
+	case *types.Array:
+		if s, ok := aliasType(t.Elem(), pkg); ok {
+			return fmt.Sprintf("&alias.Array{Elem:%v}", s), true
+		}
+	case *types.Chan:
+		if s, ok := aliasType(t.Elem(), pkg); ok {
+			return fmt.Sprintf("&alias.Chan{Elem:%v}", s), true
+		}
+	case *types.Slice:
+		if s, ok := aliasType(t.Elem(), pkg); ok {
+			return fmt.Sprintf("&alias.Slice{Elem:%v}", s), true
+		}
+	case *types.Map:
+		k, ok1 := aliasType(t.Key(), pkg)
+		v, ok2 := aliasType(t.Elem(), pkg)
+		if ok1 || ok2 {
+			return fmt.Sprintf("&alias.Map{Key:%v,Value:%v}", k, v), true
+		}
+	case *types.Struct:
+		n := t.NumFields()
+		if n == 0 {
+			break
+		}
+		var has bool
+		list := make([]string, n)
+		for i := 0; i < n; i++ {
+			s, ok := aliasType(t.Field(i).Type(), pkg)
+			if ok {
+				has = true
+			}
+			list[i] = s
+		}
+		if has {
+			return fmt.Sprintf("&alias.Struct{Fields:[]alias.Type{%v}}", strings.Join(list, ",")), true
+		}
+	case *types.Signature:
+		params, ok1 := aliasTuple(t.Params(), pkg)
+		results, ok2 := aliasTuple(t.Results(), pkg)
+		if ok1 || ok2 {
+			return fmt.Sprintf("&alias.Func{\nParams:%v,\nResults:%v,\n}", params, results), true
+		}
+	case *types.Interface:
+		return aliasInterface(t, pkg)
+	case *types.Alias:
+		var named string
+		if t.Obj().Pkg() == pkg {
+			named = t.Obj().Name()
+		} else {
+			named = t.Obj().String()
+		}
+		return fmt.Sprintf("&alias.Alias{Typ: %q}", named), true
+	}
+	return "nil", false
+}
+
+func aliasInterface(t *types.Interface, pkg *types.Package) (string, bool) {
+	var list []string
+	for i := 0; i < t.NumMethods(); i++ {
+		fn := t.Method(i)
+		if s, ok := aliasType(fn.Type(), pkg); ok {
+			list = append(list, fmt.Sprintf("%q: %v", fn.Name(), s))
+		}
+	}
+	if len(list) == 0 {
+		return "nil", false
+	}
+	return fmt.Sprintf(`&alias.Interface{
+	Methods: map[string]*alias.Func{
+		%v,
+	},
+}`,
+		strings.Join(list, ",\n")), true
+}
+
+func aliasTuple(tuple *types.Tuple, pkg *types.Package) (ret string, has bool) {
+	var list []string
+	for i := 0; i < tuple.Len(); i++ {
+		t, ok := aliasType(tuple.At(i).Type(), pkg)
+		list = append(list, t)
+		if ok {
+			has = true
+		}
+	}
+	if !has {
+		return "nil", false
+	}
+	return fmt.Sprintf("[]alias.Type{%v}", strings.Join(list, ",")), has
 }
