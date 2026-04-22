@@ -23,6 +23,8 @@ import (
 	"log"
 	"reflect"
 	"sort"
+
+	"github.com/goplus/ixgo/alias"
 )
 
 var (
@@ -79,6 +81,7 @@ type Package struct {
 	TypedConsts   map[string]TypedConst
 	UntypedConsts map[string]UntypedConst
 	Deps          map[string]string // path -> name
+	Alias         map[string]alias.Type
 	Name          string
 	Path          string
 	Source        string
@@ -101,6 +104,9 @@ func (p *Package) merge(same *Package) {
 	}
 	for k, v := range same.UntypedConsts {
 		p.UntypedConsts[k] = v
+	}
+	for k, v := range same.Alias {
+		p.Alias[k] = v
 	}
 	if p.Import == nil && same.Import != nil {
 		p.Import = same.Import

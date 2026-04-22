@@ -474,9 +474,6 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 		}
 		e.TypesData = data
 	}
-	for _, alias := range e.Alias {
-		fmt.Println(alias)
-	}
 	return e, nil
 }
 

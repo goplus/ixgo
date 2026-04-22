@@ -48,4 +48,26 @@ func ScopeDelete(s *types.Scope, name string) types.Object {
 	return nil
 }
 
+func SetFuncType(obj *types.Func, typ types.Type) {
+	(*object)(unsafe.Pointer(obj)).typ = typ
+}
+
+func SetConstType(obj *types.Const, typ types.Type) {
+	(*object)(unsafe.Pointer(obj)).typ = typ
+}
+
+func SetVarType(obj *types.Var, typ types.Type) {
+	(*object)(unsafe.Pointer(obj)).typ = typ
+}
+
+type object struct {
+	parent    *types.Scope
+	pos       token.Pos
+	pkg       *types.Package
+	name      string
+	typ       types.Type
+	order_    uint32
+	scopePos_ token.Pos
+}
+
 // -----------------------------------------------------------------------------
