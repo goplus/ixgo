@@ -160,7 +160,8 @@ func init() {
 		AliasTypes: map[string]reflect.Type{$ALIASTYPES},
 		Vars: map[string]reflect.Value{$VARS},
 		Funcs: map[string]reflect.Value{$FUNCS},
-		TypedConsts: map[string]ixgo.TypedConst{$TYPEDCONSTS},$EXT
+		TypedConsts: map[string]ixgo.TypedConst{$TYPEDCONSTS},
+		UntypedConsts: map[string]ixgo.UntypedConst{$UNTYPEDCONSTS},$EXT
 	})
 }
 `
@@ -194,7 +195,7 @@ func init() {
 		Funcs: map[string]reflect.Value{$FUNCS},
 		TypedConsts: map[string]ixgo.TypedConst{$TYPEDCONSTS},
 		UntypedConsts: map[string]ixgo.UntypedConst{$UNTYPEDCONSTS},
-		Import: typesdata.ImportFunc("$PKGPATH", $TYPESNAME),
+		Import: typesdata.ImportFunc("$PKGPATH", $TYPESNAME),$EXT
 	})
 }
 `

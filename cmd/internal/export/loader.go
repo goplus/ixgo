@@ -474,6 +474,7 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 		}
 		e.TypesData = data
 	}
+
 	return e, nil
 }
 
@@ -490,6 +491,9 @@ func aliasNamed(t *types.Named, pkg *types.Package) (string, bool) {
 	var list []string
 	for i := 0; i < t.NumMethods(); i++ {
 		fn := t.Method(i)
+		if !ast.IsExported(fn.Name()) {
+			continue
+		}
 		if s, ok := aliasType(fn.Type(), pkg); ok {
 			list = append(list, fmt.Sprintf("%q: %v", fn.Name(), s))
 		}
@@ -533,7 +537,7 @@ func aliasType(t types.Type, pkg *types.Package) (string, bool) {
 		k, ok1 := aliasType(t.Key(), pkg)
 		v, ok2 := aliasType(t.Elem(), pkg)
 		if ok1 || ok2 {
-			return fmt.Sprintf("&alias.Map{Key:%v,Value:%v}", k, v), true
+			return fmt.Sprintf("&alias.Map{Key:%v,Elem:%v}", k, v), true
 		}
 	case *types.Struct:
 		n := t.NumFields()
@@ -562,10 +566,15 @@ func aliasType(t types.Type, pkg *types.Package) (string, bool) {
 		return aliasInterface(t, pkg)
 	case *types.Alias:
 		var named string
-		if t.Obj().Pkg() == pkg {
+		opkg := t.Obj().Pkg()
+		// skip builtin
+		if opkg == nil {
+			break
+		}
+		if opkg == pkg {
 			named = t.Obj().Name()
 		} else {
-			named = t.Obj().String()
+			named = opkg.Path() + "." + t.Obj().Name()
 		}
 		return fmt.Sprintf("&alias.Alias{Typ: %q}", named), true
 	}
@@ -576,6 +585,9 @@ func aliasInterface(t *types.Interface, pkg *types.Package) (string, bool) {
 	var list []string
 	for i := 0; i < t.NumMethods(); i++ {
 		fn := t.Method(i)
+		if !ast.IsExported(fn.Name()) {
+			continue
+		}
 		if s, ok := aliasType(fn.Type(), pkg); ok {
 			list = append(list, fmt.Sprintf("%q: %v", fn.Name(), s))
 		}

@@ -322,9 +322,17 @@ func (r *TypesLoader) InsertAlias(p *types.Package, name string, rt reflect.Type
 	p.Scope().Insert(obj)
 }
 
+func splitName(path string) (pkg string, name string, ok bool) {
+	pos := strings.LastIndex(path, ".")
+	if pos == -1 {
+		return "", path, false
+	}
+	return path[:pos], path[pos+1:], true
+}
+
 func (r *TypesLoader) lookupFunc(p *types.Package) func(typ types.Type, path string) types.Type {
 	return func(typ types.Type, path string) types.Type {
-		pkg, name, ok := splitPath(path)
+		pkg, name, ok := splitName(path)
 		if ok {
 			if p = r.GetPackage(pkg); p == nil {
 				return nil
@@ -359,7 +367,7 @@ func (r *TypesLoader) InsertConst(p *types.Package, name string, typ types.Type,
 func splitPath(path string) (pkg string, name string, ok bool) {
 	pos := strings.LastIndex(path, ".")
 	if pos == -1 {
-		return "", path, false
+		return path, "", false
 	}
 	return path[:pos], path[pos+1:], true
 }
