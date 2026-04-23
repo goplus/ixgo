@@ -521,6 +521,10 @@ func aliasNamed(t *types.Named, pkg *types.Package) (string, bool) {
 func aliasType(t types.Type, pkg *types.Package) (string, bool) {
 	switch t := t.(type) {
 	case *types.Named:
+	case *types.Pointer:
+		if s, ok := aliasType(t.Elem(), pkg); ok {
+			return fmt.Sprintf("&alias.Pointer{Elem:%v}", s), true
+		}
 	case *types.Array:
 		if s, ok := aliasType(t.Elem(), pkg); ok {
 			return fmt.Sprintf("&alias.Array{Elem:%v}", s), true

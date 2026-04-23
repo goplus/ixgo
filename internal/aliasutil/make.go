@@ -32,6 +32,9 @@ func Make(typ types.Type, atyp alias.Type, lookup func(typ types.Type, name stri
 	case *types.Slice:
 		atyp := atyp.(*alias.Slice)
 		return types.NewSlice(Make(typ.Elem(), atyp.Elem, lookup))
+	case *types.Pointer:
+		atyp := atyp.(*alias.Pointer)
+		return types.NewPointer(Make(typ.Elem(), atyp.Elem, lookup))
 	case *types.Signature:
 		atyp := atyp.(*alias.Func)
 		return types.NewSignature(typ.Recv(), Tuple(typ.Params(), atyp.Params, lookup), Tuple(typ.Results(), atyp.Results, lookup), typ.Variadic())

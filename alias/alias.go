@@ -41,6 +41,12 @@ type Slice struct {
 
 func (p *Slice) alias() {}
 
+type Pointer struct {
+	Elem Type
+}
+
+func (p *Pointer) alias() {}
+
 type Func struct {
 	Params  []Type
 	Results []Type
