@@ -27,7 +27,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"unsafe"
 
 	"github.com/goplus/ixgo/alias"
 	"github.com/goplus/ixgo/internal/aliasutil"
@@ -322,28 +321,21 @@ func (r *TypesLoader) InsertAlias(p *types.Package, name string, rt reflect.Type
 	p.Scope().Insert(obj)
 }
 
-func splitName(path string) (pkg string, name string, ok bool) {
-	pos := strings.LastIndex(path, ".")
-	if pos == -1 {
-		return "", path, false
-	}
-	return path[:pos], path[pos+1:], true
-}
-
 func (r *TypesLoader) lookupFunc(p *types.Package) func(typ types.Type, path string) types.Type {
 	return func(typ types.Type, path string) types.Type {
-		pkg, name, ok := splitName(path)
+		pkg, name, ok := splitPath(path)
+		cur := p
 		if ok {
-			if p = r.GetPackage(pkg); p == nil {
+			if cur = r.GetPackage(pkg); cur == nil {
 				return nil
 			}
 		}
-		if obj := p.Scope().Lookup(name); obj != nil {
+		if obj := cur.Scope().Lookup(name); obj != nil {
 			return obj.Type()
 		} else if !token.IsExported(name) {
-			obj := types.NewTypeName(token.NoPos, p, name, nil)
+			obj := types.NewTypeName(token.NoPos, cur, name, nil)
 			types.NewAlias(obj, typ)
-			p.Scope().Insert(obj)
+			cur.Scope().Insert(obj)
 			return obj.Type()
 		}
 		return nil
@@ -367,7 +359,7 @@ func (r *TypesLoader) InsertConst(p *types.Package, name string, typ types.Type,
 func splitPath(path string) (pkg string, name string, ok bool) {
 	pos := strings.LastIndex(path, ".")
 	if pos == -1 {
-		return path, "", false
+		return "", path, false
 	}
 	return path[:pos], path[pos+1:], true
 }
@@ -636,7 +628,7 @@ func (r *TypesLoader) ToType(rt reflect.Type) types.Type {
 			im := rt.Method(i)
 			pkg := r.GetPackage(im.PkgPath)
 			sig := r.toMethod(pkg, recv, 0, im.Type)
-			(*object)(unsafe.Pointer(imethods[i])).typ = sig
+			typesutil.SetFuncType(imethods[i], sig)
 		}
 		typ.Underlying().(*types.Interface).Complete()
 	}
@@ -677,16 +669,4 @@ func (r *TypesLoader) ToType(rt reflect.Type) types.Type {
 		}
 	}
 	return typ
-}
-
-// go/types.object
-type object struct {
-	parent    *types.Scope
-	pos       token.Pos
-	pkg       *types.Package
-	name      string
-	typ       types.Type
-	order_    uint32
-	color_    uint32
-	scopePos_ token.Pos
 }

@@ -60,14 +60,4 @@ func SetVarType(obj *types.Var, typ types.Type) {
 	(*object)(unsafe.Pointer(obj)).typ = typ
 }
 
-type object struct {
-	parent    *types.Scope
-	pos       token.Pos
-	pkg       *types.Package
-	name      string
-	typ       types.Type
-	order_    uint32
-	scopePos_ token.Pos
-}
-
 // -----------------------------------------------------------------------------

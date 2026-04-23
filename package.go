@@ -105,8 +105,13 @@ func (p *Package) merge(same *Package) {
 	for k, v := range same.UntypedConsts {
 		p.UntypedConsts[k] = v
 	}
-	for k, v := range same.Alias {
-		p.Alias[k] = v
+	if same.Alias != nil {
+		if p.Alias == nil {
+			p.Alias = make(map[string]alias.Type)
+		}
+		for k, v := range same.Alias {
+			p.Alias[k] = v
+		}
 	}
 	if p.Import == nil && same.Import != nil {
 		p.Import = same.Import
