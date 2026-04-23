@@ -106,6 +106,12 @@ func exportPkg(pkg *Package, sname string, id string, tagList []string, fname st
 		pkg.Path = path.Clean(flagCustomPkg)
 		pkg.Name = path.Base(pkg.Path)
 	}
+	var ext string
+	if len(pkg.Alias) != 0 && flagExportAlias {
+		imports = append(imports, `"github.com/goplus/ixgo/alias"`)
+		ext = "\nAlias: map[string]alias.Type{" + joinList(pkg.Alias) + "},"
+	}
+
 	r := strings.NewReplacer("$PKGNAME", pkg.Name,
 		"$IMPORTS", strings.Join(imports, "\n"),
 		"$PKGPATH", pkg.Path,
@@ -122,7 +128,8 @@ func exportPkg(pkg *Package, sname string, id string, tagList []string, fname st
 		"$LINKS", strings.Join(pkg.Links, "\n"),
 		"$ID", id,
 		"$TYPESNAME", fname+"TypesData",
-		"$TYPESFILE", fname+".types")
+		"$TYPESFILE", fname+".types",
+		"$EXT", ext)
 	src := r.Replace(tmpl)
 	data, err := format.Source([]byte(src))
 	if err != nil {
@@ -154,7 +161,7 @@ func init() {
 		Vars: map[string]reflect.Value{$VARS},
 		Funcs: map[string]reflect.Value{$FUNCS},
 		TypedConsts: map[string]ixgo.TypedConst{$TYPEDCONSTS},
-		UntypedConsts: map[string]ixgo.UntypedConst{$UNTYPEDCONSTS},
+		UntypedConsts: map[string]ixgo.UntypedConst{$UNTYPEDCONSTS},$EXT
 	})
 }
 `
@@ -188,7 +195,7 @@ func init() {
 		Funcs: map[string]reflect.Value{$FUNCS},
 		TypedConsts: map[string]ixgo.TypedConst{$TYPEDCONSTS},
 		UntypedConsts: map[string]ixgo.UntypedConst{$UNTYPEDCONSTS},
-		Import: typesdata.ImportFunc("$PKGPATH", $TYPESNAME),
+		Import: typesdata.ImportFunc("$PKGPATH", $TYPESNAME),$EXT
 	})
 }
 `
@@ -237,7 +244,7 @@ func init() {
 		Vars: map[string]reflect.Value{$VARS},
 		Funcs: map[string]reflect.Value{$FUNCS},
 		TypedConsts: map[string]ixgo.TypedConst{$TYPEDCONSTS},
-		UntypedConsts: map[string]ixgo.UntypedConst{$UNTYPEDCONSTS},
+		UntypedConsts: map[string]ixgo.UntypedConst{$UNTYPEDCONSTS},$EXT
 		Source: source,
 	})
 }

@@ -27,8 +27,10 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"unsafe"
 
+	"github.com/goplus/ixgo/alias"
+	"github.com/goplus/ixgo/internal/aliasutil"
+	"github.com/goplus/ixgo/internal/typesutil"
 	"golang.org/x/tools/go/types/typeutil"
 )
 
@@ -261,6 +263,46 @@ func (r *TypesLoader) installPackage(pkg *Package) (err error) {
 	for name, c := range pkg.UntypedConsts {
 		r.InsertUntypedConst(p, name, c)
 	}
+	// check alias
+	lookup := r.lookupFunc(p)
+	for name, atyp := range pkg.Alias {
+		obj := p.Scope().Lookup(name)
+		if obj == nil {
+			continue
+		}
+		switch obj := obj.(type) {
+		case *types.Const:
+			if ntyp := aliasutil.Make(obj.Type(), atyp, lookup); ntyp != nil {
+				typesutil.SetConstType(obj, ntyp)
+			}
+		case *types.Var:
+			if ntyp := aliasutil.Make(obj.Type(), atyp, lookup); ntyp != nil {
+				typesutil.SetVarType(obj, ntyp)
+			}
+		case *types.Func:
+			if ntyp := aliasutil.Make(obj.Type(), atyp, lookup); ntyp != nil {
+				typesutil.SetFuncType(obj, ntyp)
+			}
+		case *types.TypeName:
+			if named, ok := obj.Type().(*types.Named); ok {
+				if atyp, ok := atyp.(*alias.Named); ok {
+					for i := 0; i < named.NumMethods(); i++ {
+						m := named.Method(i)
+						if afn, ok := atyp.Methods[m.Name()]; ok {
+							if ntyp := aliasutil.Make(m.Type(), afn, lookup); ntyp != nil {
+								typesutil.SetFuncType(m, ntyp)
+							}
+						}
+					}
+					if atyp.Underlying != nil {
+						if t := aliasutil.Make(named.Underlying(), atyp.Underlying, lookup); t != nil {
+							named.SetUnderlying(t)
+						}
+					}
+				}
+			}
+		}
+	}
 	return
 }
 
@@ -274,7 +316,30 @@ func (r *TypesLoader) InsertNamedType(p *types.Package, name string, rt reflect.
 
 func (r *TypesLoader) InsertAlias(p *types.Package, name string, rt reflect.Type) {
 	typ := r.ToType(rt)
-	p.Scope().Insert(types.NewTypeName(token.NoPos, p, name, typ))
+	obj := types.NewTypeName(token.NoPos, p, name, nil)
+	types.NewAlias(obj, typ)
+	p.Scope().Insert(obj)
+}
+
+func (r *TypesLoader) lookupFunc(p *types.Package) func(typ types.Type, path string) types.Type {
+	return func(typ types.Type, path string) types.Type {
+		pkg, name, ok := splitPath(path)
+		cur := p
+		if ok {
+			if cur = r.GetPackage(pkg); cur == nil {
+				return nil
+			}
+		}
+		if obj := cur.Scope().Lookup(name); obj != nil {
+			return obj.Type()
+		} else if !token.IsExported(name) {
+			obj := types.NewTypeName(token.NoPos, cur, name, nil)
+			types.NewAlias(obj, typ)
+			cur.Scope().Insert(obj)
+			return obj.Type()
+		}
+		return nil
+	}
 }
 
 func (r *TypesLoader) InsertFunc(p *types.Package, name string, v reflect.Value) {
@@ -294,7 +359,7 @@ func (r *TypesLoader) InsertConst(p *types.Package, name string, typ types.Type,
 func splitPath(path string) (pkg string, name string, ok bool) {
 	pos := strings.LastIndex(path, ".")
 	if pos == -1 {
-		return path, "", false
+		return "", path, false
 	}
 	return path[:pos], path[pos+1:], true
 }
@@ -563,7 +628,7 @@ func (r *TypesLoader) ToType(rt reflect.Type) types.Type {
 			im := rt.Method(i)
 			pkg := r.GetPackage(im.PkgPath)
 			sig := r.toMethod(pkg, recv, 0, im.Type)
-			(*object)(unsafe.Pointer(imethods[i])).typ = sig
+			typesutil.SetFuncType(imethods[i], sig)
 		}
 		typ.Underlying().(*types.Interface).Complete()
 	}
@@ -604,16 +669,4 @@ func (r *TypesLoader) ToType(rt reflect.Type) types.Type {
 		}
 	}
 	return typ
-}
-
-// go/types.object
-type object struct {
-	parent    *types.Scope
-	pos       token.Pos
-	pkg       *types.Package
-	name      string
-	typ       types.Type
-	order_    uint32
-	color_    uint32
-	scopePos_ token.Pos
 }

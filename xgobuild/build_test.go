@@ -761,7 +761,6 @@ echo cl.parseExpr("1, 2, 3", nil)!
 import (
 	"fmt"
 	"github.com/goplus/xgo/tpl"
-	"github.com/goplus/xgo/tpl/types"
 	"github.com/qiniu/x/errors"
 	"strconv"
 )
@@ -786,7 +785,7 @@ expr = INT % "," => {
 //line main.xgo:6:1
 					var _xgo_err error
 //line main.xgo:6:1
-					_xgo_ret, _xgo_err = strconv.Atoi(v.(*types.Token).Lit)
+					_xgo_ret, _xgo_err = strconv.Atoi(v.(*tpl.Token).Lit)
 //line main.xgo:6:1
 					if _xgo_err != nil {
 //line main.xgo:6:1
@@ -858,7 +857,7 @@ func TestTplPatchStaticLoad(t *testing.T) {
 			t.Fatal(err)
 		}
 		if string(data) != tplGo {
-			t.Fatalf("bad result:\n%v", tplGo)
+			t.Fatalf("bad result:\n%v", string(data))
 		}
 		_, err = ctx.RunFile("main.go", data, nil)
 		if err != nil {
