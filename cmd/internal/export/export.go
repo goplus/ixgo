@@ -40,6 +40,7 @@ var (
 	flagExportSource   bool
 	flagExportCode     bool
 	flagExportTypes    bool
+	flagExportAlias    bool
 )
 
 func init() {
@@ -51,7 +52,8 @@ func init() {
 	flag.StringVar(&flagExportFileName, "filename", "export", "set export file name")
 	flag.BoolVar(&flagExportSource, "src", false, "export generic source mode")
 	flag.BoolVar(&flagExportCode, "code", false, "export full source code mode")
-	flag.BoolVar(&flagExportTypes, "types", false, "export types data")
+	flag.BoolVar(&flagExportTypes, "types", false, "export types data for XGo")
+	flag.BoolVar(&flagExportAlias, "alias", false, "export types alias data")
 }
 
 // Cmd - ixgo build

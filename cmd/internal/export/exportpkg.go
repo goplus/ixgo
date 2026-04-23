@@ -107,7 +107,7 @@ func exportPkg(pkg *Package, sname string, id string, tagList []string, fname st
 		pkg.Name = path.Base(pkg.Path)
 	}
 	var ext string
-	if len(pkg.Alias) != 0 {
+	if len(pkg.Alias) != 0 && flagExportAlias {
 		imports = append(imports, `"github.com/goplus/ixgo/alias"`)
 		ext = "\nAlias: map[string]alias.Type{" + joinList(pkg.Alias) + "},"
 	}
