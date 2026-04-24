@@ -1,4 +1,4 @@
-package aliasutil
+package aliasload
 
 import (
 	"go/types"

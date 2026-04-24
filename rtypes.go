@@ -262,10 +262,8 @@ func (r *TypesLoader) installPackage(pkg *Package) (err error) {
 	for name, c := range pkg.UntypedConsts {
 		r.InsertUntypedConst(p, name, c)
 	}
-	// check alias
-	if pkg.Alias != nil {
-		lookup := r.lookupFunc(p)
-		aliasutil.Load(p, pkg.Alias, lookup)
+	if len(pkg.Alias) != 0 {
+		aliasload.Load(p, pkg.Alias, r.lookupFunc(p))
 	}
 	return
 }
