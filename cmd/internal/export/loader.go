@@ -570,6 +570,16 @@ func aliasType(t types.Type, pkg *types.Package) (string, bool) {
 		return aliasInterface(t, pkg)
 	case *types.Alias:
 		opkg := t.Obj().Pkg()
+		if len(flagAliasTypesMap) != 0 {
+			name := t.Obj().Name()
+			_, ok := flagAliasTypesMap[name]
+			if !ok && opkg != nil {
+				_, ok = flagAliasTypesMap[opkg.Path()+"."+name]
+			}
+			if !ok {
+				return "nil", false
+			}
+		}
 		if opkg == nil {
 			return fmt.Sprintf("&alias.Builtin{Typ: %q}", t.Obj().Name()), true
 		}
