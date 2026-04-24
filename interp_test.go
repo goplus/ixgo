@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"go/types"
 	"io"
 	"io/fs"
 	"log"
@@ -30,6 +31,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/tools/go/loader"
 
 	"github.com/goplus/ixgo"
 	"github.com/goplus/ixgo/testdata/info"
@@ -48,6 +51,8 @@ import (
 	_ "github.com/goplus/ixgo/pkg/strings"
 	_ "github.com/goplus/ixgo/pkg/sync"
 	_ "github.com/goplus/ixgo/pkg/time"
+	_ "github.com/goplus/ixgo/testdata/alias/github.com/goplus/ixgo/testdata/alias/msg"
+	_ "github.com/goplus/ixgo/testdata/alias/github.com/goplus/ixgo/testdata/alias/pkg"
 )
 
 // These are files in github.com/goplus/ixgo/testdata/.
@@ -3312,5 +3317,54 @@ func init() {
 	_, err := ixgo.RunFile("main.go", src, nil, 0)
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAlias(t *testing.T) {
+	var cfg loader.Config
+	cfg.Import("github.com/goplus/ixgo/testdata/alias/pkg")
+	prog, err := cfg.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	info := prog.Package("github.com/goplus/ixgo/testdata/alias/pkg")
+	if info == nil {
+		t.Fatal("load pkg error")
+	}
+	pkg := info.Pkg
+	t.Log(pkg.Scope())
+
+	ctx := ixgo.NewContext(ixgo.EnableDumpImports | ixgo.DisableRecover)
+	pkg2, err := ctx.Loader.Import("github.com/goplus/ixgo/testdata/alias/pkg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log(pkg2.Scope())
+
+	if pkg.Path() != pkg2.Path() {
+		t.Fatal("pkg path error", pkg2.Path())
+	}
+	if pkg.Scope().Len() != pkg2.Scope().Len() {
+		t.Fatal("scope len error")
+	}
+	for _, name := range pkg.Scope().Names() {
+		obj := pkg.Scope().Lookup(name)
+		obj2 := pkg2.Scope().Lookup(name)
+		if obj.Type().String() != obj2.Type().String() {
+			t.Fatalf("object type error: %v %v", obj, obj2)
+		}
+		if named, ok := obj.Type().(*types.Named); ok {
+			named2 := obj2.Type().(*types.Named)
+			if named.NumMethods() != named2.NumMethods() {
+				t.Fatalf("named method error: %v %v", named, named2)
+			}
+			for i := 0; i < named.NumMethods(); i++ {
+				m := named.Method(i)
+				m2 := named2.Method(i)
+				if m.String() != m2.String() {
+					t.Fatalf("method error: %v %v", m, m2)
+				}
+			}
+		}
 	}
 }
