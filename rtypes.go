@@ -28,8 +28,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/goplus/ixgo/alias"
-	"github.com/goplus/ixgo/internal/aliasutil"
+	"github.com/goplus/ixgo/internal/aliasload"
 	"github.com/goplus/ixgo/internal/typesutil"
 	"golang.org/x/tools/go/types/typeutil"
 )
@@ -264,44 +263,9 @@ func (r *TypesLoader) installPackage(pkg *Package) (err error) {
 		r.InsertUntypedConst(p, name, c)
 	}
 	// check alias
-	lookup := r.lookupFunc(p)
-	for name, atyp := range pkg.Alias {
-		obj := p.Scope().Lookup(name)
-		if obj == nil {
-			continue
-		}
-		switch obj := obj.(type) {
-		case *types.Const:
-			if ntyp := aliasutil.Make(obj.Type(), atyp, lookup); ntyp != nil {
-				typesutil.SetConstType(obj, ntyp)
-			}
-		case *types.Var:
-			if ntyp := aliasutil.Make(obj.Type(), atyp, lookup); ntyp != nil {
-				typesutil.SetVarType(obj, ntyp)
-			}
-		case *types.Func:
-			if ntyp := aliasutil.Make(obj.Type(), atyp, lookup); ntyp != nil {
-				typesutil.SetFuncType(obj, ntyp)
-			}
-		case *types.TypeName:
-			if named, ok := obj.Type().(*types.Named); ok {
-				if atyp, ok := atyp.(*alias.Named); ok {
-					for i := 0; i < named.NumMethods(); i++ {
-						m := named.Method(i)
-						if afn, ok := atyp.Methods[m.Name()]; ok {
-							if ntyp := aliasutil.Make(m.Type(), afn, lookup); ntyp != nil {
-								typesutil.SetFuncType(m, ntyp)
-							}
-						}
-					}
-					if atyp.Underlying != nil {
-						if t := aliasutil.Make(named.Underlying(), atyp.Underlying, lookup); t != nil {
-							named.SetUnderlying(t)
-						}
-					}
-				}
-			}
-		}
+	if pkg.Alias != nil {
+		lookup := r.lookupFunc(p)
+		aliasutil.Load(p, pkg.Alias, lookup)
 	}
 	return
 }

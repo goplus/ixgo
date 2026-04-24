@@ -573,9 +573,8 @@ func aliasType(t types.Type, pkg *types.Package) (string, bool) {
 		opkg := t.Obj().Pkg()
 		// skip builtin
 		if opkg == nil {
-			break
-		}
-		if opkg == pkg {
+			named = t.Obj().Name()
+		} else if opkg == pkg {
 			named = t.Obj().Name()
 		} else {
 			named = opkg.Path() + "." + t.Obj().Name()
