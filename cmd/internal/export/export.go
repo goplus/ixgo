@@ -41,6 +41,8 @@ var (
 	flagExportCode     bool
 	flagExportTypes    bool
 	flagExportAlias    bool
+	flagAliasTypes     string
+	flagAliasTypesMap  map[string]struct{}
 )
 
 func init() {
@@ -54,6 +56,7 @@ func init() {
 	flag.BoolVar(&flagExportCode, "code", false, "export full source code mode")
 	flag.BoolVar(&flagExportTypes, "types", false, "export types data for XGo")
 	flag.BoolVar(&flagExportAlias, "alias", false, "export types alias data")
+	flag.StringVar(&flagAliasTypes, "alias_types", "", "set export types alias list, split by ;")
 }
 
 // Cmd - ixgo build
@@ -92,6 +95,20 @@ func exportCmd(cmd *base.Command, args []string) {
 	if flagExportFileName == "" {
 		flagExportFileName = "export"
 	}
+	if flagAliasTypes != "" {
+		for _, typ := range strings.Split(flagAliasTypes, ";") {
+			typ = strings.TrimSpace(typ)
+			if typ == "" {
+				continue
+			}
+			if flagAliasTypesMap == nil {
+				flagAliasTypesMap = make(map[string]struct{})
+				flagExportAlias = true
+			}
+			flagAliasTypesMap[typ] = struct{}{}
+		}
+	}
+
 	ctxList := parserContextList(flagBuildContext)
 	Export(args, ctxList)
 }
