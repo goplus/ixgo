@@ -72,7 +72,7 @@ func init() {
 				Results: []alias.Type{&alias.Alias{Typ: "Int"}},
 			},
 			"Demo3": &alias.Func{
-				Params:  []alias.Type{&alias.Alias{Typ: "any"}},
+				Params:  []alias.Type{&alias.Builtin{Typ: "any"}},
 				Results: nil,
 			},
 			"Demo4": &alias.Func{
@@ -103,7 +103,7 @@ func init() {
 						Results: []alias.Type{&alias.Alias{Typ: "Int"}},
 					},
 					"Demo3": &alias.Func{
-						Params:  []alias.Type{&alias.Alias{Typ: "any"}},
+						Params:  []alias.Type{&alias.Builtin{Typ: "any"}},
 						Results: nil,
 					},
 					"Demo4": &alias.Func{

@@ -8,17 +8,21 @@ import (
 )
 
 func Make(typ types.Type, atyp alias.Type, lookup func(typ types.Type, name string) types.Type) types.Type {
-	if atyp == nil {
+	switch atyp := atyp.(type) {
+	case nil:
 		return typ
-	}
-	if atyp, ok := atyp.(*alias.Alias); ok {
+	case *alias.Builtin:
 		if obj := types.Universe.Lookup(atyp.Typ); obj != nil {
 			return obj.Type()
 		}
+		return typ
+	case *alias.Alias:
 		if t := lookup(typ, atyp.Typ); t != nil {
 			return t
 		}
+		return typ
 	}
+
 	switch typ := typ.(type) {
 	case *types.Basic:
 		// skip

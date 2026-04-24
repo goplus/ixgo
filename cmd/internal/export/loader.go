@@ -569,12 +569,12 @@ func aliasType(t types.Type, pkg *types.Package) (string, bool) {
 	case *types.Interface:
 		return aliasInterface(t, pkg)
 	case *types.Alias:
-		var named string
 		opkg := t.Obj().Pkg()
-		// skip builtin
 		if opkg == nil {
-			named = t.Obj().Name()
-		} else if opkg == pkg {
+			return fmt.Sprintf("&alias.Builtin{Typ: %q}", t.Obj().Name()), true
+		}
+		var named string
+		if opkg == pkg {
 			named = t.Obj().Name()
 		} else {
 			named = opkg.Path() + "." + t.Obj().Name()

@@ -4,6 +4,12 @@ type Alias struct {
 	Typ string
 }
 
+type Builtin struct {
+	Typ string
+}
+
+func (p *Builtin) alias() {}
+
 func (p *Alias) alias() {}
 
 type Type interface {
