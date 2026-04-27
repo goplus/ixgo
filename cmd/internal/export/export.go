@@ -198,6 +198,14 @@ func ExportPkgs(pkgs []string, ctx *build.Context) {
 	if err != nil {
 		log.Panicln(err)
 	}
+	if !flagExportAlias && len(filterAliasTypesMap) == 0 {
+		for pkg := range prog.prog.AllPackages {
+			prog.checkXGoUnitAlias(pkg)
+		}
+		if len(filterAliasTypesMap) != 0 {
+			flagExportAlias = true
+		}
+	}
 	for _, pkg := range pkgs {
 		if pkg == "unsafe" {
 			continue

@@ -388,12 +388,6 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 		}
 		return e, nil
 	}
-	if !flagExportAlias && len(filterAliasTypesMap) == 0 {
-		p.checkXGoUnitAlias(pkg)
-		if len(filterAliasTypesMap) != 0 {
-			flagExportAlias = true
-		}
-	}
 
 	var foundGeneric bool
 	for _, name := range pkg.Scope().Names() {
@@ -503,9 +497,6 @@ const (
 func (p *Program) checkXGoUnitAlias(pkg *types.Package) {
 	if !isXGoPackage(pkg) {
 		return
-	}
-	for _, im := range pkg.Imports() {
-		p.checkXGoUnitAlias(im)
 	}
 	scope := pkg.Scope()
 	for _, name := range scope.Names() {
