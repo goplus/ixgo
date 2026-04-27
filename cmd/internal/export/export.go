@@ -42,7 +42,10 @@ var (
 	flagExportTypes    bool
 	flagExportAlias    bool
 	flagAliasTypes     string
-	flagAliasTypesMap  map[string]struct{}
+)
+
+var (
+	filterAliasTypesMap map[string]struct{}
 )
 
 func init() {
@@ -101,11 +104,11 @@ func exportCmd(cmd *base.Command, args []string) {
 			if typ == "" {
 				continue
 			}
-			if flagAliasTypesMap == nil {
-				flagAliasTypesMap = make(map[string]struct{})
+			if filterAliasTypesMap == nil {
+				filterAliasTypesMap = make(map[string]struct{})
 				flagExportAlias = true
 			}
-			flagAliasTypesMap[typ] = struct{}{}
+			filterAliasTypesMap[typ] = struct{}{}
 		}
 	}
 
