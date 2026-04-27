@@ -388,6 +388,13 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 		}
 		return e, nil
 	}
+	if !flagExportAlias && len(filterAliasTypesMap) == 0 {
+		p.checkXGoUnitAlias(pkg)
+		if len(filterAliasTypesMap) != 0 {
+			flagExportAlias = true
+		}
+	}
+
 	var foundGeneric bool
 	for _, name := range pkg.Scope().Names() {
 		if !token.IsExported(name) {
@@ -476,6 +483,47 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 	}
 
 	return e, nil
+}
+
+func isXGoPackage(pkg *types.Package) bool {
+	return pkg.Scope().Lookup("XGoPackage") != nil
+}
+
+/*
+// Seconds is a time duration in seconds
+type Seconds = float64
+
+const (
+	// literals with unit for Seconds type.
+	// You can use 1s, 0.5s, 100ms, etc.
+	XGou_Seconds = "s=1,ms=0.001"
+)
+*/
+
+func (p *Program) checkXGoUnitAlias(pkg *types.Package) {
+	if !isXGoPackage(pkg) {
+		return
+	}
+	for _, im := range pkg.Imports() {
+		p.checkXGoUnitAlias(im)
+	}
+	scope := pkg.Scope()
+	for _, name := range scope.Names() {
+		if !strings.HasPrefix(name, "XGou_") {
+			continue
+		}
+		obj := scope.Lookup(name)
+		if v, ok := obj.(*types.Const); ok && v.Val().Kind() == constant.String {
+			if alias := scope.Lookup(name[5:]); alias != nil {
+				if _, ok := alias.Type().(*types.Alias); ok {
+					if filterAliasTypesMap == nil {
+						filterAliasTypesMap = make(map[string]struct{})
+					}
+					filterAliasTypesMap[pkg.Path()+"."+name[5:]] = struct{}{}
+				}
+			}
+		}
+	}
 }
 
 func (p *Program) exportTypes(pkg *types.Package) ([]byte, error) {
@@ -570,11 +618,11 @@ func aliasType(t types.Type, pkg *types.Package) (string, bool) {
 		return aliasInterface(t, pkg)
 	case *types.Alias:
 		opkg := t.Obj().Pkg()
-		if len(flagAliasTypesMap) != 0 {
+		if len(filterAliasTypesMap) != 0 {
 			name := t.Obj().Name()
-			_, ok := flagAliasTypesMap[name]
+			_, ok := filterAliasTypesMap[name]
 			if !ok && opkg != nil {
-				_, ok = flagAliasTypesMap[opkg.Path()+"."+name]
+				_, ok = filterAliasTypesMap[opkg.Path()+"."+name]
 			}
 			if !ok {
 				return "nil", false
