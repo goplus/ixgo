@@ -129,7 +129,8 @@ func exportPkg(pkg *Package, sname string, id string, tagList []string, fname st
 		"$ID", id,
 		"$TYPESNAME", fname+"TypesData",
 		"$TYPESFILE", fname+".types",
-		"$EXT", ext)
+		"$EXT", ext,
+		"$INIT", pkg.AliasInit)
 	src := r.Replace(tmpl)
 	data, err := format.Source([]byte(src))
 	if err != nil {
@@ -150,7 +151,7 @@ import (
 	"github.com/goplus/ixgo"
 )
 
-func init() {
+func init() {$INIT
 	ixgo.RegisterPackage(&ixgo.Package {
 		Name: "$PKGNAME",
 		Path: "$PKGPATH",
@@ -183,7 +184,7 @@ import (
 //go:embed $TYPESFILE
 var $TYPESNAME []byte
 
-func init() {
+func init() {$INIT
 	ixgo.RegisterPackage(&ixgo.Package {
 		Name: "$PKGNAME",
 		Path: "$PKGPATH",
@@ -233,7 +234,7 @@ import (
 	"github.com/goplus/ixgo"
 )
 
-func init() {
+func init() {$INIT
 	ixgo.RegisterPackage(&ixgo.Package {
 		Name: "$PKGNAME",
 		Path: "$PKGPATH",

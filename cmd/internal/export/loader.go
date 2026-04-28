@@ -26,6 +26,7 @@ import (
 	"go/token"
 	"go/types"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -188,6 +189,7 @@ type Package struct {
 	Source        string
 	usedPkg       bool
 	TypesData     []byte
+	AliasInit     string
 }
 
 func (p *Package) IsEmpty() bool {
@@ -389,6 +391,8 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 		return e, nil
 	}
 
+	ma := NewAlias()
+
 	var foundGeneric bool
 	for _, name := range pkg.Scope().Names() {
 		if !token.IsExported(name) {
@@ -403,13 +407,13 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 			} else {
 				e.TypedConsts = append(e.TypedConsts, fmt.Sprintf("%q: {Typ: reflect.TypeOf(%v), Value: %v}", t.Name(), pkgName+"."+t.Name(), p.constToLit(named, t.Val())))
 			}
-			if alias, ok := aliasType(t.Type(), pkg); ok {
+			if alias, ok := ma.aliasType(t.Type(), pkg); ok {
 				e.Alias = append(e.Alias, fmt.Sprintf("%q: %v", t.Name(), alias))
 			}
 			e.usedPkg = true
 		case *types.Var:
 			e.Vars = append(e.Vars, fmt.Sprintf("%q : reflect.ValueOf(&%v)", t.Name(), pkgName+"."+t.Name()))
-			if alias, ok := aliasType(t.Type(), pkg); ok {
+			if alias, ok := ma.aliasType(t.Type(), pkg); ok {
 				e.Alias = append(e.Alias, fmt.Sprintf("%q: %v", t.Name(), alias))
 			}
 			e.usedPkg = true
@@ -422,7 +426,7 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 				continue
 			}
 			e.Funcs = append(e.Funcs, fmt.Sprintf("%q : reflect.ValueOf(%v)", t.Name(), pkgName+"."+t.Name()))
-			if alias, ok := aliasType(t.Type(), pkg); ok {
+			if alias, ok := ma.aliasType(t.Type(), pkg); ok {
 				e.Alias = append(e.Alias, fmt.Sprintf("%q: %v", t.Name(), alias))
 			}
 			e.usedPkg = true
@@ -454,7 +458,7 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 				e.NamedTypes = append(e.NamedTypes, fmt.Sprintf("%q : reflect.TypeOf((*%v.%v)(nil)).Elem()", typeName, pkgName, typeName))
 			}
 			if named, ok := t.Type().(*types.Named); ok {
-				if alias, ok := aliasNamed(named, pkg); ok {
+				if alias, ok := ma.aliasNamed(named, pkg); ok {
 					e.Alias = append(e.Alias, fmt.Sprintf("%q: %v", t.Name(), alias))
 				}
 			}
@@ -474,6 +478,14 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 			return nil, fmt.Errorf("export types for %q failed: %w", path, err)
 		}
 		e.TypesData = data
+	}
+	if flagExportAlias && len(ma.alias) > 0 {
+		var inits []string
+		for _, info := range ma.alias {
+			inits = append(inits, fmt.Sprintf("%v = %v", info.name, info.info))
+		}
+		sort.Strings(inits)
+		e.AliasInit = fmt.Sprintf("var (\n\t%v\n)", strings.Join(inits, "\n\t"))
 	}
 
 	return e, nil
@@ -526,18 +538,33 @@ func (p *Program) exportTypes(pkg *types.Package) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func aliasNamed(t *types.Named, pkg *types.Package) (string, bool) {
+type aliasVar struct {
+	name string // alias var name
+	info string // &alias.Alias{} / &alias.Builtin{}
+}
+
+type Alias struct {
+	alias map[string]*aliasVar // alias string => var
+	used  map[string]bool      // used alias name => count
+	count map[string]int
+}
+
+func NewAlias() *Alias {
+	return &Alias{alias: make(map[string]*aliasVar), used: make(map[string]bool), count: make(map[string]int)}
+}
+
+func (p *Alias) aliasNamed(t *types.Named, pkg *types.Package) (string, bool) {
 	var list []string
 	for i := 0; i < t.NumMethods(); i++ {
 		fn := t.Method(i)
 		if !ast.IsExported(fn.Name()) {
 			continue
 		}
-		if s, ok := aliasType(fn.Type(), pkg); ok {
+		if s, ok := p.aliasType(fn.Type(), pkg); ok {
 			list = append(list, fmt.Sprintf("%q: %v", fn.Name(), s))
 		}
 	}
-	under, ok := aliasType(t.Underlying(), pkg)
+	under, ok := p.aliasType(t.Underlying(), pkg)
 	if len(list) == 0 && !ok {
 		return "nil", false
 	}
@@ -557,28 +584,28 @@ func aliasNamed(t *types.Named, pkg *types.Package) (string, bool) {
 		under, strings.Join(list, ",\n")), true
 }
 
-func aliasType(t types.Type, pkg *types.Package) (string, bool) {
+func (p *Alias) aliasType(t types.Type, pkg *types.Package) (string, bool) {
 	switch t := t.(type) {
 	case *types.Named:
 	case *types.Pointer:
-		if s, ok := aliasType(t.Elem(), pkg); ok {
+		if s, ok := p.aliasType(t.Elem(), pkg); ok {
 			return fmt.Sprintf("&alias.Pointer{Elem:%v}", s), true
 		}
 	case *types.Array:
-		if s, ok := aliasType(t.Elem(), pkg); ok {
+		if s, ok := p.aliasType(t.Elem(), pkg); ok {
 			return fmt.Sprintf("&alias.Array{Elem:%v}", s), true
 		}
 	case *types.Chan:
-		if s, ok := aliasType(t.Elem(), pkg); ok {
+		if s, ok := p.aliasType(t.Elem(), pkg); ok {
 			return fmt.Sprintf("&alias.Chan{Elem:%v}", s), true
 		}
 	case *types.Slice:
-		if s, ok := aliasType(t.Elem(), pkg); ok {
+		if s, ok := p.aliasType(t.Elem(), pkg); ok {
 			return fmt.Sprintf("&alias.Slice{Elem:%v}", s), true
 		}
 	case *types.Map:
-		k, ok1 := aliasType(t.Key(), pkg)
-		v, ok2 := aliasType(t.Elem(), pkg)
+		k, ok1 := p.aliasType(t.Key(), pkg)
+		v, ok2 := p.aliasType(t.Elem(), pkg)
 		if ok1 || ok2 {
 			return fmt.Sprintf("&alias.Map{Key:%v,Elem:%v}", k, v), true
 		}
@@ -590,7 +617,7 @@ func aliasType(t types.Type, pkg *types.Package) (string, bool) {
 		var has bool
 		list := make([]string, n)
 		for i := 0; i < n; i++ {
-			s, ok := aliasType(t.Field(i).Type(), pkg)
+			s, ok := p.aliasType(t.Field(i).Type(), pkg)
 			if ok {
 				has = true
 			}
@@ -600,13 +627,13 @@ func aliasType(t types.Type, pkg *types.Package) (string, bool) {
 			return fmt.Sprintf("&alias.Struct{Fields:[]alias.Type{%v}}", strings.Join(list, ",")), true
 		}
 	case *types.Signature:
-		params, ok1 := aliasTuple(t.Params(), pkg)
-		results, ok2 := aliasTuple(t.Results(), pkg)
+		params, ok1 := p.aliasTuple(t.Params(), pkg)
+		results, ok2 := p.aliasTuple(t.Results(), pkg)
 		if ok1 || ok2 {
 			return fmt.Sprintf("&alias.Func{\nParams:%v,\nResults:%v,\n}", params, results), true
 		}
 	case *types.Interface:
-		return aliasInterface(t, pkg)
+		return p.aliasInterface(t, pkg)
 	case *types.Alias:
 		opkg := t.Obj().Pkg()
 		if len(filterAliasTypesMap) != 0 {
@@ -619,28 +646,44 @@ func aliasType(t types.Type, pkg *types.Package) (string, bool) {
 				return "nil", false
 			}
 		}
+		if info, ok := p.alias[t.Obj().String()]; ok {
+			return info.name, true
+		}
+		info := &aliasVar{}
 		if opkg == nil {
-			return fmt.Sprintf("&alias.Builtin{Typ: %q}", t.Obj().Name()), true
-		}
-		var named string
-		if opkg == pkg {
-			named = t.Obj().Name()
+			info.name = "alias_" + t.Obj().Name()
+			info.info = fmt.Sprintf("&alias.Builtin{Typ: %q}", t.Obj().Name())
 		} else {
-			named = opkg.Path() + "." + t.Obj().Name()
+			var named string
+			if opkg == pkg {
+				named = t.Obj().Name()
+				info.name = "alias_" + named
+			} else {
+				named = opkg.Path() + "." + t.Obj().Name()
+				info.name = "alias_" + opkg.Name() + "_" + t.Obj().Name()
+			}
+			info.info = fmt.Sprintf("&alias.Alias{Typ: %q}", named)
 		}
-		return fmt.Sprintf("&alias.Alias{Typ: %q}", named), true
+		base := info.name
+		for p.used[info.name] {
+			p.count[base]++
+			info.name = fmt.Sprintf("%v_%v", base, p.count[base])
+		}
+		p.used[info.name] = true
+		p.alias[t.Obj().String()] = info
+		return info.name, true
 	}
 	return "nil", false
 }
 
-func aliasInterface(t *types.Interface, pkg *types.Package) (string, bool) {
+func (p *Alias) aliasInterface(t *types.Interface, pkg *types.Package) (string, bool) {
 	var list []string
 	for i := 0; i < t.NumMethods(); i++ {
 		fn := t.Method(i)
 		if !ast.IsExported(fn.Name()) {
 			continue
 		}
-		if s, ok := aliasType(fn.Type(), pkg); ok {
+		if s, ok := p.aliasType(fn.Type(), pkg); ok {
 			list = append(list, fmt.Sprintf("%q: %v", fn.Name(), s))
 		}
 	}
@@ -655,10 +698,10 @@ func aliasInterface(t *types.Interface, pkg *types.Package) (string, bool) {
 		strings.Join(list, ",\n")), true
 }
 
-func aliasTuple(tuple *types.Tuple, pkg *types.Package) (ret string, has bool) {
+func (p *Alias) aliasTuple(tuple *types.Tuple, pkg *types.Package) (ret string, has bool) {
 	var list []string
 	for i := 0; i < tuple.Len(); i++ {
-		t, ok := aliasType(tuple.At(i).Type(), pkg)
+		t, ok := p.aliasType(tuple.At(i).Type(), pkg)
 		list = append(list, t)
 		if ok {
 			has = true
