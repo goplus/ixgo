@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package load
+package test
 
 import (
 	"bytes"
@@ -282,3 +282,10 @@ func (t *testFuncs) load(filename, pkg string, doImport, seen *bool) error {
 }
 
 var testmainTmpl = template.Must(template.New("main").Parse(testmainData))
+
+type Processor struct {
+}
+
+func (Processor) LoadMain(ctx *build.Context, bp *build.Package) ([]byte, error) {
+	return TestMain(ctx, bp)
+}
