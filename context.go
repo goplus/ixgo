@@ -384,6 +384,31 @@ var (
 	sourceProcessor = make(map[string]SourceProcessFunc)
 )
 
+// EmbedProcessor handles processing of embed directives and returns a embed data AST file.
+type EmbedProcessor interface {
+	LoadPkg(bp *build.Package, fset *token.FileSet, files []*ast.File, test bool, xtest bool) (*ast.File, error)
+	LoadFiles(pkgName string, dir string, fset *token.FileSet, files []*ast.File) (*ast.File, error)
+}
+
+var embedProcessor EmbedProcessor
+
+// RegisterEmbedProcessor registers a global EmbedProcessor for embed handling.
+func RegisterEmbedProcessor(processor EmbedProcessor) {
+	embedProcessor = processor
+}
+
+// TestProcessor handles loading of test main data.
+type TestProcessor interface {
+	LoadMain(ctx *build.Context, bp *build.Package) ([]byte, error)
+}
+
+var testProcessor TestProcessor
+
+// RegisterTestProcessor registers a global TestProcessor for test handling.
+func RegisterTestProcessor(processor TestProcessor) {
+	testProcessor = processor
+}
+
 func (ctx *Context) AddImportFile(path string, filename string, src interface{}) (err error) {
 	_, err = ctx.addImportFile(path, filename, src)
 	return
@@ -449,19 +474,6 @@ func (ctx *Context) loadPackageFile(path string, filename string, src interface{
 	return tp, nil
 }
 
-// EmbedProcessor handles processing of embed directives and returns a embed data AST file.
-type EmbedProcessor interface {
-	LoadPkg(bp *build.Package, fset *token.FileSet, files []*ast.File, test bool, xtest bool) (*ast.File, error)
-	LoadFiles(pkgName string, dir string, fset *token.FileSet, files []*ast.File) (*ast.File, error)
-}
-
-var embedProcessor EmbedProcessor
-
-// RegisterEmbedProcessor registers a global EmbedProcessor for embed handling.
-func RegisterEmbedProcessor(processor EmbedProcessor) {
-	embedProcessor = processor
-}
-
 func (ctx *Context) loadPackage(bp *build.Package, path string, dir string) (*SourcePackage, error) {
 	files, err := ctx.parseGoFiles(dir, append(bp.GoFiles, bp.CgoFiles...))
 	if err != nil {
@@ -492,6 +504,9 @@ func (ctx *Context) loadPackage(bp *build.Package, path string, dir string) (*So
 func (ctx *Context) loadTestPackage(bp *build.Package, path string, dir string) (*SourcePackage, error) {
 	if len(bp.TestGoFiles) == 0 && len(bp.XTestGoFiles) == 0 {
 		return nil, ErrNoTestFiles
+	}
+	if testProcessor == nil {
+		return nil, ErrNoTestProcessor
 	}
 	files, err := ctx.parseGoFiles(dir, append(append(bp.GoFiles, bp.CgoFiles...), bp.TestGoFiles...))
 	if err != nil {
@@ -545,7 +560,7 @@ func (ctx *Context) loadTestPackage(bp *build.Package, path string, dir string) 
 		}
 		ctx.pkgs[path+"_test"] = tp
 	}
-	data, err := load.TestMain(&ctx.BuildContext, bp)
+	data, err := testProcessor.LoadMain(&ctx.BuildContext, bp)
 	if err != nil {
 		return nil, err
 	}

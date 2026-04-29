@@ -29,6 +29,7 @@ var (
 	ErrGoexitDeadlock  = errors.New("fatal error: no goroutines (main called runtime.Goexit) - deadlock!")
 	ErrNoFunction      = errors.New("no function")
 	ErrNoTestFiles     = errors.New("[no test files]")
+	ErrNoTestProcessor = errors.New("test processor not registered: import _ \"github.com/goplus/ixgo/pkg/testing\" or call ixgo.RegisterTestProcessor")
 )
 
 type ExitError int
