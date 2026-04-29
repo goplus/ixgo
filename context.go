@@ -449,17 +449,32 @@ func (ctx *Context) loadPackageFile(path string, filename string, src interface{
 	return tp, nil
 }
 
+// EmbedProcessor handles processing of embed directives and returns a embed data AST file.
+type EmbedProcessor interface {
+	LoadPkg(bp *build.Package, fset *token.FileSet, files []*ast.File, test bool, xtest bool) (*ast.File, error)
+	LoadFiles(pkgName string, dir string, fset *token.FileSet, files []*ast.File) (*ast.File, error)
+}
+
+var embedProcessor EmbedProcessor
+
+// RegisterEmbedProcessor registers a global EmbedProcessor for embed handling.
+func RegisterEmbedProcessor(processor EmbedProcessor) {
+	embedProcessor = processor
+}
+
 func (ctx *Context) loadPackage(bp *build.Package, path string, dir string) (*SourcePackage, error) {
 	files, err := ctx.parseGoFiles(dir, append(bp.GoFiles, bp.CgoFiles...))
 	if err != nil {
 		return nil, err
 	}
-	embed, err := load.Embed(bp, ctx.FileSet, files, false, false)
-	if err != nil {
-		return nil, err
-	}
-	if embed != nil {
-		files = append(files, embed)
+	if embedProcessor != nil {
+		embed, err := embedProcessor.LoadPkg(bp, ctx.FileSet, files, false, false)
+		if err != nil {
+			return nil, err
+		}
+		if embed != nil {
+			files = append(files, embed)
+		}
 	}
 	if bp.Name == "main" {
 		path = "main"
@@ -482,12 +497,14 @@ func (ctx *Context) loadTestPackage(bp *build.Package, path string, dir string) 
 	if err != nil {
 		return nil, err
 	}
-	embed, err := load.Embed(bp, ctx.FileSet, files, true, false)
-	if err != nil {
-		return nil, err
-	}
-	if embed != nil {
-		files = append(files, embed)
+	if embedProcessor != nil {
+		embed, err := embedProcessor.LoadPkg(bp, ctx.FileSet, files, true, false)
+		if err != nil {
+			return nil, err
+		}
+		if embed != nil {
+			files = append(files, embed)
+		}
 	}
 	// fix pkg name
 	name := bp.Name
@@ -510,12 +527,14 @@ func (ctx *Context) loadTestPackage(bp *build.Package, path string, dir string) 
 		if err != nil {
 			return nil, err
 		}
-		embed, err := load.Embed(bp, ctx.FileSet, files, false, true)
-		if err != nil {
-			return nil, err
-		}
-		if embed != nil {
-			files = append(files, embed)
+		if embedProcessor != nil {
+			embed, err := embedProcessor.LoadPkg(bp, ctx.FileSet, files, false, true)
+			if err != nil {
+				return nil, err
+			}
+			if embed != nil {
+				files = append(files, embed)
+			}
 		}
 		tp := &SourcePackage{
 			Package: types.NewPackage(path+"_test", bp.Name+"_test"),
@@ -624,12 +643,14 @@ func (ctx *Context) LoadAstFile(path string, file *ast.File) (*ssa.Package, erro
 	if dir == "" {
 		dir, _ = os.Getwd()
 	}
-	embed, err := load.EmbedFiles(file.Name.Name, filepath.Clean(dir), ctx.FileSet, files)
-	if err != nil {
-		return nil, err
-	}
-	if embed != nil {
-		files = append(files, embed)
+	if embedProcessor != nil {
+		embed, err := embedProcessor.LoadFiles(file.Name.Name, filepath.Clean(dir), ctx.FileSet, files)
+		if err != nil {
+			return nil, err
+		}
+		if embed != nil {
+			files = append(files, embed)
+		}
 	}
 	sp := &SourcePackage{
 		Context: ctx,

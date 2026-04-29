@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package load
+package embed
 
 import (
 	"bytes"
@@ -216,4 +216,15 @@ func EmbedFiles(pkgName string, dir string, fset *token.FileSet, files []*ast.Fi
 		EmbedPatternPos: embed.PatternPos,
 	}
 	return Embed(bp, fset, files, false, false)
+}
+
+type Processor struct {
+}
+
+func (Processor) LoadPkg(bp *build.Package, fset *token.FileSet, files []*ast.File, test bool, xtest bool) (*ast.File, error) {
+	return Embed(bp, fset, files, test, xtest)
+}
+
+func (Processor) LoadFiles(pkgName string, dir string, fset *token.FileSet, files []*ast.File) (*ast.File, error) {
+	return EmbedFiles(pkgName, dir, fset, files)
 }
