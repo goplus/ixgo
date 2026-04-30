@@ -21,14 +21,12 @@ package list
 
 import (
 	"bytes"
-	"errors"
-	"fmt"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
 
-	"golang.org/x/mod/modfile"
+	"github.com/goplus/ixgo/load/mod"
 )
 
 // GetImportPath get import path from dir.
@@ -49,15 +47,15 @@ func GetImportPath(pkgName string, dir string) (string, error) {
 	if pkgName == "" || pkgName == "main" {
 		_, pkgName = filepath.Split(dir)
 	}
-	mod, found := findModule(dir)
+	fmod, found := findModule(dir)
 	if !found {
 		return pkgName, nil
 	}
-	data, err := os.ReadFile(mod)
+	data, err := os.ReadFile(fmod)
 	if err != nil {
 		return "", err
 	}
-	f, err := ParseModFile(mod, data)
+	f, err := mod.ParseModFile(fmod, data)
 	if err != nil {
 		return "", err
 	}
@@ -91,20 +89,4 @@ func findModule(dir string) (file string, found bool) {
 		}
 	}
 	return
-}
-
-// ParseModFile parse go.mod
-func ParseModFile(file string, data []byte) (*modfile.File, error) {
-	fix := func(path, vers string) (resolved string, err error) {
-		// do nothing
-		return vers, nil
-	}
-	f, err := modfile.Parse(file, data, fix)
-	if err != nil {
-		return nil, fmt.Errorf("parse go.mod %w", err)
-	}
-	if f.Module == nil {
-		return nil, errors.New("no module declaration in go.mod")
-	}
-	return f, nil
 }
