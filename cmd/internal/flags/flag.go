@@ -21,7 +21,7 @@ import (
 	"strings"
 
 	"github.com/goplus/ixgo/cmd/internal/base"
-	"github.com/goplus/ixgo/load"
+	"github.com/goplus/ixgo/load/list"
 )
 
 var (
@@ -57,7 +57,7 @@ func AddBuildFlags(cmd *base.Command, mask BuildFlagMask) {
 		cmd.Flag.BoolVar(&BuildV, "v", false, "print the names of packages as they are compiled.")
 	}
 	if mask&OmitModFlag != 0 {
-		cmd.Flag.Var(explicitStringFlag{value: &load.BuildMod, explicit: &BuildModExplicit}, "mod", "module download mode to use: readonly, vendor, or mod.")
+		cmd.Flag.Var(explicitStringFlag{value: &list.BuildMod, explicit: &BuildModExplicit}, "mod", "module download mode to use: readonly, vendor, or mod.")
 	}
 	if mask&OmitSSAFlag != 0 {
 		cmd.Flag.BoolVar(&BuildSSA, "ssa", false, "print SSA instruction code")

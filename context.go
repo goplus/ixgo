@@ -40,6 +40,7 @@ import (
 	"time"
 
 	"github.com/goplus/ixgo/load"
+	"github.com/goplus/ixgo/load/list"
 	"golang.org/x/tools/go/ssa"
 )
 
@@ -204,7 +205,7 @@ func NewContext(mode Mode) *Context {
 		ctx.RegisterExternal("runtime.GC", runtimeGC)
 	}
 	ctx.sizes = types.SizesFor("gc", runtime.GOARCH)
-	ctx.Lookup = new(load.ListDriver).Lookup
+	ctx.Lookup = new(list.ListDriver).Lookup
 	ctx.Importer = NewImporter(ctx)
 	ctx.Builder = NewSSABuilder(ctx)
 
@@ -325,7 +326,7 @@ func (ctx *Context) writeOutput(data []byte) (n int, err error) {
 
 func (ctx *Context) LoadDir(dir string, test bool) (pkg *ssa.Package, err error) {
 	return ctx.LoadDirEx(dir, test, func(pkgName string, dir string) (string, bool) {
-		path, err := load.GetImportPath(pkgName, dir)
+		path, err := list.GetImportPath(pkgName, dir)
 		if err != nil {
 			log.Println("GetImportPath error:", err)
 			return "", false

@@ -1,3 +1,6 @@
+//go:build !wasm
+// +build !wasm
+
 /*
  * Copyright (c) 2022 The GoPlus Authors (goplus.org). All rights reserved.
  *
@@ -14,7 +17,7 @@
  * limitations under the License.
  */
 
-package load
+package list
 
 import (
 	"bytes"
