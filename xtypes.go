@@ -413,7 +413,7 @@ func (r *TypesRecord) extractMethodSet(T types.Type) (methods []*types.Selection
 		}
 		for i := 0; i < pcount; i++ {
 			meth := pmset.At(i)
-			if m, ok := mcache[meth.Obj().Name()]; ok {
+			if m, ok := mcache[meth.Obj().Name()]; ok && len(meth.Index()) >= len(m.Index()) {
 				meth = m
 			}
 			methods[i] = meth
