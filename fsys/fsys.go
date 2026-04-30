@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/goplus/ixgo"
-	"github.com/goplus/ixgo/load"
+	"github.com/goplus/ixgo/load/mod"
 )
 
 // FileSystem represents a file system.
@@ -30,7 +30,7 @@ type FileSystem interface {
 func SetBuildFileSystem(ctx *ixgo.Context, fsys FileSystem, parseGoMod bool) error {
 	if parseGoMod {
 		if data, err := fsys.ReadFile("go.mod"); err == nil {
-			f, err := load.ParseModFile("go.mod", data)
+			f, err := mod.ParseModFile("go.mod", data)
 			if err != nil {
 				return err
 			}
@@ -93,7 +93,7 @@ func SetBuildFS(ctx *ixgo.Context, fsys fs.FS, parseGoMod bool) error {
 			if err != nil {
 				return err
 			}
-			f, err := load.ParseModFile("go.mod", data)
+			f, err := mod.ParseModFile("go.mod", data)
 			if err != nil {
 				return err
 			}
