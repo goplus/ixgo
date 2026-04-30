@@ -392,6 +392,10 @@ func (r *TypesRecord) toNamedType(t *types.Named) (reflect.Type, bool) {
 	return typ, nested
 }
 
+// extractMethodSet builds the combined method list for T. For each method in
+// the pointer-receiver set, it prefers the value-receiver selection when one
+// exists at an equal or shallower embedding depth (shorter Index), since that
+// selection is the canonical one for non-pointer dispatch.
 func (r *TypesRecord) extractMethodSet(T types.Type) (methods []*types.Selection, pcount int, mcount int) {
 	pmset := r.prog.MethodSets.MethodSet(types.NewPointer(T))
 	pcount = pmset.Len()
@@ -413,7 +417,10 @@ func (r *TypesRecord) extractMethodSet(T types.Type) (methods []*types.Selection
 		}
 		for i := 0; i < pcount; i++ {
 			meth := pmset.At(i)
-			if m, ok := mcache[meth.Obj().Name()]; ok {
+			// Prefer the value-receiver selection (m) only when its embedding depth
+			// is no greater than the pointer-receiver entry (meth). A deeper m would
+			// mean meth is the more direct promotion and should not be replaced.
+			if m, ok := mcache[meth.Obj().Name()]; ok && len(meth.Index()) >= len(m.Index()) {
 				meth = m
 			}
 			methods[i] = meth
