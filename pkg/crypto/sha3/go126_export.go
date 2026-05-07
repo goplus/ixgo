@@ -14,39 +14,41 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "sha3",
-		Path: "crypto/sha3",
-		Deps: map[string]string{
-			"crypto":                       "crypto",
-			"crypto/internal/fips140/sha3": "sha3",
-			"hash":                         "hash",
-			"unsafe":                       "unsafe",
-		},
-		Interfaces: map[string]reflect.Type{},
-		NamedTypes: map[string]reflect.Type{
-			"SHA3":  reflect.TypeOf((*q.SHA3)(nil)).Elem(),
-			"SHAKE": reflect.TypeOf((*q.SHAKE)(nil)).Elem(),
-		},
-		AliasTypes: map[string]reflect.Type{},
-		Vars:       map[string]reflect.Value{},
-		Funcs: map[string]reflect.Value{
-			"New224":       reflect.ValueOf(q.New224),
-			"New256":       reflect.ValueOf(q.New256),
-			"New384":       reflect.ValueOf(q.New384),
-			"New512":       reflect.ValueOf(q.New512),
-			"NewCSHAKE128": reflect.ValueOf(q.NewCSHAKE128),
-			"NewCSHAKE256": reflect.ValueOf(q.NewCSHAKE256),
-			"NewSHAKE128":  reflect.ValueOf(q.NewSHAKE128),
-			"NewSHAKE256":  reflect.ValueOf(q.NewSHAKE256),
-			"Sum224":       reflect.ValueOf(q.Sum224),
-			"Sum256":       reflect.ValueOf(q.Sum256),
-			"Sum384":       reflect.ValueOf(q.Sum384),
-			"Sum512":       reflect.ValueOf(q.Sum512),
-			"SumSHAKE128":  reflect.ValueOf(q.SumSHAKE128),
-			"SumSHAKE256":  reflect.ValueOf(q.SumSHAKE256),
-		},
-		TypedConsts:   map[string]ixgo.TypedConst{},
-		UntypedConsts: map[string]ixgo.UntypedConst{},
+	ixgo.RegisterPackage("crypto/sha3", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "sha3",
+			Path: "crypto/sha3",
+			Deps: map[string]string{
+				"crypto":                       "crypto",
+				"crypto/internal/fips140/sha3": "sha3",
+				"hash":                         "hash",
+				"unsafe":                       "unsafe",
+			},
+			Interfaces: map[string]reflect.Type{},
+			NamedTypes: map[string]reflect.Type{
+				"SHA3":  reflect.TypeOf((*q.SHA3)(nil)).Elem(),
+				"SHAKE": reflect.TypeOf((*q.SHAKE)(nil)).Elem(),
+			},
+			AliasTypes: map[string]reflect.Type{},
+			Vars:       map[string]interface{}{},
+			Funcs: map[string]interface{}{
+				"New224":       q.New224,
+				"New256":       q.New256,
+				"New384":       q.New384,
+				"New512":       q.New512,
+				"NewCSHAKE128": q.NewCSHAKE128,
+				"NewCSHAKE256": q.NewCSHAKE256,
+				"NewSHAKE128":  q.NewSHAKE128,
+				"NewSHAKE256":  q.NewSHAKE256,
+				"Sum224":       q.Sum224,
+				"Sum256":       q.Sum256,
+				"Sum384":       q.Sum384,
+				"Sum512":       q.Sum512,
+				"SumSHAKE128":  q.SumSHAKE128,
+				"SumSHAKE256":  q.SumSHAKE256,
+			},
+			TypedConsts:   map[string]interface{}{},
+			UntypedConsts: map[string]ixgo.UntypedConst{},
+		}
 	})
 }

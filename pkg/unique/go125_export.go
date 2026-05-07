@@ -12,19 +12,21 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "unique",
-		Path: "unique",
-		Deps: map[string]string{
-			"internal/abi":         "abi",
-			"internal/goarch":      "goarch",
-			"internal/stringslite": "stringslite",
-			"internal/sync":        "sync",
-			"runtime":              "runtime",
-			"sync":                 "sync",
-			"sync/atomic":          "atomic",
-			"unsafe":               "unsafe",
-			"weak":                 "weak",
-		},
+	ixgo.RegisterPackage("unique", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "unique",
+			Path: "unique",
+			Deps: map[string]string{
+				"internal/abi":         "abi",
+				"internal/goarch":      "goarch",
+				"internal/stringslite": "stringslite",
+				"internal/sync":        "sync",
+				"runtime":              "runtime",
+				"sync":                 "sync",
+				"sync/atomic":          "atomic",
+				"unsafe":               "unsafe",
+				"weak":                 "weak",
+			},
+		}
 	})
 }

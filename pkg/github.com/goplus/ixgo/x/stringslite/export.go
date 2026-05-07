@@ -11,20 +11,22 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "stringslite",
-		Path: "github.com/goplus/ixgo/x/stringslite",
-		Deps: map[string]string{
-			"unsafe": "unsafe",
-		},
-		Interfaces: map[string]reflect.Type{},
-		NamedTypes: map[string]reflect.Type{},
-		AliasTypes: map[string]reflect.Type{},
-		Vars:       map[string]reflect.Value{},
-		Funcs: map[string]reflect.Value{
-			"Clone": reflect.ValueOf(q.Clone),
-		},
-		TypedConsts:   map[string]ixgo.TypedConst{},
-		UntypedConsts: map[string]ixgo.UntypedConst{},
+	ixgo.RegisterPackage("github.com/goplus/ixgo/x/stringslite", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "stringslite",
+			Path: "github.com/goplus/ixgo/x/stringslite",
+			Deps: map[string]string{
+				"unsafe": "unsafe",
+			},
+			Interfaces: map[string]reflect.Type{},
+			NamedTypes: map[string]reflect.Type{},
+			AliasTypes: map[string]reflect.Type{},
+			Vars:       map[string]interface{}{},
+			Funcs: map[string]interface{}{
+				"Clone": q.Clone,
+			},
+			TypedConsts:   map[string]interface{}{},
+			UntypedConsts: map[string]ixgo.UntypedConst{},
+		}
 	})
 }

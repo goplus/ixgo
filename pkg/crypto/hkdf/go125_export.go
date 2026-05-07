@@ -12,15 +12,17 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "hkdf",
-		Path: "crypto/hkdf",
-		Deps: map[string]string{
-			"crypto/internal/fips140/hkdf": "hkdf",
-			"crypto/internal/fips140hash":  "fips140hash",
-			"crypto/internal/fips140only":  "fips140only",
-			"errors":                       "errors",
-			"hash":                         "hash",
-		},
+	ixgo.RegisterPackage("crypto/hkdf", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "hkdf",
+			Path: "crypto/hkdf",
+			Deps: map[string]string{
+				"crypto/internal/fips140/hkdf": "hkdf",
+				"crypto/internal/fips140hash":  "fips140hash",
+				"crypto/internal/fips140only":  "fips140only",
+				"errors":                       "errors",
+				"hash":                         "hash",
+			},
+		}
 	})
 }

@@ -15,49 +15,51 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "binary",
-		Path: "encoding/binary",
-		Deps: map[string]string{
-			"errors":  "errors",
-			"io":      "io",
-			"math":    "math",
-			"reflect": "reflect",
-			"slices":  "slices",
-			"sync":    "sync",
-		},
-		Interfaces: map[string]reflect.Type{
-			"AppendByteOrder": reflect.TypeOf((*q.AppendByteOrder)(nil)).Elem(),
-			"ByteOrder":       reflect.TypeOf((*q.ByteOrder)(nil)).Elem(),
-		},
-		NamedTypes: map[string]reflect.Type{},
-		AliasTypes: map[string]reflect.Type{},
-		Vars: map[string]reflect.Value{
-			"BigEndian":    reflect.ValueOf(&q.BigEndian),
-			"LittleEndian": reflect.ValueOf(&q.LittleEndian),
-			"NativeEndian": reflect.ValueOf(&q.NativeEndian),
-		},
-		Funcs: map[string]reflect.Value{
-			"Append":        reflect.ValueOf(q.Append),
-			"AppendUvarint": reflect.ValueOf(q.AppendUvarint),
-			"AppendVarint":  reflect.ValueOf(q.AppendVarint),
-			"Decode":        reflect.ValueOf(q.Decode),
-			"Encode":        reflect.ValueOf(q.Encode),
-			"PutUvarint":    reflect.ValueOf(q.PutUvarint),
-			"PutVarint":     reflect.ValueOf(q.PutVarint),
-			"Read":          reflect.ValueOf(q.Read),
-			"ReadUvarint":   reflect.ValueOf(q.ReadUvarint),
-			"ReadVarint":    reflect.ValueOf(q.ReadVarint),
-			"Size":          reflect.ValueOf(q.Size),
-			"Uvarint":       reflect.ValueOf(q.Uvarint),
-			"Varint":        reflect.ValueOf(q.Varint),
-			"Write":         reflect.ValueOf(q.Write),
-		},
-		TypedConsts: map[string]ixgo.TypedConst{},
-		UntypedConsts: map[string]ixgo.UntypedConst{
-			"MaxVarintLen16": {"untyped int", constant.MakeInt64(int64(q.MaxVarintLen16))},
-			"MaxVarintLen32": {"untyped int", constant.MakeInt64(int64(q.MaxVarintLen32))},
-			"MaxVarintLen64": {"untyped int", constant.MakeInt64(int64(q.MaxVarintLen64))},
-		},
+	ixgo.RegisterPackage("encoding/binary", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "binary",
+			Path: "encoding/binary",
+			Deps: map[string]string{
+				"errors":  "errors",
+				"io":      "io",
+				"math":    "math",
+				"reflect": "reflect",
+				"slices":  "slices",
+				"sync":    "sync",
+			},
+			Interfaces: map[string]reflect.Type{
+				"AppendByteOrder": reflect.TypeOf((*q.AppendByteOrder)(nil)).Elem(),
+				"ByteOrder":       reflect.TypeOf((*q.ByteOrder)(nil)).Elem(),
+			},
+			NamedTypes: map[string]reflect.Type{},
+			AliasTypes: map[string]reflect.Type{},
+			Vars: map[string]interface{}{
+				"BigEndian":    &q.BigEndian,
+				"LittleEndian": &q.LittleEndian,
+				"NativeEndian": &q.NativeEndian,
+			},
+			Funcs: map[string]interface{}{
+				"Append":        q.Append,
+				"AppendUvarint": q.AppendUvarint,
+				"AppendVarint":  q.AppendVarint,
+				"Decode":        q.Decode,
+				"Encode":        q.Encode,
+				"PutUvarint":    q.PutUvarint,
+				"PutVarint":     q.PutVarint,
+				"Read":          q.Read,
+				"ReadUvarint":   q.ReadUvarint,
+				"ReadVarint":    q.ReadVarint,
+				"Size":          q.Size,
+				"Uvarint":       q.Uvarint,
+				"Varint":        q.Varint,
+				"Write":         q.Write,
+			},
+			TypedConsts: map[string]interface{}{},
+			UntypedConsts: map[string]ixgo.UntypedConst{
+				"MaxVarintLen16": {Typ: "untyped int", Value: constant.MakeInt64(int64(q.MaxVarintLen16))},
+				"MaxVarintLen32": {Typ: "untyped int", Value: constant.MakeInt64(int64(q.MaxVarintLen32))},
+				"MaxVarintLen64": {Typ: "untyped int", Value: constant.MakeInt64(int64(q.MaxVarintLen64))},
+			},
+		}
 	})
 }

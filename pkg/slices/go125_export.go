@@ -12,16 +12,18 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "slices",
-		Path: "slices",
-		Deps: map[string]string{
-			"cmp":       "cmp",
-			"iter":      "iter",
-			"math/bits": "bits",
-			"unsafe":    "unsafe",
-		},
-		Source: source,
+	ixgo.RegisterPackage("slices", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "slices",
+			Path: "slices",
+			Deps: map[string]string{
+				"cmp":       "cmp",
+				"iter":      "iter",
+				"math/bits": "bits",
+				"unsafe":    "unsafe",
+			},
+			Source: source,
+		}
 	})
 }
 

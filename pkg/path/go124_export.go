@@ -14,31 +14,33 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "path",
-		Path: "path",
-		Deps: map[string]string{
-			"errors":           "errors",
-			"internal/bytealg": "bytealg",
-			"unicode/utf8":     "utf8",
-		},
-		Interfaces: map[string]reflect.Type{},
-		NamedTypes: map[string]reflect.Type{},
-		AliasTypes: map[string]reflect.Type{},
-		Vars: map[string]reflect.Value{
-			"ErrBadPattern": reflect.ValueOf(&q.ErrBadPattern),
-		},
-		Funcs: map[string]reflect.Value{
-			"Base":  reflect.ValueOf(q.Base),
-			"Clean": reflect.ValueOf(q.Clean),
-			"Dir":   reflect.ValueOf(q.Dir),
-			"Ext":   reflect.ValueOf(q.Ext),
-			"IsAbs": reflect.ValueOf(q.IsAbs),
-			"Join":  reflect.ValueOf(q.Join),
-			"Match": reflect.ValueOf(q.Match),
-			"Split": reflect.ValueOf(q.Split),
-		},
-		TypedConsts:   map[string]ixgo.TypedConst{},
-		UntypedConsts: map[string]ixgo.UntypedConst{},
+	ixgo.RegisterPackage("path", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "path",
+			Path: "path",
+			Deps: map[string]string{
+				"errors":           "errors",
+				"internal/bytealg": "bytealg",
+				"unicode/utf8":     "utf8",
+			},
+			Interfaces: map[string]reflect.Type{},
+			NamedTypes: map[string]reflect.Type{},
+			AliasTypes: map[string]reflect.Type{},
+			Vars: map[string]interface{}{
+				"ErrBadPattern": &q.ErrBadPattern,
+			},
+			Funcs: map[string]interface{}{
+				"Base":  q.Base,
+				"Clean": q.Clean,
+				"Dir":   q.Dir,
+				"Ext":   q.Ext,
+				"IsAbs": q.IsAbs,
+				"Join":  q.Join,
+				"Match": q.Match,
+				"Split": q.Split,
+			},
+			TypedConsts:   map[string]interface{}{},
+			UntypedConsts: map[string]ixgo.UntypedConst{},
+		}
 	})
 }

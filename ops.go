@@ -89,7 +89,7 @@ func globalToValue(i *Interp, key *ssa.Global) (interface{}, bool) {
 		pkgpath := key.Pkg.Pkg.Path()
 		if pkg, ok := i.installed(pkgpath); ok {
 			if ext, ok := pkg.Vars[key.Name()]; ok {
-				return ext.Interface(), true
+				return ext, true
 			}
 		}
 	}

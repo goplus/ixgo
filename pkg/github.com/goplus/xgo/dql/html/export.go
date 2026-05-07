@@ -12,42 +12,44 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "html",
-		Path: "github.com/goplus/xgo/dql/html",
-		Deps: map[string]string{
-			"bytes":                      "bytes",
-			"fmt":                        "fmt",
-			"github.com/goplus/xgo/dql":  "dql",
-			"github.com/qiniu/x/stream":  "stream",
-			"golang.org/x/net/html":      "html",
-			"golang.org/x/net/html/atom": "atom",
-			"io":                         "io",
-			"iter":                       "iter",
-			"os":                         "os",
-			"unsafe":                     "unsafe",
-		},
-		Interfaces: map[string]reflect.Type{
-			"NodeFilter": reflect.TypeOf((*q.NodeFilter)(nil)).Elem(),
-		},
-		NamedTypes: map[string]reflect.Type{
-			"Node":    reflect.TypeOf((*q.Node)(nil)).Elem(),
-			"NodeSet": reflect.TypeOf((*q.NodeSet)(nil)).Elem(),
-		},
-		AliasTypes: map[string]reflect.Type{},
-		Vars:       map[string]reflect.Value{},
-		Funcs: map[string]reflect.Value{
-			"ClassContains": reflect.ValueOf(q.ClassContains),
-			"New":           reflect.ValueOf(q.New),
-			"NodeSet_Cast":  reflect.ValueOf(q.NodeSet_Cast),
-			"Nodes":         reflect.ValueOf(q.Nodes),
-			"Parse":         reflect.ValueOf(q.Parse),
-			"Root":          reflect.ValueOf(q.Root),
-			"Source":        reflect.ValueOf(q.Source),
-		},
-		TypedConsts: map[string]ixgo.TypedConst{},
-		UntypedConsts: map[string]ixgo.UntypedConst{
-			"XGoPackage": {Typ: "untyped bool", Value: constant.MakeBool(bool(q.XGoPackage))},
-		},
+	ixgo.RegisterPackage("github.com/goplus/xgo/dql/html", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "html",
+			Path: "github.com/goplus/xgo/dql/html",
+			Deps: map[string]string{
+				"bytes":                      "bytes",
+				"fmt":                        "fmt",
+				"github.com/goplus/xgo/dql":  "dql",
+				"github.com/qiniu/x/stream":  "stream",
+				"golang.org/x/net/html":      "html",
+				"golang.org/x/net/html/atom": "atom",
+				"io":                         "io",
+				"iter":                       "iter",
+				"os":                         "os",
+				"unsafe":                     "unsafe",
+			},
+			Interfaces: map[string]reflect.Type{
+				"NodeFilter": reflect.TypeOf((*q.NodeFilter)(nil)).Elem(),
+			},
+			NamedTypes: map[string]reflect.Type{
+				"Node":    reflect.TypeOf((*q.Node)(nil)).Elem(),
+				"NodeSet": reflect.TypeOf((*q.NodeSet)(nil)).Elem(),
+			},
+			AliasTypes: map[string]reflect.Type{},
+			Vars:       map[string]interface{}{},
+			Funcs: map[string]interface{}{
+				"ClassContains": q.ClassContains,
+				"New":           q.New,
+				"NodeSet_Cast":  q.NodeSet_Cast,
+				"Nodes":         q.Nodes,
+				"Parse":         q.Parse,
+				"Root":          q.Root,
+				"Source":        q.Source,
+			},
+			TypedConsts: map[string]interface{}{},
+			UntypedConsts: map[string]ixgo.UntypedConst{
+				"XGoPackage": {Typ: "untyped bool", Value: constant.MakeBool(bool(q.XGoPackage))},
+			},
+		}
 	})
 }

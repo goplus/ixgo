@@ -14,27 +14,29 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "errors",
-		Path: "errors",
-		Deps: map[string]string{
-			"internal/reflectlite": "reflectlite",
-			"unsafe":               "unsafe",
-		},
-		Interfaces: map[string]reflect.Type{},
-		NamedTypes: map[string]reflect.Type{},
-		AliasTypes: map[string]reflect.Type{},
-		Vars: map[string]reflect.Value{
-			"ErrUnsupported": reflect.ValueOf(&q.ErrUnsupported),
-		},
-		Funcs: map[string]reflect.Value{
-			"As":     reflect.ValueOf(q.As),
-			"Is":     reflect.ValueOf(q.Is),
-			"Join":   reflect.ValueOf(q.Join),
-			"New":    reflect.ValueOf(q.New),
-			"Unwrap": reflect.ValueOf(q.Unwrap),
-		},
-		TypedConsts:   map[string]ixgo.TypedConst{},
-		UntypedConsts: map[string]ixgo.UntypedConst{},
+	ixgo.RegisterPackage("errors", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "errors",
+			Path: "errors",
+			Deps: map[string]string{
+				"internal/reflectlite": "reflectlite",
+				"unsafe":               "unsafe",
+			},
+			Interfaces: map[string]reflect.Type{},
+			NamedTypes: map[string]reflect.Type{},
+			AliasTypes: map[string]reflect.Type{},
+			Vars: map[string]interface{}{
+				"ErrUnsupported": &q.ErrUnsupported,
+			},
+			Funcs: map[string]interface{}{
+				"As":     q.As,
+				"Is":     q.Is,
+				"Join":   q.Join,
+				"New":    q.New,
+				"Unwrap": q.Unwrap,
+			},
+			TypedConsts:   map[string]interface{}{},
+			UntypedConsts: map[string]ixgo.UntypedConst{},
+		}
 	})
 }

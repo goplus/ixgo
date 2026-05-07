@@ -12,15 +12,17 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "pbkdf2",
-		Path: "crypto/pbkdf2",
-		Deps: map[string]string{
-			"crypto/internal/fips140/pbkdf2": "pbkdf2",
-			"crypto/internal/fips140hash":    "fips140hash",
-			"crypto/internal/fips140only":    "fips140only",
-			"errors":                         "errors",
-			"hash":                           "hash",
-		},
+	ixgo.RegisterPackage("crypto/pbkdf2", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "pbkdf2",
+			Path: "crypto/pbkdf2",
+			Deps: map[string]string{
+				"crypto/internal/fips140/pbkdf2": "pbkdf2",
+				"crypto/internal/fips140hash":    "fips140hash",
+				"crypto/internal/fips140only":    "fips140only",
+				"errors":                         "errors",
+				"hash":                           "hash",
+			},
+		}
 	})
 }

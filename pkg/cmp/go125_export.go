@@ -12,11 +12,13 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name:   "cmp",
-		Path:   "cmp",
-		Deps:   map[string]string{},
-		Source: source,
+	ixgo.RegisterPackage("cmp", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name:   "cmp",
+			Path:   "cmp",
+			Deps:   map[string]string{},
+			Source: source,
+		}
 	})
 }
 

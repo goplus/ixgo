@@ -10,11 +10,13 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name:   "internal",
-		Path:   "log/slog/internal",
-		Deps:   map[string]string{},
-		Source: source,
+	ixgo.RegisterPackage("log/slog/internal", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name:   "internal",
+			Path:   "log/slog/internal",
+			Deps:   map[string]string{},
+			Source: source,
+		}
 	})
 }
 

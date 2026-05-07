@@ -170,15 +170,16 @@ func (r *TypesLoader) Import(path string) (*types.Package, error) {
 				load()
 			}
 			if pkg, ok := registerPkgs[path]; ok {
-				r.installed[path] = pkg
+				r.installed[path] = pkg.Package()
 			}
 		}
 		return p, nil
 	}
-	pkg, ok := registerPkgs[path]
+	pkgInfo, ok := registerPkgs[path]
 	if !ok {
 		return nil, fmt.Errorf("not found package %v", path)
 	}
+	pkg := pkgInfo.Package()
 	p := types.NewPackage(pkg.Path, pkg.Name)
 	r.packages[path] = p
 	for dep := range pkg.Deps {
@@ -251,13 +252,13 @@ func (r *TypesLoader) installPackage(pkg *Package) (err error) {
 		r.InsertAlias(p, name, typ)
 	}
 	for name, fn := range pkg.Funcs {
-		r.InsertFunc(p, name, fn)
+		r.InsertFunc(p, name, reflect.ValueOf(fn))
 	}
 	for name, v := range pkg.Vars {
-		r.InsertVar(p, name, v.Elem())
+		r.InsertVar(p, name, reflect.ValueOf(v).Elem())
 	}
-	for name, c := range pkg.TypedConsts {
-		r.InsertTypedConst(p, name, c)
+	for name, v := range pkg.TypedConsts {
+		r.InsertTypedConst(p, name, v)
 	}
 	for name, c := range pkg.UntypedConsts {
 		r.InsertUntypedConst(p, name, c)
@@ -343,9 +344,26 @@ func (r *TypesLoader) LookupType(typ string) types.Type {
 	return p.Scope().Lookup(name).Type()
 }
 
-func (r *TypesLoader) InsertTypedConst(p *types.Package, name string, v TypedConst) {
-	typ := r.ToType(v.Typ)
-	r.InsertConst(p, name, typ, v.Value)
+func (r *TypesLoader) InsertTypedConst(p *types.Package, name string, v interface{}) {
+	rv := reflect.ValueOf(v)
+	var value constant.Value
+	switch rv.Kind() {
+	case reflect.Bool:
+		value = constant.MakeBool(rv.Bool())
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		value = constant.MakeInt64(rv.Int())
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		value = constant.MakeUint64(rv.Uint())
+	case reflect.Float32, reflect.Float64:
+		value = constant.MakeFloat64(rv.Float())
+	case reflect.Complex64, reflect.Complex128:
+		c := rv.Complex()
+		value = constant.BinaryOp(constant.MakeFloat64(real(c)), token.ADD, constant.MakeImag(constant.MakeFloat64(imag(c))))
+	case reflect.String:
+		value = constant.MakeString(rv.String())
+	}
+	typ := r.ToType(rv.Type())
+	r.InsertConst(p, name, typ, value)
 }
 
 func (r *TypesLoader) InsertUntypedConst(p *types.Package, name string, v UntypedConst) {

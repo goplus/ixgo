@@ -2434,11 +2434,11 @@ func TestStructEmbed(t *testing.T) {
 		NamedTypes: map[string]reflect.Type{
 			"MyInfo": reflect.TypeOf((*info.MyInfo)(nil)).Elem(),
 		},
-		Funcs: map[string]reflect.Value{
-			"NewInfo": reflect.ValueOf(info.NewInfo),
+		Funcs: map[string]interface{}{
+			"NewInfo": info.NewInfo,
 		},
 	}
-	ixgo.RegisterPackage(p)
+	ixgo.RegisterPackage(p.Path, func() *ixgo.Package { return p })
 
 	src := `package main
 
@@ -2874,12 +2874,12 @@ func TestEmbedImethod(t *testing.T) {
 		NamedTypes: map[string]reflect.Type{
 			"App": reflect.TypeOf((*pkg.App)(nil)).Elem(),
 		},
-		Funcs: map[string]reflect.Value{
-			"RunApp":  reflect.ValueOf(pkg.RunApp),
-			"RunTest": reflect.ValueOf(pkg.RunTest),
+		Funcs: map[string]interface{}{
+			"RunApp":  pkg.RunApp,
+			"RunTest": pkg.RunTest,
 		},
 	}
-	ixgo.RegisterPackage(p)
+	ixgo.RegisterPackage(p.Path, func() *ixgo.Package { return p })
 	src := `
 package main
 

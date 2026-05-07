@@ -72,12 +72,14 @@ func lookupSymbol(p *ixgo.Package, sym string) (info string, found bool) {
 		return fmt.Sprintf("const %v.%v %v = %v", p.Name, sym, v.Typ, constant.ExactConstant(v.Value)), true
 	}
 	if v, ok := p.TypedConsts[sym]; ok {
-		return fmt.Sprintf("const %v.%v %v = %v", p.Name, sym, v.Typ, constant.ExactConstant(v.Value)), true
+		return fmt.Sprintf("const %v.%v %T = %v", p.Name, sym, v, v), true
 	}
-	if v, ok := p.Vars[sym]; ok {
+	if i, ok := p.Vars[sym]; ok {
+		v := reflect.ValueOf(i)
 		return fmt.Sprintf("var %v.%v %v", p.Name, sym, v.Type().Elem()), true
 	}
-	if v, ok := p.Funcs[sym]; ok {
+	if i, ok := p.Funcs[sym]; ok {
+		v := reflect.ValueOf(i)
 		var buf bytes.Buffer
 		writeFunc(&buf, p.Name+"."+sym, v.Type())
 		return buf.String(), true
@@ -140,7 +142,7 @@ func dumpPkg(p *ixgo.Package) string {
 	sort.Strings(tconst)
 	for _, v := range tconst {
 		t := p.TypedConsts[v]
-		fmt.Fprintf(&buf, "const %v %v = %v\n", v, t.Typ, constant.ExactConstant(t.Value))
+		fmt.Fprintf(&buf, "const %v %T = %v\n", v, t, t)
 	}
 	// var
 	var vars []string
@@ -150,7 +152,7 @@ func dumpPkg(p *ixgo.Package) string {
 	sort.Strings(vars)
 	for _, v := range vars {
 		t := p.Vars[v]
-		fmt.Fprintf(&buf, "var %v %v\n", v, t.Elem().Type())
+		fmt.Fprintf(&buf, "var %v %v\n", v, reflect.ValueOf(t).Elem().Type())
 	}
 	// funcs
 	var funcs []string
@@ -160,7 +162,7 @@ func dumpPkg(p *ixgo.Package) string {
 	sort.Strings(funcs)
 	for _, v := range funcs {
 		f := p.Funcs[v]
-		writeFunc(&buf, v, f.Type())
+		writeFunc(&buf, v, reflect.ValueOf(f).Type())
 		buf.WriteByte('\n')
 	}
 	// named types

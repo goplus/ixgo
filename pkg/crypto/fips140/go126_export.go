@@ -14,26 +14,28 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "fips140",
-		Path: "crypto/fips140",
-		Deps: map[string]string{
-			"crypto/internal/fips140":       "fips140",
-			"crypto/internal/fips140/check": "check",
-			"internal/godebug":              "godebug",
-			"unsafe":                        "unsafe",
-		},
-		Interfaces: map[string]reflect.Type{},
-		NamedTypes: map[string]reflect.Type{},
-		AliasTypes: map[string]reflect.Type{},
-		Vars:       map[string]reflect.Value{},
-		Funcs: map[string]reflect.Value{
-			"Enabled":            reflect.ValueOf(q.Enabled),
-			"Enforced":           reflect.ValueOf(q.Enforced),
-			"Version":            reflect.ValueOf(q.Version),
-			"WithoutEnforcement": reflect.ValueOf(q.WithoutEnforcement),
-		},
-		TypedConsts:   map[string]ixgo.TypedConst{},
-		UntypedConsts: map[string]ixgo.UntypedConst{},
+	ixgo.RegisterPackage("crypto/fips140", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "fips140",
+			Path: "crypto/fips140",
+			Deps: map[string]string{
+				"crypto/internal/fips140":       "fips140",
+				"crypto/internal/fips140/check": "check",
+				"internal/godebug":              "godebug",
+				"unsafe":                        "unsafe",
+			},
+			Interfaces: map[string]reflect.Type{},
+			NamedTypes: map[string]reflect.Type{},
+			AliasTypes: map[string]reflect.Type{},
+			Vars:       map[string]interface{}{},
+			Funcs: map[string]interface{}{
+				"Enabled":            q.Enabled,
+				"Enforced":           q.Enforced,
+				"Version":            q.Version,
+				"WithoutEnforcement": q.WithoutEnforcement,
+			},
+			TypedConsts:   map[string]interface{}{},
+			UntypedConsts: map[string]ixgo.UntypedConst{},
+		}
 	})
 }

@@ -356,7 +356,7 @@ func (p *Program) ExportSource(e *Package, info *loader.PackageInfo) error {
 					var buf bytes.Buffer
 					printer.Fprint(&buf, p.fset, decl)
 					links = append(links, buf.String())
-					e.Funcs = append(e.Funcs, fmt.Sprintf("%q : reflect.ValueOf(%v)", fnName, lcName))
+					e.Funcs = append(e.Funcs, fmt.Sprintf("%q : %v", fnName, lcName))
 				}
 			}
 		}
@@ -405,14 +405,14 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 			if typ := t.Type().String(); strings.HasPrefix(typ, "untyped ") {
 				e.UntypedConsts = append(e.UntypedConsts, fmt.Sprintf("%q: {Typ: %q, Value: %v}", t.Name(), t.Type().String(), p.constToLit(named, t.Val())))
 			} else {
-				e.TypedConsts = append(e.TypedConsts, fmt.Sprintf("%q: {Typ: reflect.TypeOf(%v), Value: %v}", t.Name(), pkgName+"."+t.Name(), p.constToLit(named, t.Val())))
+				e.TypedConsts = append(e.TypedConsts, fmt.Sprintf("%q: %v", t.Name(), pkgName+"."+t.Name()))
 			}
 			if alias, ok := ma.aliasType(t.Type(), pkg); ok {
 				e.Alias = append(e.Alias, fmt.Sprintf("%q: %v", t.Name(), alias))
 			}
 			e.usedPkg = true
 		case *types.Var:
-			e.Vars = append(e.Vars, fmt.Sprintf("%q : reflect.ValueOf(&%v)", t.Name(), pkgName+"."+t.Name()))
+			e.Vars = append(e.Vars, fmt.Sprintf("%q : &%v", t.Name(), pkgName+"."+t.Name()))
 			if alias, ok := ma.aliasType(t.Type(), pkg); ok {
 				e.Alias = append(e.Alias, fmt.Sprintf("%q: %v", t.Name(), alias))
 			}
@@ -425,7 +425,7 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 				foundGeneric = true
 				continue
 			}
-			e.Funcs = append(e.Funcs, fmt.Sprintf("%q : reflect.ValueOf(%v)", t.Name(), pkgName+"."+t.Name()))
+			e.Funcs = append(e.Funcs, fmt.Sprintf("%q : %v", t.Name(), pkgName+"."+t.Name()))
 			if alias, ok := ma.aliasType(t.Type(), pkg); ok {
 				e.Alias = append(e.Alias, fmt.Sprintf("%q: %v", t.Name(), alias))
 			}

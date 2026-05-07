@@ -10,20 +10,22 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "log",
-		Path: "log",
-		Deps: map[string]string{
-			"fmt":          "fmt",
-			"io":           "io",
-			"log/internal": "internal",
-			"os":           "os",
-			"runtime":      "runtime",
-			"sync":         "sync",
-			"sync/atomic":  "atomic",
-			"time":         "time",
-		},
-		Source: source,
+	ixgo.RegisterPackage("log", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "log",
+			Path: "log",
+			Deps: map[string]string{
+				"fmt":          "fmt",
+				"io":           "io",
+				"log/internal": "internal",
+				"os":           "os",
+				"runtime":      "runtime",
+				"sync":         "sync",
+				"sync/atomic":  "atomic",
+				"time":         "time",
+			},
+			Source: source,
+		}
 	})
 }
 

@@ -12,13 +12,15 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "weak",
-		Path: "weak",
-		Deps: map[string]string{
-			"internal/abi": "abi",
-			"runtime":      "runtime",
-			"unsafe":       "unsafe",
-		},
+	ixgo.RegisterPackage("weak", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "weak",
+			Path: "weak",
+			Deps: map[string]string{
+				"internal/abi": "abi",
+				"runtime":      "runtime",
+				"unsafe":       "unsafe",
+			},
+		}
 	})
 }

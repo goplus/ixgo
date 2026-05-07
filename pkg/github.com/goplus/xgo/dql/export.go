@@ -7,15 +7,17 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "dql",
-		Path: "github.com/goplus/xgo/dql",
-		Deps: map[string]string{
-			"errors":  "errors",
-			"strconv": "strconv",
-			"strings": "strings",
-		},
-		Source: source,
+	ixgo.RegisterPackage("github.com/goplus/xgo/dql", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "dql",
+			Path: "github.com/goplus/xgo/dql",
+			Deps: map[string]string{
+				"errors":  "errors",
+				"strconv": "strconv",
+				"strings": "strings",
+			},
+			Source: source,
+		}
 	})
 }
 

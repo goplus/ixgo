@@ -14,45 +14,47 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "sort",
-		Path: "sort",
-		Deps: map[string]string{
-			"internal/reflectlite": "reflectlite",
-			"math/bits":            "bits",
-			"slices":               "slices",
-		},
-		Interfaces: map[string]reflect.Type{
-			"Interface": reflect.TypeOf((*q.Interface)(nil)).Elem(),
-		},
-		NamedTypes: map[string]reflect.Type{
-			"Float64Slice": reflect.TypeOf((*q.Float64Slice)(nil)).Elem(),
-			"IntSlice":     reflect.TypeOf((*q.IntSlice)(nil)).Elem(),
-			"StringSlice":  reflect.TypeOf((*q.StringSlice)(nil)).Elem(),
-		},
-		AliasTypes: map[string]reflect.Type{},
-		Vars:       map[string]reflect.Value{},
-		Funcs: map[string]reflect.Value{
-			"Find":              reflect.ValueOf(q.Find),
-			"Float64s":          reflect.ValueOf(q.Float64s),
-			"Float64sAreSorted": reflect.ValueOf(q.Float64sAreSorted),
-			"Ints":              reflect.ValueOf(q.Ints),
-			"IntsAreSorted":     reflect.ValueOf(q.IntsAreSorted),
-			"IsSorted":          reflect.ValueOf(q.IsSorted),
-			"Reverse":           reflect.ValueOf(q.Reverse),
-			"Search":            reflect.ValueOf(q.Search),
-			"SearchFloat64s":    reflect.ValueOf(q.SearchFloat64s),
-			"SearchInts":        reflect.ValueOf(q.SearchInts),
-			"SearchStrings":     reflect.ValueOf(q.SearchStrings),
-			"Slice":             reflect.ValueOf(q.Slice),
-			"SliceIsSorted":     reflect.ValueOf(q.SliceIsSorted),
-			"SliceStable":       reflect.ValueOf(q.SliceStable),
-			"Sort":              reflect.ValueOf(q.Sort),
-			"Stable":            reflect.ValueOf(q.Stable),
-			"Strings":           reflect.ValueOf(q.Strings),
-			"StringsAreSorted":  reflect.ValueOf(q.StringsAreSorted),
-		},
-		TypedConsts:   map[string]ixgo.TypedConst{},
-		UntypedConsts: map[string]ixgo.UntypedConst{},
+	ixgo.RegisterPackage("sort", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "sort",
+			Path: "sort",
+			Deps: map[string]string{
+				"internal/reflectlite": "reflectlite",
+				"math/bits":            "bits",
+				"slices":               "slices",
+			},
+			Interfaces: map[string]reflect.Type{
+				"Interface": reflect.TypeOf((*q.Interface)(nil)).Elem(),
+			},
+			NamedTypes: map[string]reflect.Type{
+				"Float64Slice": reflect.TypeOf((*q.Float64Slice)(nil)).Elem(),
+				"IntSlice":     reflect.TypeOf((*q.IntSlice)(nil)).Elem(),
+				"StringSlice":  reflect.TypeOf((*q.StringSlice)(nil)).Elem(),
+			},
+			AliasTypes: map[string]reflect.Type{},
+			Vars:       map[string]interface{}{},
+			Funcs: map[string]interface{}{
+				"Find":              q.Find,
+				"Float64s":          q.Float64s,
+				"Float64sAreSorted": q.Float64sAreSorted,
+				"Ints":              q.Ints,
+				"IntsAreSorted":     q.IntsAreSorted,
+				"IsSorted":          q.IsSorted,
+				"Reverse":           q.Reverse,
+				"Search":            q.Search,
+				"SearchFloat64s":    q.SearchFloat64s,
+				"SearchInts":        q.SearchInts,
+				"SearchStrings":     q.SearchStrings,
+				"Slice":             q.Slice,
+				"SliceIsSorted":     q.SliceIsSorted,
+				"SliceStable":       q.SliceStable,
+				"Sort":              q.Sort,
+				"Stable":            q.Stable,
+				"Strings":           q.Strings,
+				"StringsAreSorted":  q.StringsAreSorted,
+			},
+			TypedConsts:   map[string]interface{}{},
+			UntypedConsts: map[string]ixgo.UntypedConst{},
+		}
 	})
 }

@@ -23,12 +23,13 @@ import (
 	"log"
 	"reflect"
 	"sort"
+	"sync"
 
 	"github.com/goplus/ixgo/alias"
 )
 
 var (
-	registerPkgs   = make(map[string]*Package)
+	registerPkgs   = make(map[string]*pkgInfo)
 	registerPatchs = make(map[string][]interface{})
 )
 
@@ -43,28 +44,35 @@ func PackageList() (list []string) {
 
 // LookupPackage lookup register pkgs
 func LookupPackage(name string) (pkg *Package, ok bool) {
-	pkg, ok = registerPkgs[name]
+	if pkg, ok := registerPkgs[name]; ok {
+		return pkg.Package(), true
+	}
 	return
 }
 
 // RegisterPackage register pkg
-func RegisterPackage(pkg *Package) {
-	if p, ok := registerPkgs[pkg.Path]; ok {
-		p.merge(pkg)
-		return
+func RegisterPackage(pkg string, fn func() *Package) {
+	registerPkgs[pkg] = &pkgInfo{
+		load: fn,
 	}
-	registerPkgs[pkg.Path] = pkg
-	//	externPackages[pkg.Path] = true
+}
+
+type pkgInfo struct {
+	once sync.Once
+	pkg  *Package
+	load func() *Package
+}
+
+func (p *pkgInfo) Package() *Package {
+	p.once.Do(func() {
+		p.pkg = p.load()
+	})
+	return p.pkg
 }
 
 // RegisterPatch register pkg with "pkg@patch"
 func RegisterPatch(pkg string, src ...interface{}) {
 	registerPatchs[pkg] = append(registerPatchs[pkg], src...)
-}
-
-type TypedConst struct {
-	Typ   reflect.Type
-	Value constant.Value
 }
 
 type UntypedConst struct {
@@ -76,9 +84,9 @@ type Package struct {
 	Interfaces    map[string]reflect.Type
 	NamedTypes    map[string]reflect.Type
 	AliasTypes    map[string]reflect.Type
-	Vars          map[string]reflect.Value
-	Funcs         map[string]reflect.Value
-	TypedConsts   map[string]TypedConst
+	Vars          map[string]interface{}
+	Funcs         map[string]interface{}
+	TypedConsts   map[string]interface{}
 	UntypedConsts map[string]UntypedConst
 	Deps          map[string]string // path -> name
 	Alias         map[string]alias.Type
@@ -86,36 +94,6 @@ type Package struct {
 	Path          string
 	Source        string
 	Import        func(fset *token.FileSet, pkgs map[string]*types.Package) (*types.Package, error)
-}
-
-// merge same package
-func (p *Package) merge(same *Package) {
-	for k, v := range same.Interfaces {
-		p.Interfaces[k] = v
-	}
-	for k, v := range same.NamedTypes {
-		p.NamedTypes[k] = v
-	}
-	for k, v := range same.Vars {
-		p.Vars[k] = v
-	}
-	for k, v := range same.Funcs {
-		p.Funcs[k] = v
-	}
-	for k, v := range same.UntypedConsts {
-		p.UntypedConsts[k] = v
-	}
-	if same.Alias != nil {
-		if p.Alias == nil {
-			p.Alias = make(map[string]alias.Type)
-		}
-		for k, v := range same.Alias {
-			p.Alias[k] = v
-		}
-	}
-	if p.Import == nil && same.Import != nil {
-		p.Import = same.Import
-	}
 }
 
 var (

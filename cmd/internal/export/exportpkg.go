@@ -66,7 +66,7 @@ func exportPkg(pkg *Package, sname string, id string, tagList []string, fname st
 	if !pkg.IsEmpty() {
 		imports = append(imports, `"reflect"`)
 	}
-	if len(pkg.UntypedConsts) > 0 || len(pkg.TypedConsts) > 0 {
+	if len(pkg.UntypedConsts) > 0 {
 		imports = append(imports, `"go/constant"`)
 		var hasToken bool
 		for _, c := range pkg.UntypedConsts {
@@ -109,7 +109,7 @@ func exportPkg(pkg *Package, sname string, id string, tagList []string, fname st
 	var ext string
 	if len(pkg.Alias) != 0 && flagExportAlias {
 		imports = append(imports, `"github.com/goplus/ixgo/alias"`)
-		ext = "\nAlias: map[string]alias.Type{" + joinList(pkg.Alias) + "},"
+		ext += "\nAlias: map[string]alias.Type{" + joinList(pkg.Alias) + "},"
 	}
 
 	r := strings.NewReplacer("$PKGNAME", pkg.Name,
@@ -151,18 +151,20 @@ import (
 	"github.com/goplus/ixgo"
 )
 
-func init() {$INIT
-	ixgo.RegisterPackage(&ixgo.Package {
-		Name: "$PKGNAME",
-		Path: "$PKGPATH",
-		Deps: map[string]string{$DEPS},
-		Interfaces: map[string]reflect.Type{$INTERFACES},
-		NamedTypes: map[string]reflect.Type{$NAMEDTYPES},
-		AliasTypes: map[string]reflect.Type{$ALIASTYPES},
-		Vars: map[string]reflect.Value{$VARS},
-		Funcs: map[string]reflect.Value{$FUNCS},
-		TypedConsts: map[string]ixgo.TypedConst{$TYPEDCONSTS},
-		UntypedConsts: map[string]ixgo.UntypedConst{$UNTYPEDCONSTS},$EXT
+func init() {
+	ixgo.RegisterPackage("$PKGPATH", func() *ixgo.Package {$INIT
+		return &ixgo.Package {
+			Name: "$PKGNAME",
+			Path: "$PKGPATH",
+			Deps: map[string]string{$DEPS},
+			Interfaces: map[string]reflect.Type{$INTERFACES},
+			NamedTypes: map[string]reflect.Type{$NAMEDTYPES},
+			AliasTypes: map[string]reflect.Type{$ALIASTYPES},
+			Vars: map[string]interface{}{$VARS},
+			Funcs: map[string]interface{}{$FUNCS},
+			TypedConsts: map[string]interface{}{$TYPEDCONSTS},
+			UntypedConsts: map[string]ixgo.UntypedConst{$UNTYPEDCONSTS},$EXT
+		}
 	})
 }
 `
@@ -184,19 +186,21 @@ import (
 //go:embed $TYPESFILE
 var $TYPESNAME []byte
 
-func init() {$INIT
-	ixgo.RegisterPackage(&ixgo.Package {
-		Name: "$PKGNAME",
-		Path: "$PKGPATH",
-		Deps: map[string]string{$DEPS},
-		Interfaces: map[string]reflect.Type{$INTERFACES},
-		NamedTypes: map[string]reflect.Type{$NAMEDTYPES},
-		AliasTypes: map[string]reflect.Type{$ALIASTYPES},
-		Vars: map[string]reflect.Value{$VARS},
-		Funcs: map[string]reflect.Value{$FUNCS},
-		TypedConsts: map[string]ixgo.TypedConst{$TYPEDCONSTS},
-		UntypedConsts: map[string]ixgo.UntypedConst{$UNTYPEDCONSTS},
-		Import: typesdata.ImportFunc("$PKGPATH", $TYPESNAME),$EXT
+func init() {
+	ixgo.RegisterPackage("$PKGPATH", func() *ixgo.Package {$INIT
+		return &ixgo.Package {
+			Name: "$PKGNAME",
+			Path: "$PKGPATH",
+			Deps: map[string]string{$DEPS},
+			Interfaces: map[string]reflect.Type{$INTERFACES},
+			NamedTypes: map[string]reflect.Type{$NAMEDTYPES},
+			AliasTypes: map[string]reflect.Type{$ALIASTYPES},
+			Vars: map[string]interface{}{$VARS},
+			Funcs: map[string]interface{}{$FUNCS},
+			TypedConsts: map[string]interface{}{$TYPEDCONSTS},
+			UntypedConsts: map[string]ixgo.UntypedConst{$UNTYPEDCONSTS},
+			Import: typesdata.ImportFunc("$PKGPATH", $TYPESNAME),$EXT
+		}
 	})
 }
 `
@@ -214,10 +218,12 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package {
-		Name: "$PKGNAME",
-		Path: "$PKGPATH",
-		Deps: map[string]string{$DEPS},
+	ixgo.RegisterPackage("$PKGPATH", func() *ixgo.Package {
+		return &ixgo.Package {
+			Name: "$PKGNAME",
+			Path: "$PKGPATH",
+			Deps: map[string]string{$DEPS},
+		}
 	})
 }
 `
@@ -234,19 +240,21 @@ import (
 	"github.com/goplus/ixgo"
 )
 
-func init() {$INIT
-	ixgo.RegisterPackage(&ixgo.Package {
-		Name: "$PKGNAME",
-		Path: "$PKGPATH",
-		Deps: map[string]string{$DEPS},
-		Interfaces: map[string]reflect.Type{$INTERFACES},
-		NamedTypes: map[string]reflect.Type{$NAMEDTYPES},
-		AliasTypes: map[string]reflect.Type{$ALIASTYPES},
-		Vars: map[string]reflect.Value{$VARS},
-		Funcs: map[string]reflect.Value{$FUNCS},
-		TypedConsts: map[string]ixgo.TypedConst{$TYPEDCONSTS},
-		UntypedConsts: map[string]ixgo.UntypedConst{$UNTYPEDCONSTS},$EXT
-		Source: source,
+func init() {
+	ixgo.RegisterPackage("$PKGPATH", func() *ixgo.Package {$INIT
+		return &ixgo.Package {
+			Name: "$PKGNAME",
+			Path: "$PKGPATH",
+			Deps: map[string]string{$DEPS},
+			Interfaces: map[string]reflect.Type{$INTERFACES},
+			NamedTypes: map[string]reflect.Type{$NAMEDTYPES},
+			AliasTypes: map[string]reflect.Type{$ALIASTYPES},
+			Vars: map[string]interface{}{$VARS},
+			Funcs: map[string]interface{}{$FUNCS},
+			TypedConsts: map[string]interface{}{$TYPEDCONSTS},
+			UntypedConsts: map[string]ixgo.UntypedConst{$UNTYPEDCONSTS},$EXT
+			Source: source,
+		}
 	})
 }
 $LINKS
@@ -266,11 +274,13 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package {
-		Name: "$PKGNAME",
-		Path: "$PKGPATH",
-		Deps: map[string]string{$DEPS},
-		Source: source,
+	ixgo.RegisterPackage("$PKGPATH", func() *ixgo.Package {
+		return &ixgo.Package {
+			Name: "$PKGNAME",
+			Path: "$PKGPATH",
+			Deps: map[string]string{$DEPS},
+			Source: source,
+		}
 	})
 }
 $LINKS

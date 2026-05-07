@@ -1075,16 +1075,16 @@ var (
 		Interfaces:    map[string]reflect.Type{},
 		NamedTypes:    map[string]reflect.Type{},
 		AliasTypes:    map[string]reflect.Type{},
-		Vars:          map[string]reflect.Value{},
-		Funcs:         map[string]reflect.Value{},
-		TypedConsts:   map[string]TypedConst{},
+		Vars:          map[string]interface{}{},
+		Funcs:         map[string]interface{}{},
+		TypedConsts:   map[string]interface{}{},
 		UntypedConsts: map[string]UntypedConst{},
 	}
 	builtinPrefix = "Builtin_"
 )
 
 func init() {
-	RegisterPackage(builtinPkg)
+	RegisterPackage(builtinPkg.Path, func() *Package { return builtinPkg })
 }
 
 func RegisterCustomBuiltin(key string, fn interface{}) error {
@@ -1094,7 +1094,7 @@ func RegisterCustomBuiltin(key string, fn interface{}) error {
 		if !strings.HasPrefix(key, builtinPrefix) {
 			key = builtinPrefix + key
 		}
-		builtinPkg.Funcs[key] = v
+		builtinPkg.Funcs[key] = fn
 		typ := v.Type()
 		for i := 0; i < typ.NumIn(); i++ {
 			checkBuiltinDeps(typ.In(i))
@@ -1116,8 +1116,9 @@ func checkBuiltinDeps(typ reflect.Type) {
 
 func builtinFuncList() []string {
 	var list []string
-	for k, v := range builtinPkg.Funcs {
+	for k, fn := range builtinPkg.Funcs {
 		if strings.HasPrefix(k, builtinPrefix) {
+			v := reflect.ValueOf(fn)
 			name := k[len(builtinPrefix):]
 			typ := v.Type()
 			var ins []string

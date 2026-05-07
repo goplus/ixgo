@@ -294,7 +294,9 @@ func findExternLinkFunc(interp *Interp, link *load.Linkname) (ext reflect.Value,
 			}
 			return
 		}
-		ext, ok = pkg.Funcs[link.Name]
+		if v, ok := pkg.Funcs[link.Name]; ok {
+			return reflect.ValueOf(v), true
+		}
 	}
 	return
 }
@@ -313,7 +315,9 @@ func findExternVar(interp *Interp, pkgPath string, name string) (ext reflect.Val
 	}
 	// check install pkg
 	if pkg, found := interp.installed(pkgPath); found {
-		ext, ok = pkg.Vars[name]
+		if i, iok := pkg.Vars[name]; iok {
+			return reflect.ValueOf(i), true
+		}
 	}
 	return
 }
@@ -346,7 +350,9 @@ func findExternFunc(interp *Interp, fn *ssa.Function) (ext reflect.Value, ok boo
 	if fn.Pkg != nil {
 		if recv := fn.Signature.Recv(); recv == nil {
 			if pkg, found := LookupPackage(fn.Pkg.Pkg.Path()); found {
-				ext, ok = pkg.Funcs[fn.Name()]
+				if v, iok := pkg.Funcs[fn.Name()]; iok {
+					ext, ok = reflect.ValueOf(v), true
+				}
 			}
 		} else if typ, found := interp.ctx.Loader.LookupReflect(recv.Type()); found {
 			if m, found := reflectx.MethodByName(typ, fn.Name()); found {

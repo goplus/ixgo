@@ -14,28 +14,30 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "format",
-		Path: "go/format",
-		Deps: map[string]string{
-			"bytes":      "bytes",
-			"fmt":        "fmt",
-			"go/ast":     "ast",
-			"go/parser":  "parser",
-			"go/printer": "printer",
-			"go/token":   "token",
-			"io":         "io",
-			"strings":    "strings",
-		},
-		Interfaces: map[string]reflect.Type{},
-		NamedTypes: map[string]reflect.Type{},
-		AliasTypes: map[string]reflect.Type{},
-		Vars:       map[string]reflect.Value{},
-		Funcs: map[string]reflect.Value{
-			"Node":   reflect.ValueOf(q.Node),
-			"Source": reflect.ValueOf(q.Source),
-		},
-		TypedConsts:   map[string]ixgo.TypedConst{},
-		UntypedConsts: map[string]ixgo.UntypedConst{},
+	ixgo.RegisterPackage("go/format", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "format",
+			Path: "go/format",
+			Deps: map[string]string{
+				"bytes":      "bytes",
+				"fmt":        "fmt",
+				"go/ast":     "ast",
+				"go/parser":  "parser",
+				"go/printer": "printer",
+				"go/token":   "token",
+				"io":         "io",
+				"strings":    "strings",
+			},
+			Interfaces: map[string]reflect.Type{},
+			NamedTypes: map[string]reflect.Type{},
+			AliasTypes: map[string]reflect.Type{},
+			Vars:       map[string]interface{}{},
+			Funcs: map[string]interface{}{
+				"Node":   q.Node,
+				"Source": q.Source,
+			},
+			TypedConsts:   map[string]interface{}{},
+			UntypedConsts: map[string]ixgo.UntypedConst{},
+		}
 	})
 }

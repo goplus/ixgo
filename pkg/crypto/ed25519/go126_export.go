@@ -15,43 +15,45 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "ed25519",
-		Path: "crypto/ed25519",
-		Deps: map[string]string{
-			"crypto":                          "crypto",
-			"crypto/internal/fips140/ed25519": "ed25519",
-			"crypto/internal/fips140cache":    "fips140cache",
-			"crypto/internal/fips140only":     "fips140only",
-			"crypto/internal/rand":            "rand",
-			"crypto/rand":                     "rand",
-			"crypto/subtle":                   "subtle",
-			"errors":                          "errors",
-			"internal/godebug":                "godebug",
-			"io":                              "io",
-			"strconv":                         "strconv",
-		},
-		Interfaces: map[string]reflect.Type{},
-		NamedTypes: map[string]reflect.Type{
-			"Options":    reflect.TypeOf((*q.Options)(nil)).Elem(),
-			"PrivateKey": reflect.TypeOf((*q.PrivateKey)(nil)).Elem(),
-			"PublicKey":  reflect.TypeOf((*q.PublicKey)(nil)).Elem(),
-		},
-		AliasTypes: map[string]reflect.Type{},
-		Vars:       map[string]reflect.Value{},
-		Funcs: map[string]reflect.Value{
-			"GenerateKey":       reflect.ValueOf(q.GenerateKey),
-			"NewKeyFromSeed":    reflect.ValueOf(q.NewKeyFromSeed),
-			"Sign":              reflect.ValueOf(q.Sign),
-			"Verify":            reflect.ValueOf(q.Verify),
-			"VerifyWithOptions": reflect.ValueOf(q.VerifyWithOptions),
-		},
-		TypedConsts: map[string]ixgo.TypedConst{},
-		UntypedConsts: map[string]ixgo.UntypedConst{
-			"PrivateKeySize": {"untyped int", constant.MakeInt64(int64(q.PrivateKeySize))},
-			"PublicKeySize":  {"untyped int", constant.MakeInt64(int64(q.PublicKeySize))},
-			"SeedSize":       {"untyped int", constant.MakeInt64(int64(q.SeedSize))},
-			"SignatureSize":  {"untyped int", constant.MakeInt64(int64(q.SignatureSize))},
-		},
+	ixgo.RegisterPackage("crypto/ed25519", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "ed25519",
+			Path: "crypto/ed25519",
+			Deps: map[string]string{
+				"crypto":                          "crypto",
+				"crypto/internal/fips140/ed25519": "ed25519",
+				"crypto/internal/fips140cache":    "fips140cache",
+				"crypto/internal/fips140only":     "fips140only",
+				"crypto/internal/rand":            "rand",
+				"crypto/rand":                     "rand",
+				"crypto/subtle":                   "subtle",
+				"errors":                          "errors",
+				"internal/godebug":                "godebug",
+				"io":                              "io",
+				"strconv":                         "strconv",
+			},
+			Interfaces: map[string]reflect.Type{},
+			NamedTypes: map[string]reflect.Type{
+				"Options":    reflect.TypeOf((*q.Options)(nil)).Elem(),
+				"PrivateKey": reflect.TypeOf((*q.PrivateKey)(nil)).Elem(),
+				"PublicKey":  reflect.TypeOf((*q.PublicKey)(nil)).Elem(),
+			},
+			AliasTypes: map[string]reflect.Type{},
+			Vars:       map[string]interface{}{},
+			Funcs: map[string]interface{}{
+				"GenerateKey":       q.GenerateKey,
+				"NewKeyFromSeed":    q.NewKeyFromSeed,
+				"Sign":              q.Sign,
+				"Verify":            q.Verify,
+				"VerifyWithOptions": q.VerifyWithOptions,
+			},
+			TypedConsts: map[string]interface{}{},
+			UntypedConsts: map[string]ixgo.UntypedConst{
+				"PrivateKeySize": {Typ: "untyped int", Value: constant.MakeInt64(int64(q.PrivateKeySize))},
+				"PublicKeySize":  {Typ: "untyped int", Value: constant.MakeInt64(int64(q.PublicKeySize))},
+				"SeedSize":       {Typ: "untyped int", Value: constant.MakeInt64(int64(q.SeedSize))},
+				"SignatureSize":  {Typ: "untyped int", Value: constant.MakeInt64(int64(q.SignatureSize))},
+			},
+		}
 	})
 }

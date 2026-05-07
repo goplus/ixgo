@@ -11,40 +11,42 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "testdeps",
-		Path: "github.com/goplus/ixgo/x/testdeps",
-		Deps: map[string]string{
-			"bufio":                            "bufio",
-			"github.com/goplus/ixgo/x/testlog": "testlog",
-			"io":                               "io",
-			"os":                               "os",
-			"reflect":                          "reflect",
-			"regexp":                           "regexp",
-			"runtime/pprof":                    "pprof",
-			"strings":                          "strings",
-			"sync":                             "sync",
-			"time":                             "time",
-		},
-		Interfaces: map[string]reflect.Type{},
-		NamedTypes: map[string]reflect.Type{
-			"TestDeps": reflect.TypeOf((*q.TestDeps)(nil)).Elem(),
-		},
-		AliasTypes: map[string]reflect.Type{
-			"CorpusEntry": reflect.TypeOf((*q.CorpusEntry)(nil)).Elem(),
-		},
-		Vars: map[string]reflect.Value{
-			"CoverMarkProfileEmittedFunc": reflect.ValueOf(&q.CoverMarkProfileEmittedFunc),
-			"CoverMode":                   reflect.ValueOf(&q.CoverMode),
-			"CoverProcessTestDirFunc":     reflect.ValueOf(&q.CoverProcessTestDirFunc),
-			"CoverSelectedPackages":       reflect.ValueOf(&q.CoverSelectedPackages),
-			"CoverSnapshotFunc":           reflect.ValueOf(&q.CoverSnapshotFunc),
-			"Covered":                     reflect.ValueOf(&q.Covered),
-			"ImportPath":                  reflect.ValueOf(&q.ImportPath),
-			"ModulePath":                  reflect.ValueOf(&q.ModulePath),
-		},
-		Funcs:         map[string]reflect.Value{},
-		TypedConsts:   map[string]ixgo.TypedConst{},
-		UntypedConsts: map[string]ixgo.UntypedConst{},
+	ixgo.RegisterPackage("github.com/goplus/ixgo/x/testdeps", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "testdeps",
+			Path: "github.com/goplus/ixgo/x/testdeps",
+			Deps: map[string]string{
+				"bufio":                            "bufio",
+				"github.com/goplus/ixgo/x/testlog": "testlog",
+				"io":                               "io",
+				"os":                               "os",
+				"reflect":                          "reflect",
+				"regexp":                           "regexp",
+				"runtime/pprof":                    "pprof",
+				"strings":                          "strings",
+				"sync":                             "sync",
+				"time":                             "time",
+			},
+			Interfaces: map[string]reflect.Type{},
+			NamedTypes: map[string]reflect.Type{
+				"TestDeps": reflect.TypeOf((*q.TestDeps)(nil)).Elem(),
+			},
+			AliasTypes: map[string]reflect.Type{
+				"CorpusEntry": reflect.TypeOf((*q.CorpusEntry)(nil)).Elem(),
+			},
+			Vars: map[string]interface{}{
+				"CoverMarkProfileEmittedFunc": &q.CoverMarkProfileEmittedFunc,
+				"CoverMode":                   &q.CoverMode,
+				"CoverProcessTestDirFunc":     &q.CoverProcessTestDirFunc,
+				"CoverSelectedPackages":       &q.CoverSelectedPackages,
+				"CoverSnapshotFunc":           &q.CoverSnapshotFunc,
+				"Covered":                     &q.Covered,
+				"ImportPath":                  &q.ImportPath,
+				"ModulePath":                  &q.ModulePath,
+			},
+			Funcs:         map[string]interface{}{},
+			TypedConsts:   map[string]interface{}{},
+			UntypedConsts: map[string]ixgo.UntypedConst{},
+		}
 	})
 }

@@ -14,28 +14,30 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "fnv",
-		Path: "hash/fnv",
-		Deps: map[string]string{
-			"errors":             "errors",
-			"hash":               "hash",
-			"internal/byteorder": "byteorder",
-			"math/bits":          "bits",
-		},
-		Interfaces: map[string]reflect.Type{},
-		NamedTypes: map[string]reflect.Type{},
-		AliasTypes: map[string]reflect.Type{},
-		Vars:       map[string]reflect.Value{},
-		Funcs: map[string]reflect.Value{
-			"New128":  reflect.ValueOf(q.New128),
-			"New128a": reflect.ValueOf(q.New128a),
-			"New32":   reflect.ValueOf(q.New32),
-			"New32a":  reflect.ValueOf(q.New32a),
-			"New64":   reflect.ValueOf(q.New64),
-			"New64a":  reflect.ValueOf(q.New64a),
-		},
-		TypedConsts:   map[string]ixgo.TypedConst{},
-		UntypedConsts: map[string]ixgo.UntypedConst{},
+	ixgo.RegisterPackage("hash/fnv", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "fnv",
+			Path: "hash/fnv",
+			Deps: map[string]string{
+				"errors":             "errors",
+				"hash":               "hash",
+				"internal/byteorder": "byteorder",
+				"math/bits":          "bits",
+			},
+			Interfaces: map[string]reflect.Type{},
+			NamedTypes: map[string]reflect.Type{},
+			AliasTypes: map[string]reflect.Type{},
+			Vars:       map[string]interface{}{},
+			Funcs: map[string]interface{}{
+				"New128":  q.New128,
+				"New128a": q.New128a,
+				"New32":   q.New32,
+				"New32a":  q.New32a,
+				"New64":   q.New64,
+				"New64a":  q.New64a,
+			},
+			TypedConsts:   map[string]interface{}{},
+			UntypedConsts: map[string]ixgo.UntypedConst{},
+		}
 	})
 }

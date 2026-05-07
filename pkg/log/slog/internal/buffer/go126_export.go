@@ -10,13 +10,15 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "buffer",
-		Path: "log/slog/internal/buffer",
-		Deps: map[string]string{
-			"sync": "sync",
-		},
-		Source: source,
+	ixgo.RegisterPackage("log/slog/internal/buffer", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "buffer",
+			Path: "log/slog/internal/buffer",
+			Deps: map[string]string{
+				"sync": "sync",
+			},
+			Source: source,
+		}
 	})
 }
 

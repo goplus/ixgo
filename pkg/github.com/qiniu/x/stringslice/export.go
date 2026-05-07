@@ -11,33 +11,35 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "stringslice",
-		Path: "github.com/qiniu/x/stringslice",
-		Deps: map[string]string{
-			"github.com/qiniu/x/stringutil": "stringutil",
-			"strings":                       "strings",
-		},
-		Interfaces: map[string]reflect.Type{},
-		NamedTypes: map[string]reflect.Type{},
-		AliasTypes: map[string]reflect.Type{},
-		Vars:       map[string]reflect.Value{},
-		Funcs: map[string]reflect.Value{
-			"Capitalize": reflect.ValueOf(q.Capitalize),
-			"Repeat":     reflect.ValueOf(q.Repeat),
-			"Replace":    reflect.ValueOf(q.Replace),
-			"ReplaceAll": reflect.ValueOf(q.ReplaceAll),
-			"ToLower":    reflect.ValueOf(q.ToLower),
-			"ToTitle":    reflect.ValueOf(q.ToTitle),
-			"ToUpper":    reflect.ValueOf(q.ToUpper),
-			"Trim":       reflect.ValueOf(q.Trim),
-			"TrimLeft":   reflect.ValueOf(q.TrimLeft),
-			"TrimPrefix": reflect.ValueOf(q.TrimPrefix),
-			"TrimRight":  reflect.ValueOf(q.TrimRight),
-			"TrimSpace":  reflect.ValueOf(q.TrimSpace),
-			"TrimSuffix": reflect.ValueOf(q.TrimSuffix),
-		},
-		TypedConsts:   map[string]ixgo.TypedConst{},
-		UntypedConsts: map[string]ixgo.UntypedConst{},
+	ixgo.RegisterPackage("github.com/qiniu/x/stringslice", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "stringslice",
+			Path: "github.com/qiniu/x/stringslice",
+			Deps: map[string]string{
+				"github.com/qiniu/x/stringutil": "stringutil",
+				"strings":                       "strings",
+			},
+			Interfaces: map[string]reflect.Type{},
+			NamedTypes: map[string]reflect.Type{},
+			AliasTypes: map[string]reflect.Type{},
+			Vars:       map[string]interface{}{},
+			Funcs: map[string]interface{}{
+				"Capitalize": q.Capitalize,
+				"Repeat":     q.Repeat,
+				"Replace":    q.Replace,
+				"ReplaceAll": q.ReplaceAll,
+				"ToLower":    q.ToLower,
+				"ToTitle":    q.ToTitle,
+				"ToUpper":    q.ToUpper,
+				"Trim":       q.Trim,
+				"TrimLeft":   q.TrimLeft,
+				"TrimPrefix": q.TrimPrefix,
+				"TrimRight":  q.TrimRight,
+				"TrimSpace":  q.TrimSpace,
+				"TrimSuffix": q.TrimSuffix,
+			},
+			TypedConsts:   map[string]interface{}{},
+			UntypedConsts: map[string]ixgo.UntypedConst{},
+		}
 	})
 }
