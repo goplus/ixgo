@@ -23,12 +23,13 @@ import (
 	"log"
 	"reflect"
 	"sort"
+	"sync"
 
 	"github.com/goplus/ixgo/alias"
 )
 
 var (
-	registerPkgs   = make(map[string]*Package)
+	registerPkgs   = make(map[string]pkgLoad)
 	registerPatchs = make(map[string][]interface{})
 )
 
@@ -43,18 +44,51 @@ func PackageList() (list []string) {
 
 // LookupPackage lookup register pkgs
 func LookupPackage(name string) (pkg *Package, ok bool) {
-	pkg, ok = registerPkgs[name]
+	if pload, ok := registerPkgs[name]; ok {
+		return pload.Package(), true
+	}
 	return
 }
 
-// RegisterPackage register pkg
+type pkgLoad interface {
+	Package() *Package
+}
+
+type baseLoad struct {
+	pkg *Package
+}
+
+func (p *baseLoad) Package() *Package {
+	return p.pkg
+}
+
+type lazyLoad struct {
+	once sync.Once
+	pkg  *Package
+	load func() *Package
+}
+
+func (p *lazyLoad) Package() *Package {
+	p.once.Do(func() {
+		p.pkg = p.load()
+	})
+	return p.pkg
+}
+
+// RegisterPackage register a pkg.
 func RegisterPackage(pkg *Package) {
 	if p, ok := registerPkgs[pkg.Path]; ok {
-		p.merge(pkg)
-		return
+		if base, ok := p.(*baseLoad); ok {
+			base.pkg.merge(pkg)
+			return
+		}
 	}
-	registerPkgs[pkg.Path] = pkg
-	//	externPackages[pkg.Path] = true
+	registerPkgs[pkg.Path] = &baseLoad{pkg: pkg}
+}
+
+// RegisterPackageLazy registers a pkg with lazy initialization.
+func RegisterPackageLazy(pkg string, load func() *Package) {
+	registerPkgs[pkg] = &lazyLoad{load: load}
 }
 
 // RegisterPatch register pkg with "pkg@patch"
