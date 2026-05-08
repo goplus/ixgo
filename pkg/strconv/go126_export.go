@@ -72,7 +72,7 @@ func init() {
 		},
 		TypedConsts: map[string]ixgo.TypedConst{},
 		UntypedConsts: map[string]ixgo.UntypedConst{
-			"IntSize": {"untyped int", constant.MakeInt64(int64(q.IntSize))},
+			"IntSize": {Typ: "untyped int", Value: constant.MakeInt64(int64(q.IntSize))},
 		},
 	})
 }

@@ -15,27 +15,29 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "aes",
-		Path: "crypto/aes",
-		Deps: map[string]string{
-			"crypto/cipher":               "cipher",
-			"crypto/internal/boring":      "boring",
-			"crypto/internal/fips140/aes": "aes",
-			"strconv":                     "strconv",
-		},
-		Interfaces: map[string]reflect.Type{},
-		NamedTypes: map[string]reflect.Type{
-			"KeySizeError": reflect.TypeOf((*q.KeySizeError)(nil)).Elem(),
-		},
-		AliasTypes: map[string]reflect.Type{},
-		Vars:       map[string]reflect.Value{},
-		Funcs: map[string]reflect.Value{
-			"NewCipher": reflect.ValueOf(q.NewCipher),
-		},
-		TypedConsts: map[string]ixgo.TypedConst{},
-		UntypedConsts: map[string]ixgo.UntypedConst{
-			"BlockSize": {"untyped int", constant.MakeInt64(int64(q.BlockSize))},
-		},
+	ixgo.RegisterPackageLazy("crypto/aes", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "aes",
+			Path: "crypto/aes",
+			Deps: map[string]string{
+				"crypto/cipher":               "cipher",
+				"crypto/internal/boring":      "boring",
+				"crypto/internal/fips140/aes": "aes",
+				"strconv":                     "strconv",
+			},
+			Interfaces: map[string]reflect.Type{},
+			NamedTypes: map[string]reflect.Type{
+				"KeySizeError": reflect.TypeOf((*q.KeySizeError)(nil)).Elem(),
+			},
+			AliasTypes: map[string]reflect.Type{},
+			Vars:       map[string]reflect.Value{},
+			Funcs: map[string]reflect.Value{
+				"NewCipher": reflect.ValueOf(q.NewCipher),
+			},
+			TypedConsts: map[string]ixgo.TypedConst{},
+			UntypedConsts: map[string]ixgo.UntypedConst{
+				"BlockSize": {Typ: "untyped int", Value: constant.MakeInt64(int64(q.BlockSize))},
+			},
+		}
 	})
 }

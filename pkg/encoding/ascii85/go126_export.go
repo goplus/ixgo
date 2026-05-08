@@ -14,27 +14,29 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "ascii85",
-		Path: "encoding/ascii85",
-		Deps: map[string]string{
-			"io":      "io",
-			"strconv": "strconv",
-		},
-		Interfaces: map[string]reflect.Type{},
-		NamedTypes: map[string]reflect.Type{
-			"CorruptInputError": reflect.TypeOf((*q.CorruptInputError)(nil)).Elem(),
-		},
-		AliasTypes: map[string]reflect.Type{},
-		Vars:       map[string]reflect.Value{},
-		Funcs: map[string]reflect.Value{
-			"Decode":        reflect.ValueOf(q.Decode),
-			"Encode":        reflect.ValueOf(q.Encode),
-			"MaxEncodedLen": reflect.ValueOf(q.MaxEncodedLen),
-			"NewDecoder":    reflect.ValueOf(q.NewDecoder),
-			"NewEncoder":    reflect.ValueOf(q.NewEncoder),
-		},
-		TypedConsts:   map[string]ixgo.TypedConst{},
-		UntypedConsts: map[string]ixgo.UntypedConst{},
+	ixgo.RegisterPackageLazy("encoding/ascii85", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "ascii85",
+			Path: "encoding/ascii85",
+			Deps: map[string]string{
+				"io":      "io",
+				"strconv": "strconv",
+			},
+			Interfaces: map[string]reflect.Type{},
+			NamedTypes: map[string]reflect.Type{
+				"CorruptInputError": reflect.TypeOf((*q.CorruptInputError)(nil)).Elem(),
+			},
+			AliasTypes: map[string]reflect.Type{},
+			Vars:       map[string]reflect.Value{},
+			Funcs: map[string]reflect.Value{
+				"Decode":        reflect.ValueOf(q.Decode),
+				"Encode":        reflect.ValueOf(q.Encode),
+				"MaxEncodedLen": reflect.ValueOf(q.MaxEncodedLen),
+				"NewDecoder":    reflect.ValueOf(q.NewDecoder),
+				"NewEncoder":    reflect.ValueOf(q.NewEncoder),
+			},
+			TypedConsts:   map[string]ixgo.TypedConst{},
+			UntypedConsts: map[string]ixgo.UntypedConst{},
+		}
 	})
 }

@@ -9,12 +9,14 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "time",
-		Path: "github.com/goplus/xgo/tpl/variant/time",
-		Deps: map[string]string{
-			"github.com/goplus/xgo/tpl/variant": "variant",
-			"time":                              "time",
-		},
+	ixgo.RegisterPackageLazy("github.com/goplus/xgo/tpl/variant/time", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "time",
+			Path: "github.com/goplus/xgo/tpl/variant/time",
+			Deps: map[string]string{
+				"github.com/goplus/xgo/tpl/variant": "variant",
+				"time":                              "time",
+			},
+		}
 	})
 }

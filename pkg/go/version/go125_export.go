@@ -14,23 +14,25 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "version",
-		Path: "go/version",
-		Deps: map[string]string{
-			"internal/gover": "gover",
-			"strings":        "strings",
-		},
-		Interfaces: map[string]reflect.Type{},
-		NamedTypes: map[string]reflect.Type{},
-		AliasTypes: map[string]reflect.Type{},
-		Vars:       map[string]reflect.Value{},
-		Funcs: map[string]reflect.Value{
-			"Compare": reflect.ValueOf(q.Compare),
-			"IsValid": reflect.ValueOf(q.IsValid),
-			"Lang":    reflect.ValueOf(q.Lang),
-		},
-		TypedConsts:   map[string]ixgo.TypedConst{},
-		UntypedConsts: map[string]ixgo.UntypedConst{},
+	ixgo.RegisterPackageLazy("go/version", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "version",
+			Path: "go/version",
+			Deps: map[string]string{
+				"internal/gover": "gover",
+				"strings":        "strings",
+			},
+			Interfaces: map[string]reflect.Type{},
+			NamedTypes: map[string]reflect.Type{},
+			AliasTypes: map[string]reflect.Type{},
+			Vars:       map[string]reflect.Value{},
+			Funcs: map[string]reflect.Value{
+				"Compare": reflect.ValueOf(q.Compare),
+				"IsValid": reflect.ValueOf(q.IsValid),
+				"Lang":    reflect.ValueOf(q.Lang),
+			},
+			TypedConsts:   map[string]ixgo.TypedConst{},
+			UntypedConsts: map[string]ixgo.UntypedConst{},
+		}
 	})
 }

@@ -14,29 +14,31 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "suffixarray",
-		Path: "index/suffixarray",
-		Deps: map[string]string{
-			"bytes":           "bytes",
-			"encoding/binary": "binary",
-			"errors":          "errors",
-			"io":              "io",
-			"math":            "math",
-			"regexp":          "regexp",
-			"slices":          "slices",
-			"sort":            "sort",
-		},
-		Interfaces: map[string]reflect.Type{},
-		NamedTypes: map[string]reflect.Type{
-			"Index": reflect.TypeOf((*q.Index)(nil)).Elem(),
-		},
-		AliasTypes: map[string]reflect.Type{},
-		Vars:       map[string]reflect.Value{},
-		Funcs: map[string]reflect.Value{
-			"New": reflect.ValueOf(q.New),
-		},
-		TypedConsts:   map[string]ixgo.TypedConst{},
-		UntypedConsts: map[string]ixgo.UntypedConst{},
+	ixgo.RegisterPackageLazy("index/suffixarray", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "suffixarray",
+			Path: "index/suffixarray",
+			Deps: map[string]string{
+				"bytes":           "bytes",
+				"encoding/binary": "binary",
+				"errors":          "errors",
+				"io":              "io",
+				"math":            "math",
+				"regexp":          "regexp",
+				"slices":          "slices",
+				"sort":            "sort",
+			},
+			Interfaces: map[string]reflect.Type{},
+			NamedTypes: map[string]reflect.Type{
+				"Index": reflect.TypeOf((*q.Index)(nil)).Elem(),
+			},
+			AliasTypes: map[string]reflect.Type{},
+			Vars:       map[string]reflect.Value{},
+			Funcs: map[string]reflect.Value{
+				"New": reflect.ValueOf(q.New),
+			},
+			TypedConsts:   map[string]ixgo.TypedConst{},
+			UntypedConsts: map[string]ixgo.UntypedConst{},
+		}
 	})
 }

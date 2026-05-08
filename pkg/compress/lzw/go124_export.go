@@ -15,31 +15,33 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "lzw",
-		Path: "compress/lzw",
-		Deps: map[string]string{
-			"bufio":  "bufio",
-			"errors": "errors",
-			"fmt":    "fmt",
-			"io":     "io",
-		},
-		Interfaces: map[string]reflect.Type{},
-		NamedTypes: map[string]reflect.Type{
-			"Order":  reflect.TypeOf((*q.Order)(nil)).Elem(),
-			"Reader": reflect.TypeOf((*q.Reader)(nil)).Elem(),
-			"Writer": reflect.TypeOf((*q.Writer)(nil)).Elem(),
-		},
-		AliasTypes: map[string]reflect.Type{},
-		Vars:       map[string]reflect.Value{},
-		Funcs: map[string]reflect.Value{
-			"NewReader": reflect.ValueOf(q.NewReader),
-			"NewWriter": reflect.ValueOf(q.NewWriter),
-		},
-		TypedConsts: map[string]ixgo.TypedConst{
-			"LSB": {reflect.TypeOf(q.LSB), constant.MakeInt64(int64(q.LSB))},
-			"MSB": {reflect.TypeOf(q.MSB), constant.MakeInt64(int64(q.MSB))},
-		},
-		UntypedConsts: map[string]ixgo.UntypedConst{},
+	ixgo.RegisterPackageLazy("compress/lzw", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "lzw",
+			Path: "compress/lzw",
+			Deps: map[string]string{
+				"bufio":  "bufio",
+				"errors": "errors",
+				"fmt":    "fmt",
+				"io":     "io",
+			},
+			Interfaces: map[string]reflect.Type{},
+			NamedTypes: map[string]reflect.Type{
+				"Order":  reflect.TypeOf((*q.Order)(nil)).Elem(),
+				"Reader": reflect.TypeOf((*q.Reader)(nil)).Elem(),
+				"Writer": reflect.TypeOf((*q.Writer)(nil)).Elem(),
+			},
+			AliasTypes: map[string]reflect.Type{},
+			Vars:       map[string]reflect.Value{},
+			Funcs: map[string]reflect.Value{
+				"NewReader": reflect.ValueOf(q.NewReader),
+				"NewWriter": reflect.ValueOf(q.NewWriter),
+			},
+			TypedConsts: map[string]ixgo.TypedConst{
+				"LSB": {Typ: reflect.TypeOf(q.LSB), Value: constant.MakeInt64(int64(q.LSB))},
+				"MSB": {Typ: reflect.TypeOf(q.MSB), Value: constant.MakeInt64(int64(q.MSB))},
+			},
+			UntypedConsts: map[string]ixgo.UntypedConst{},
+		}
 	})
 }
