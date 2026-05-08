@@ -63,32 +63,29 @@ func (p *baseLoad) Package() *Package {
 }
 
 type lazyLoad struct {
-	once sync.Once
-	pkg  *Package
 	load func() *Package
 }
 
 func (p *lazyLoad) Package() *Package {
-	p.once.Do(func() {
-		p.pkg = p.load()
-	})
-	return p.pkg
+	return p.load()
 }
 
 // RegisterPackage register a pkg.
 func RegisterPackage(pkg *Package) {
 	if p, ok := registerPkgs[pkg.Path]; ok {
-		if base, ok := p.(*baseLoad); ok {
-			base.pkg.merge(pkg)
-			return
-		}
+		p.Package().merge(pkg)
+		return
 	}
 	registerPkgs[pkg.Path] = &baseLoad{pkg: pkg}
 }
 
 // RegisterPackageLazy registers a pkg with lazy initialization.
 func RegisterPackageLazy(pkg string, load func() *Package) {
-	registerPkgs[pkg] = &lazyLoad{load: load}
+	if p, ok := registerPkgs[pkg]; ok {
+		p.Package().merge(load())
+		return
+	}
+	registerPkgs[pkg] = &lazyLoad{load: sync.OnceValue(load)}
 }
 
 // RegisterPatch register pkg with "pkg@patch"

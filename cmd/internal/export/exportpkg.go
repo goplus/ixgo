@@ -111,7 +111,7 @@ func exportPkg(pkg *Package, sname string, id string, tagList []string, fname st
 		tmpl = strings.Replace(tmpl, "ixgo.RegisterPackage(",
 			`ixgo.RegisterPackageLazy("$PKGPATH",func() *ixgo.Package {$INIT 
 	return `, 1)
-		tmpl = strings.Replace(tmpl, "$EXT", "$EXT\n}", 1)
+		tmpl = strings.Replace(tmpl, "})", "}\n\t})", 1)
 	}
 
 	var ext string
@@ -252,8 +252,8 @@ func init() {$INIT
 		Vars: map[string]reflect.Value{$VARS},
 		Funcs: map[string]reflect.Value{$FUNCS},
 		TypedConsts: map[string]ixgo.TypedConst{$TYPEDCONSTS},
-		UntypedConsts: map[string]ixgo.UntypedConst{$UNTYPEDCONSTS},$EXT
-		Source: source,
+		UntypedConsts: map[string]ixgo.UntypedConst{$UNTYPEDCONSTS},
+		Source: source,$EXT
 	})
 }
 $LINKS
