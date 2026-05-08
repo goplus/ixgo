@@ -106,12 +106,19 @@ func exportPkg(pkg *Package, sname string, id string, tagList []string, fname st
 		pkg.Path = path.Clean(flagCustomPkg)
 		pkg.Name = path.Base(pkg.Path)
 	}
+	if flagExportLazy {
+		tmpl = strings.Replace(tmpl, "$INIT", "", 1)
+		tmpl = strings.Replace(tmpl, "ixgo.RegisterPackage(",
+			`ixgo.RegisterPackageLazy("$PKGPATH",func() *ixgo.Package {$INIT 
+	return `, 1)
+		tmpl = strings.Replace(tmpl, "$EXT", "$EXT\n}", 1)
+	}
+
 	var ext string
 	if len(pkg.Alias) != 0 && flagExportAlias {
 		imports = append(imports, `"github.com/goplus/ixgo/alias"`)
 		ext = "\nAlias: map[string]alias.Type{" + joinList(pkg.Alias) + "},"
 	}
-
 	r := strings.NewReplacer("$PKGNAME", pkg.Name,
 		"$IMPORTS", strings.Join(imports, "\n"),
 		"$PKGPATH", pkg.Path,
@@ -213,11 +220,11 @@ import (
 	"github.com/goplus/ixgo"
 )
 
-func init() {
+func init() {$INIT
 	ixgo.RegisterPackage(&ixgo.Package {
 		Name: "$PKGNAME",
 		Path: "$PKGPATH",
-		Deps: map[string]string{$DEPS},
+		Deps: map[string]string{$DEPS},$EXT
 	})
 }
 `
@@ -265,12 +272,12 @@ import (
 	"github.com/goplus/ixgo"
 )
 
-func init() {
+func init() {$INIT
 	ixgo.RegisterPackage(&ixgo.Package {
 		Name: "$PKGNAME",
 		Path: "$PKGPATH",
 		Deps: map[string]string{$DEPS},
-		Source: source,
+		Source: source,$EXT
 	})
 }
 $LINKS

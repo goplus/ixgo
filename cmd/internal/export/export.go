@@ -41,6 +41,7 @@ var (
 	flagExportCode     bool
 	flagExportTypes    bool
 	flagExportAlias    bool
+	flagExportLazy     bool
 	flagAliasTypes     string
 )
 
@@ -59,6 +60,7 @@ func init() {
 	flag.BoolVar(&flagExportCode, "code", false, "export full source code mode")
 	flag.BoolVar(&flagExportTypes, "types", false, "export types data for XGo")
 	flag.BoolVar(&flagExportAlias, "alias", false, "export types alias data")
+	flag.BoolVar(&flagExportLazy, "lazy", false, "delay package initialization until first access (reduces startup time)")
 	flag.StringVar(&flagAliasTypes, "alias_types", "", "set export types alias list, split by ;")
 }
 
