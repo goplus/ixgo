@@ -12,31 +12,33 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "json",
-		Path: "github.com/goplus/xgo/dql/json",
-		Deps: map[string]string{
-			"bytes":                          "bytes",
-			"encoding/json":                  "json",
-			"github.com/goplus/xgo/dql/maps": "maps",
-			"github.com/qiniu/x/stream":      "stream",
-			"io":                             "io",
-			"iter":                           "iter",
-		},
-		Interfaces: map[string]reflect.Type{},
-		NamedTypes: map[string]reflect.Type{},
-		AliasTypes: map[string]reflect.Type{
-			"Node":    reflect.TypeOf((*q.Node)(nil)).Elem(),
-			"NodeSet": reflect.TypeOf((*q.NodeSet)(nil)).Elem(),
-		},
-		Vars: map[string]reflect.Value{},
-		Funcs: map[string]reflect.Value{
-			"New":    reflect.ValueOf(q.New),
-			"Source": reflect.ValueOf(q.Source),
-		},
-		TypedConsts: map[string]ixgo.TypedConst{},
-		UntypedConsts: map[string]ixgo.UntypedConst{
-			"XGoPackage": {Typ: "untyped string", Value: constant.MakeString(string(q.XGoPackage))},
-		},
+	ixgo.RegisterPackageLazy("github.com/goplus/xgo/dql/json", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "json",
+			Path: "github.com/goplus/xgo/dql/json",
+			Deps: map[string]string{
+				"bytes":                          "bytes",
+				"encoding/json":                  "json",
+				"github.com/goplus/xgo/dql/maps": "maps",
+				"github.com/qiniu/x/stream":      "stream",
+				"io":                             "io",
+				"iter":                           "iter",
+			},
+			Interfaces: map[string]reflect.Type{},
+			NamedTypes: map[string]reflect.Type{},
+			AliasTypes: map[string]reflect.Type{
+				"Node":    reflect.TypeOf((*q.Node)(nil)).Elem(),
+				"NodeSet": reflect.TypeOf((*q.NodeSet)(nil)).Elem(),
+			},
+			Vars: map[string]reflect.Value{},
+			Funcs: map[string]reflect.Value{
+				"New":    reflect.ValueOf(q.New),
+				"Source": reflect.ValueOf(q.Source),
+			},
+			TypedConsts: map[string]ixgo.TypedConst{},
+			UntypedConsts: map[string]ixgo.UntypedConst{
+				"XGoPackage": {Typ: "untyped string", Value: constant.MakeString(string(q.XGoPackage))},
+			},
+		}
 	})
 }

@@ -14,21 +14,23 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "fips140",
-		Path: "crypto/fips140",
-		Deps: map[string]string{
-			"crypto/internal/fips140":       "fips140",
-			"crypto/internal/fips140/check": "check",
-		},
-		Interfaces: map[string]reflect.Type{},
-		NamedTypes: map[string]reflect.Type{},
-		AliasTypes: map[string]reflect.Type{},
-		Vars:       map[string]reflect.Value{},
-		Funcs: map[string]reflect.Value{
-			"Enabled": reflect.ValueOf(q.Enabled),
-		},
-		TypedConsts:   map[string]ixgo.TypedConst{},
-		UntypedConsts: map[string]ixgo.UntypedConst{},
+	ixgo.RegisterPackageLazy("crypto/fips140", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "fips140",
+			Path: "crypto/fips140",
+			Deps: map[string]string{
+				"crypto/internal/fips140":       "fips140",
+				"crypto/internal/fips140/check": "check",
+			},
+			Interfaces: map[string]reflect.Type{},
+			NamedTypes: map[string]reflect.Type{},
+			AliasTypes: map[string]reflect.Type{},
+			Vars:       map[string]reflect.Value{},
+			Funcs: map[string]reflect.Value{
+				"Enabled": reflect.ValueOf(q.Enabled),
+			},
+			TypedConsts:   map[string]ixgo.TypedConst{},
+			UntypedConsts: map[string]ixgo.UntypedConst{},
+		}
 	})
 }

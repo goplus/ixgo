@@ -14,23 +14,25 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "maps",
-		Path: "maps",
-		Deps: map[string]string{
-			"iter":   "iter",
-			"unsafe": "unsafe",
-		},
-		Interfaces: map[string]reflect.Type{},
-		NamedTypes: map[string]reflect.Type{},
-		AliasTypes: map[string]reflect.Type{},
-		Vars:       map[string]reflect.Value{},
-		Funcs: map[string]reflect.Value{
-			"clone": reflect.ValueOf(_clone),
-		},
-		TypedConsts:   map[string]ixgo.TypedConst{},
-		UntypedConsts: map[string]ixgo.UntypedConst{},
-		Source:        source,
+	ixgo.RegisterPackageLazy("maps", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "maps",
+			Path: "maps",
+			Deps: map[string]string{
+				"iter":   "iter",
+				"unsafe": "unsafe",
+			},
+			Interfaces: map[string]reflect.Type{},
+			NamedTypes: map[string]reflect.Type{},
+			AliasTypes: map[string]reflect.Type{},
+			Vars:       map[string]reflect.Value{},
+			Funcs: map[string]reflect.Value{
+				"clone": reflect.ValueOf(_clone),
+			},
+			TypedConsts:   map[string]ixgo.TypedConst{},
+			UntypedConsts: map[string]ixgo.UntypedConst{},
+			Source:        source,
+		}
 	})
 }
 

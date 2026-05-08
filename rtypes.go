@@ -169,16 +169,17 @@ func (r *TypesLoader) Import(path string) (*types.Package, error) {
 			if load, ok := r.pkgloads[path]; ok {
 				load()
 			}
-			if pkg, ok := registerPkgs[path]; ok {
-				r.installed[path] = pkg
+			if pload, ok := registerPkgs[path]; ok {
+				r.installed[path] = pload.Package()
 			}
 		}
 		return p, nil
 	}
-	pkg, ok := registerPkgs[path]
+	pload, ok := registerPkgs[path]
 	if !ok {
 		return nil, fmt.Errorf("not found package %v", path)
 	}
+	pkg := pload.Package()
 	p := types.NewPackage(pkg.Path, pkg.Name)
 	r.packages[path] = p
 	for dep := range pkg.Deps {

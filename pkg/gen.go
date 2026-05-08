@@ -44,6 +44,19 @@ func init() {
 	}
 }
 
+var commonPkgs = map[string]bool{
+	"bytes":   true,
+	"errors":  true,
+	"fmt":     true,
+	"io":      true,
+	"math":    true,
+	"os":      true,
+	"strconv": true,
+	"strings": true,
+	"sync":    true,
+	"time":    true,
+}
+
 func main() {
 	var tags string
 	var name string
@@ -108,8 +121,20 @@ func main() {
 	log.Println(gover, name, tags)
 	log.Println(pkgs)
 
+	npkgs := normalPkgs(pkgs)
+	var cpkgs []string
+	var opkgs []string
+	for _, pkg := range npkgs {
+		if commonPkgs[pkg] {
+			cpkgs = append(cpkgs, pkg)
+		} else {
+			opkgs = append(opkgs, pkg)
+		}
+	}
+
+	// common pkgs
 	cmd := exec.Command("qexp", "-outdir", ".", "-addtags", tags, "-filename", name)
-	cmd.Args = append(cmd.Args, normalPkgs(pkgs)...)
+	cmd.Args = append(cmd.Args, cpkgs...)
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
 	err := cmd.Run()
@@ -117,8 +142,20 @@ func main() {
 		panic(err)
 	}
 
+	// lazy pkgs
+	cmd = exec.Command("qexp", "-outdir", ".", "-addtags", tags, "-filename", name)
+	cmd.Args = append(cmd.Args, "-lazy")
+	cmd.Args = append(cmd.Args, opkgs...)
+	cmd.Stderr = os.Stderr
+	cmd.Stdout = os.Stdout
+	err = cmd.Run()
+	if err != nil {
+		panic(err)
+	}
+
 	// log
 	cmd = exec.Command("qexp", "-outdir", ".", "-addtags", tags, "-filename", name, "-code")
+	cmd.Args = append(cmd.Args, "-lazy")
 	cmd.Args = append(cmd.Args, "log")
 	if minorVer >= 21 {
 		cmd.Args = append(cmd.Args, "log/slog", "log/internal", "log/slog/internal", "log/slog/internal/buffer")
@@ -134,6 +171,7 @@ func main() {
 	gpkgs := genericPkgs(pkgs)
 	if len(gpkgs) > 0 {
 		cmd = exec.Command("qexp", "-outdir", ".", "-addtags", tags, "-filename", name, "-src")
+		cmd.Args = append(cmd.Args, "-lazy")
 		cmd.Args = append(cmd.Args, gpkgs...)
 		cmd.Stderr = os.Stderr
 		cmd.Stdout = os.Stdout
@@ -150,7 +188,9 @@ func main() {
 		if len(ar) != 2 {
 			continue
 		}
-		cmd := exec.Command("qexp", "-outdir", ".", "-addtags", tags, "-filename", name, "-contexts", osarch, "syscall")
+		cmd := exec.Command("qexp", "-outdir", ".", "-addtags", tags, "-filename", name, "-contexts", osarch)
+		cmd.Args = append(cmd.Args, "-lazy")
+		cmd.Args = append(cmd.Args, "syscall")
 		cmd.Stderr = os.Stderr
 		cmd.Stdout = os.Stdout
 		cmd.Env = os.Environ()

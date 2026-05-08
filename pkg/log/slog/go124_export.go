@@ -10,35 +10,37 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name: "slog",
-		Path: "log/slog",
-		Deps: map[string]string{
-			"bytes":                    "bytes",
-			"context":                  "context",
-			"encoding":                 "encoding",
-			"encoding/json":            "json",
-			"errors":                   "errors",
-			"fmt":                      "fmt",
-			"io":                       "io",
-			"log":                      "log",
-			"log/internal":             "internal",
-			"log/slog/internal":        "internal",
-			"log/slog/internal/buffer": "buffer",
-			"math":                     "math",
-			"reflect":                  "reflect",
-			"runtime":                  "runtime",
-			"slices":                   "slices",
-			"strconv":                  "strconv",
-			"strings":                  "strings",
-			"sync":                     "sync",
-			"sync/atomic":              "atomic",
-			"time":                     "time",
-			"unicode":                  "unicode",
-			"unicode/utf8":             "utf8",
-			"unsafe":                   "unsafe",
-		},
-		Source: source,
+	ixgo.RegisterPackageLazy("log/slog", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "slog",
+			Path: "log/slog",
+			Deps: map[string]string{
+				"bytes":                    "bytes",
+				"context":                  "context",
+				"encoding":                 "encoding",
+				"encoding/json":            "json",
+				"errors":                   "errors",
+				"fmt":                      "fmt",
+				"io":                       "io",
+				"log":                      "log",
+				"log/internal":             "internal",
+				"log/slog/internal":        "internal",
+				"log/slog/internal/buffer": "buffer",
+				"math":                     "math",
+				"reflect":                  "reflect",
+				"runtime":                  "runtime",
+				"slices":                   "slices",
+				"strconv":                  "strconv",
+				"strings":                  "strings",
+				"sync":                     "sync",
+				"sync/atomic":              "atomic",
+				"time":                     "time",
+				"unicode":                  "unicode",
+				"unicode/utf8":             "utf8",
+				"unsafe":                   "unsafe",
+			},
+			Source: source,
+		}
 	})
 }
 

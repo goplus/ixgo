@@ -1,7 +1,7 @@
 // export by github.com/goplus/ixgo/cmd/qexp
 
-//go:build go1.24 && js
-// +build go1.24,js
+//go:build go1.24 && !go1.25 && js
+// +build go1.24,!go1.25,js
 
 package js
 
@@ -44,14 +44,14 @@ func init() {
 			"ValueOf":       reflect.ValueOf(q.ValueOf),
 		},
 		TypedConsts: map[string]ixgo.TypedConst{
-			"TypeBoolean":   {reflect.TypeOf(q.TypeBoolean), constant.MakeInt64(int64(q.TypeBoolean))},
-			"TypeFunction":  {reflect.TypeOf(q.TypeFunction), constant.MakeInt64(int64(q.TypeFunction))},
-			"TypeNull":      {reflect.TypeOf(q.TypeNull), constant.MakeInt64(int64(q.TypeNull))},
-			"TypeNumber":    {reflect.TypeOf(q.TypeNumber), constant.MakeInt64(int64(q.TypeNumber))},
-			"TypeObject":    {reflect.TypeOf(q.TypeObject), constant.MakeInt64(int64(q.TypeObject))},
-			"TypeString":    {reflect.TypeOf(q.TypeString), constant.MakeInt64(int64(q.TypeString))},
-			"TypeSymbol":    {reflect.TypeOf(q.TypeSymbol), constant.MakeInt64(int64(q.TypeSymbol))},
-			"TypeUndefined": {reflect.TypeOf(q.TypeUndefined), constant.MakeInt64(int64(q.TypeUndefined))},
+			"TypeBoolean":   {Typ: reflect.TypeOf(q.TypeBoolean), Value: constant.MakeInt64(int64(q.TypeBoolean))},
+			"TypeFunction":  {Typ: reflect.TypeOf(q.TypeFunction), Value: constant.MakeInt64(int64(q.TypeFunction))},
+			"TypeNull":      {Typ: reflect.TypeOf(q.TypeNull), Value: constant.MakeInt64(int64(q.TypeNull))},
+			"TypeNumber":    {Typ: reflect.TypeOf(q.TypeNumber), Value: constant.MakeInt64(int64(q.TypeNumber))},
+			"TypeObject":    {Typ: reflect.TypeOf(q.TypeObject), Value: constant.MakeInt64(int64(q.TypeObject))},
+			"TypeString":    {Typ: reflect.TypeOf(q.TypeString), Value: constant.MakeInt64(int64(q.TypeString))},
+			"TypeSymbol":    {Typ: reflect.TypeOf(q.TypeSymbol), Value: constant.MakeInt64(int64(q.TypeSymbol))},
+			"TypeUndefined": {Typ: reflect.TypeOf(q.TypeUndefined), Value: constant.MakeInt64(int64(q.TypeUndefined))},
 		},
 		UntypedConsts: map[string]ixgo.UntypedConst{},
 	})

@@ -12,18 +12,20 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackage(&ixgo.Package{
-		Name:        "goarch",
-		Path:        "github.com/goplus/ixgo/x/goarch",
-		Deps:        map[string]string{},
-		Interfaces:  map[string]reflect.Type{},
-		NamedTypes:  map[string]reflect.Type{},
-		AliasTypes:  map[string]reflect.Type{},
-		Vars:        map[string]reflect.Value{},
-		Funcs:       map[string]reflect.Value{},
-		TypedConsts: map[string]ixgo.TypedConst{},
-		UntypedConsts: map[string]ixgo.UntypedConst{
-			"PtrSize": {"untyped int", constant.MakeInt64(int64(q.PtrSize))},
-		},
+	ixgo.RegisterPackageLazy("github.com/goplus/ixgo/x/goarch", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name:        "goarch",
+			Path:        "github.com/goplus/ixgo/x/goarch",
+			Deps:        map[string]string{},
+			Interfaces:  map[string]reflect.Type{},
+			NamedTypes:  map[string]reflect.Type{},
+			AliasTypes:  map[string]reflect.Type{},
+			Vars:        map[string]reflect.Value{},
+			Funcs:       map[string]reflect.Value{},
+			TypedConsts: map[string]ixgo.TypedConst{},
+			UntypedConsts: map[string]ixgo.UntypedConst{
+				"PtrSize": {Typ: "untyped int", Value: constant.MakeInt64(int64(q.PtrSize))},
+			},
+		}
 	})
 }

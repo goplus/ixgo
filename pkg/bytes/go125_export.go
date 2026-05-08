@@ -101,7 +101,7 @@ func init() {
 		},
 		TypedConsts: map[string]ixgo.TypedConst{},
 		UntypedConsts: map[string]ixgo.UntypedConst{
-			"MinRead": {"untyped int", constant.MakeInt64(int64(q.MinRead))},
+			"MinRead": {Typ: "untyped int", Value: constant.MakeInt64(int64(q.MinRead))},
 		},
 	})
 }

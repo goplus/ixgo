@@ -82,9 +82,9 @@ func init() {
 		},
 		TypedConsts: map[string]ixgo.TypedConst{},
 		UntypedConsts: map[string]ixgo.UntypedConst{
-			"SeekCurrent": {"untyped int", constant.MakeInt64(int64(q.SeekCurrent))},
-			"SeekEnd":     {"untyped int", constant.MakeInt64(int64(q.SeekEnd))},
-			"SeekStart":   {"untyped int", constant.MakeInt64(int64(q.SeekStart))},
+			"SeekCurrent": {Typ: "untyped int", Value: constant.MakeInt64(int64(q.SeekCurrent))},
+			"SeekEnd":     {Typ: "untyped int", Value: constant.MakeInt64(int64(q.SeekEnd))},
+			"SeekStart":   {Typ: "untyped int", Value: constant.MakeInt64(int64(q.SeekStart))},
 		},
 	})
 }

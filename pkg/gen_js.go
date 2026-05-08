@@ -32,8 +32,16 @@ func main() {
 	var name string
 	var fname string
 	switch ver {
+	case "go1.26":
+		tags = "//+build go1.26"
+		name = "go126_export"
+		fname = "go126_pkgs.go"
+	case "go1.25":
+		tags = "//+build go1.25,!go1.26"
+		name = "go125_export"
+		fname = "go125_pkgs.go"
 	case "go1.24":
-		tags = "//+build go1.24"
+		tags = "//+build go1.24,!go1.25"
 		name = "go124_export"
 		fname = "go124_pkgs.go"
 	case "go1.23":
