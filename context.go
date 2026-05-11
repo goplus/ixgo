@@ -39,8 +39,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/goplus/ixgo/internal/typesalias"
 	"github.com/goplus/ixgo/load"
 	"github.com/goplus/ixgo/load/list"
+	"github.com/goplus/reflectx"
 	"golang.org/x/tools/go/ssa"
 )
 
@@ -76,6 +78,10 @@ type Loader interface {
 	SetImport(path string, pkg *types.Package, load func() error) error
 }
 
+type IcallCheck interface {
+	NewCheck(prog *ssa.Program) func(typ reflect.Type, method reflectx.Method) bool
+}
+
 // Context ssa context
 type Context struct {
 	Loader       Loader                                                   // types loader
@@ -100,6 +106,7 @@ type Context struct {
 	Builder      *SSABuilder                                              // ssa builder
 	evalMode     bool                                                     // eval mode
 	loadPkgMu    sync.Mutex                                               // load pkg mutex
+	IcallCheck   IcallCheck                                               // icall check
 }
 
 func (ctx *Context) setRoot(root string) {
@@ -219,6 +226,12 @@ func NewContext(mode Mode) *Context {
 			}
 		}
 	}
+	if mode&OptionLoadRutimeImethod != 0 {
+		ctx.IcallCheck = runtimeCheck{}
+	} else if mode&OptionLoadAllImethod == 0 {
+		ctx.IcallCheck = defaultCheck{}
+	}
+
 	return ctx
 }
 
@@ -1173,4 +1186,47 @@ import (
 %v
 `, pkg, strings.Join(deps, "\n"), strings.Join(list, "\n"))
 	return parser.ParseFile(fset, "gossa_builtin.go", src, 0)
+}
+
+type defaultCheck struct {
+}
+
+func (p defaultCheck) NewCheck(prog *ssa.Program) func(typ reflect.Type, method reflectx.Method) bool {
+	return func(typ reflect.Type, method reflectx.Method) bool {
+		if ast.IsExported(method.Name) {
+			return true
+		}
+		if typ.PkgPath() != method.PkgPath {
+			return true
+		}
+		return false
+	}
+}
+
+type runtimeCheck struct {
+}
+
+func (p runtimeCheck) NewCheck(prog *ssa.Program) func(typ reflect.Type, method reflectx.Method) bool {
+	rtyps := make(map[string]bool)
+	for _, typ := range prog.RuntimeTypes() {
+	retry:
+		switch t := typ.(type) {
+		case *types.Named:
+			rtyps[t.String()] = true
+		case *typesalias.Alias:
+			typ = typesalias.Unalias(t)
+			goto retry
+		}
+	}
+	return func(typ reflect.Type, method reflectx.Method) bool {
+		if _, ok := rtyps[typ.String()]; ok {
+			if ast.IsExported(method.Name) {
+				return true
+			}
+			if typ.PkgPath() != method.PkgPath {
+				return true
+			}
+		}
+		return false
+	}
 }
