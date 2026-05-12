@@ -2920,6 +2920,53 @@ func main() {
 	}
 }
 
+func TestEmbedImethod2(t *testing.T) {
+	src := `
+package main
+
+import "github.com/goplus/ixgo/testdata2/pkg"
+
+type MyApp struct {
+	pkg.App
+}
+
+func (p *MyApp) MainEntry() {
+	if !p.IsInit() {
+		panic("init app error")
+	}
+	println("MainEntry: app")
+}
+
+type TestApp struct {
+	pkg.App
+}
+
+func (p *TestApp) MainEntry() {
+	if !p.IsTest() {
+		panic("init test error")
+	}
+	println("MainEntry: test")
+}
+
+func main() {
+	pkg.RunApp(&MyApp{})
+	pkg.RunTest(&TestApp{})
+}
+`
+	data, err := os.ReadFile("./testdata/pkg/pkg.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mode := range []ixgo.Mode{ixgo.OptionLoadDefaultImethod, ixgo.OptionLoadRutimeImethod, ixgo.OptionLoadAllImethod} {
+		ctx := ixgo.NewContext(mode)
+		ctx.AddImportFile("github.com/goplus/ixgo/testdata2/pkg", "pkg.go", data)
+		_, err := ctx.RunFile("main.go", src, nil)
+		if err != nil {
+			t.Errorf("error: %v mode: %d", err, mode)
+		}
+	}
+}
+
 func TestExternFunc(t *testing.T) {
 	type Stub struct {
 		Add func(int, int) int

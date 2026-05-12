@@ -57,7 +57,6 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/goplus/ixgo/internal/typesalias"
 	"github.com/goplus/ixgo/load"
 	"github.com/goplus/reflectx"
 	"github.com/timandy/routine"
@@ -1178,48 +1177,13 @@ func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{
 		mainid:       goroutineID(),
 	}
 	prog := mainpkg.Prog
-	if ctx.Mode&OptionLoadAllImethod != 0 {
-		rctx.SetHasImethod(func(typ reflect.Type, method reflectx.Method) bool {
-			return true
-		})
-	} else if ctx.Mode&OptionLoadRutimeImethod != 0 {
-		rtyps := make(map[string]bool)
-		for _, typ := range prog.RuntimeTypes() {
-		retry:
-			switch t := typ.(type) {
-			case *types.Named:
-				rtyps[t.String()] = true
-			case *typesalias.Alias:
-				typ = typesalias.Unalias(t)
-				goto retry
-			}
-		}
+	if ctx.MethodChecker != nil {
+		check := ctx.MethodChecker(ctx, prog)
 		rctx.SetHasImethod(func(typ reflect.Type, method reflectx.Method) bool {
 			if method.Type == tyUnusedFunc || method.FuncId == -1 {
 				return false
 			}
-			if _, ok := rtyps[typ.String()]; ok {
-				if ast.IsExported(method.Name) {
-					return true
-				}
-				if typ.PkgPath() != method.PkgPath {
-					return true
-				}
-			}
-			return false
-		})
-	} else {
-		rctx.SetHasImethod(func(typ reflect.Type, method reflectx.Method) bool {
-			if method.Type == tyUnusedFunc || method.FuncId == -1 {
-				return false
-			}
-			if ast.IsExported(method.Name) {
-				return true
-			}
-			if typ.PkgPath() != method.PkgPath {
-				return true
-			}
-			return false
+			return check(typ, method)
 		})
 	}
 

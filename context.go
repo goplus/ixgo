@@ -39,8 +39,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/goplus/ixgo/internal/typesalias"
 	"github.com/goplus/ixgo/load"
 	"github.com/goplus/ixgo/load/list"
+	"github.com/goplus/reflectx"
 	"golang.org/x/tools/go/ssa"
 )
 
@@ -74,32 +76,37 @@ type Loader interface {
 	LookupReflect(typ types.Type) (reflect.Type, bool)
 	LookupTypes(typ reflect.Type) (types.Type, bool)
 	SetImport(path string, pkg *types.Package, load func() error) error
+	Iterate(f func(typ types.Type, value interface{}))
 }
+
+// MethodChecker returns a validator that reports whether method is valid for typ.
+type MethodChecker func(ctx *Context, prog *ssa.Program) func(typ reflect.Type, method reflectx.Method) bool
 
 // Context ssa context
 type Context struct {
-	Loader       Loader                                                   // types loader
-	BuildContext build.Context                                            // build context, default build.Default
-	RunContext   context.Context                                          // run context, default unset
-	Importer     types.Importer                                           // importer
-	output       io.Writer                                                // capture print/println output
-	FileSet      *token.FileSet                                           // file set
-	sizes        types.Sizes                                              // types unsafe sizes
-	Lookup       func(root, path string) (dir string, found bool)         // lookup external import
-	evalCallFn   func(interp *Interp, call *ssa.Call, res ...interface{}) // internal eval func for repl
-	debugFunc    func(*DebugInfo)                                         // debug func
-	panicFunc    func(*PanicInfo)                                         // panic func
-	pkgs         map[string]*SourcePackage                                // imports
-	override     map[string]reflect.Value                                 // override function
-	evalInit     map[string]bool                                          // eval init check
-	nestedMap    map[*types.Named]int                                     // nested named index
-	rootp        atomic.Pointer[string]                                   // project root
-	callForPool  int                                                      // least call count for enable function pool
-	Mode         Mode                                                     // mode
-	BuilderMode  ssa.BuilderMode                                          // ssa builder mode
-	Builder      *SSABuilder                                              // ssa builder
-	evalMode     bool                                                     // eval mode
-	loadPkgMu    sync.Mutex                                               // load pkg mutex
+	Loader        Loader                                                   // types loader
+	BuildContext  build.Context                                            // build context, default build.Default
+	RunContext    context.Context                                          // run context, default unset
+	Importer      types.Importer                                           // importer
+	output        io.Writer                                                // capture print/println output
+	FileSet       *token.FileSet                                           // file set
+	sizes         types.Sizes                                              // types unsafe sizes
+	Lookup        func(root, path string) (dir string, found bool)         // lookup external import
+	evalCallFn    func(interp *Interp, call *ssa.Call, res ...interface{}) // internal eval func for repl
+	debugFunc     func(*DebugInfo)                                         // debug func
+	panicFunc     func(*PanicInfo)                                         // panic func
+	pkgs          map[string]*SourcePackage                                // imports
+	override      map[string]reflect.Value                                 // override function
+	evalInit      map[string]bool                                          // eval init check
+	nestedMap     map[*types.Named]int                                     // nested named index
+	rootp         atomic.Pointer[string]                                   // project root
+	callForPool   int                                                      // least call count for enable function pool
+	Mode          Mode                                                     // mode
+	BuilderMode   ssa.BuilderMode                                          // ssa builder mode
+	Builder       *SSABuilder                                              // ssa builder
+	evalMode      bool                                                     // eval mode
+	loadPkgMu     sync.Mutex                                               // load pkg mutex
+	MethodChecker MethodChecker                                            // method checker
 }
 
 func (ctx *Context) setRoot(root string) {
@@ -219,6 +226,12 @@ func NewContext(mode Mode) *Context {
 			}
 		}
 	}
+	if mode&OptionLoadRutimeImethod != 0 {
+		ctx.MethodChecker = runtimeChecker
+	} else if mode&OptionLoadAllImethod == 0 {
+		ctx.MethodChecker = defaultChecker
+	}
+
 	return ctx
 }
 
@@ -1173,4 +1186,57 @@ import (
 %v
 `, pkg, strings.Join(deps, "\n"), strings.Join(list, "\n"))
 	return parser.ParseFile(fset, "gossa_builtin.go", src, 0)
+}
+
+func defaultChecker(ctx *Context, prog *ssa.Program) func(typ reflect.Type, method reflectx.Method) bool {
+	return func(typ reflect.Type, method reflectx.Method) bool {
+		if ast.IsExported(method.Name) {
+			return true
+		}
+		if typ.PkgPath() != method.PkgPath {
+			return true
+		}
+		return false
+	}
+}
+
+func runtimeChecker(ctx *Context, prog *ssa.Program) func(typ reflect.Type, method reflectx.Method) bool {
+	rtyps := make(map[string]struct{})
+	imthd := make(map[string]struct{})
+	addIface := func(iface *types.Interface) {
+		for i := 0; i < iface.NumMethods(); i++ {
+			imthd[iface.Method(i).Name()] = struct{}{}
+		}
+	}
+	ctx.Loader.Iterate(func(typ types.Type, value interface{}) {
+		if iface, ok := typ.Underlying().(*types.Interface); ok {
+			addIface(iface)
+		}
+	})
+	for _, typ := range prog.RuntimeTypes() {
+	retry:
+		switch t := typ.(type) {
+		case *types.Named:
+			obj := t.Obj()
+			if pkg := obj.Pkg(); pkg != nil {
+				rtyps[pkg.Path()+"."+obj.Name()] = struct{}{}
+			}
+		case *typesalias.Alias:
+			typ = typesalias.Unalias(t)
+			goto retry
+		}
+	}
+	return func(typ reflect.Type, method reflectx.Method) bool {
+		if _, ok := rtyps[typ.PkgPath()+"."+typ.Name()]; ok {
+			if ast.IsExported(method.Name) {
+				return true
+			}
+			if typ.PkgPath() != method.PkgPath {
+				if _, ok := imthd[method.Name]; ok {
+					return true
+				}
+			}
+		}
+		return false
+	}
 }
