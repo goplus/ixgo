@@ -87,8 +87,6 @@ func NewTypesLoader(ctx *Context, mode Mode) Loader {
 }
 
 func (r *TypesLoader) Iterate(fn func(typ types.Type, value interface{})) {
-	r.ctx.loadPkgMu.Lock()
-	defer r.ctx.loadPkgMu.Unlock()
 	r.tcache.Iterate(fn)
 }
 
