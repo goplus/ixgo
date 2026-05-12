@@ -1178,7 +1178,7 @@ func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{
 	}
 	prog := mainpkg.Prog
 	if ctx.MethodChecker != nil {
-		check := ctx.MethodChecker(prog)
+		check := ctx.MethodChecker(ctx, prog)
 		rctx.SetHasImethod(func(typ reflect.Type, method reflectx.Method) bool {
 			if method.Type == tyUnusedFunc || method.FuncId == -1 {
 				return false

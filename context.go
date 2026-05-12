@@ -79,7 +79,7 @@ type Loader interface {
 }
 
 // MethodChecker returns a validator that reports whether method is valid for typ.
-type MethodChecker func(prog *ssa.Program) func(typ reflect.Type, method reflectx.Method) bool
+type MethodChecker func(ctx *Context, prog *ssa.Program) func(typ reflect.Type, method reflectx.Method) bool
 
 // Context ssa context
 type Context struct {
@@ -1187,7 +1187,7 @@ import (
 	return parser.ParseFile(fset, "gossa_builtin.go", src, 0)
 }
 
-func defaultChecker(prog *ssa.Program) func(typ reflect.Type, method reflectx.Method) bool {
+func defaultChecker(ctx *Context, prog *ssa.Program) func(typ reflect.Type, method reflectx.Method) bool {
 	return func(typ reflect.Type, method reflectx.Method) bool {
 		if ast.IsExported(method.Name) {
 			return true
@@ -1199,8 +1199,31 @@ func defaultChecker(prog *ssa.Program) func(typ reflect.Type, method reflectx.Me
 	}
 }
 
-func runtimeChecker(prog *ssa.Program) func(typ reflect.Type, method reflectx.Method) bool {
+func runtimeChecker(ctx *Context, prog *ssa.Program) func(typ reflect.Type, method reflectx.Method) bool {
 	rtyps := make(map[string]struct{})
+	imthd := make(map[string]struct{})
+	addIface := func(iface *types.Interface) {
+		for i := 0; i < iface.NumMethods(); i++ {
+			imthd[iface.Method(i).Name()] = struct{}{}
+		}
+	}
+	if loader, ok := ctx.Loader.(*TypesLoader); ok {
+		loader.tcache.Iterate(func(typ types.Type, value interface{}) {
+			if iface, ok := typ.Underlying().(*types.Interface); ok {
+				addIface(iface)
+			}
+		})
+	}
+	for _, pkg := range prog.AllPackages() {
+		for _, m := range pkg.Members {
+			switch t := m.(type) {
+			case *ssa.Type:
+				if iface, ok := t.Type().Underlying().(*types.Interface); ok {
+					addIface(iface)
+				}
+			}
+		}
+	}
 	for _, typ := range prog.RuntimeTypes() {
 	retry:
 		switch t := typ.(type) {
@@ -1220,7 +1243,9 @@ func runtimeChecker(prog *ssa.Program) func(typ reflect.Type, method reflectx.Me
 				return true
 			}
 			if typ.PkgPath() != method.PkgPath {
-				return true
+				if _, ok := imthd[method.Name]; ok {
+					return true
+				}
 			}
 		}
 		return false
