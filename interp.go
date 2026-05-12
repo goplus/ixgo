@@ -1177,8 +1177,8 @@ func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{
 		mainid:       goroutineID(),
 	}
 	prog := mainpkg.Prog
-	if ctx.IcallCheck != nil {
-		check := ctx.IcallCheck.NewCheck(prog)
+	if ctx.MethodChecker != nil {
+		check := ctx.MethodChecker(prog)
 		rctx.SetHasImethod(func(typ reflect.Type, method reflectx.Method) bool {
 			if method.Type == tyUnusedFunc || method.FuncId == -1 {
 				return false

@@ -78,35 +78,34 @@ type Loader interface {
 	SetImport(path string, pkg *types.Package, load func() error) error
 }
 
-type IcallCheck interface {
-	NewCheck(prog *ssa.Program) func(typ reflect.Type, method reflectx.Method) bool
-}
+// MethodChecker returns a validator that reports whether method is valid for typ.
+type MethodChecker func(prog *ssa.Program) func(typ reflect.Type, method reflectx.Method) bool
 
 // Context ssa context
 type Context struct {
-	Loader       Loader                                                   // types loader
-	BuildContext build.Context                                            // build context, default build.Default
-	RunContext   context.Context                                          // run context, default unset
-	Importer     types.Importer                                           // importer
-	output       io.Writer                                                // capture print/println output
-	FileSet      *token.FileSet                                           // file set
-	sizes        types.Sizes                                              // types unsafe sizes
-	Lookup       func(root, path string) (dir string, found bool)         // lookup external import
-	evalCallFn   func(interp *Interp, call *ssa.Call, res ...interface{}) // internal eval func for repl
-	debugFunc    func(*DebugInfo)                                         // debug func
-	panicFunc    func(*PanicInfo)                                         // panic func
-	pkgs         map[string]*SourcePackage                                // imports
-	override     map[string]reflect.Value                                 // override function
-	evalInit     map[string]bool                                          // eval init check
-	nestedMap    map[*types.Named]int                                     // nested named index
-	rootp        atomic.Pointer[string]                                   // project root
-	callForPool  int                                                      // least call count for enable function pool
-	Mode         Mode                                                     // mode
-	BuilderMode  ssa.BuilderMode                                          // ssa builder mode
-	Builder      *SSABuilder                                              // ssa builder
-	evalMode     bool                                                     // eval mode
-	loadPkgMu    sync.Mutex                                               // load pkg mutex
-	IcallCheck   IcallCheck                                               // icall check
+	Loader        Loader                                                   // types loader
+	BuildContext  build.Context                                            // build context, default build.Default
+	RunContext    context.Context                                          // run context, default unset
+	Importer      types.Importer                                           // importer
+	output        io.Writer                                                // capture print/println output
+	FileSet       *token.FileSet                                           // file set
+	sizes         types.Sizes                                              // types unsafe sizes
+	Lookup        func(root, path string) (dir string, found bool)         // lookup external import
+	evalCallFn    func(interp *Interp, call *ssa.Call, res ...interface{}) // internal eval func for repl
+	debugFunc     func(*DebugInfo)                                         // debug func
+	panicFunc     func(*PanicInfo)                                         // panic func
+	pkgs          map[string]*SourcePackage                                // imports
+	override      map[string]reflect.Value                                 // override function
+	evalInit      map[string]bool                                          // eval init check
+	nestedMap     map[*types.Named]int                                     // nested named index
+	rootp         atomic.Pointer[string]                                   // project root
+	callForPool   int                                                      // least call count for enable function pool
+	Mode          Mode                                                     // mode
+	BuilderMode   ssa.BuilderMode                                          // ssa builder mode
+	Builder       *SSABuilder                                              // ssa builder
+	evalMode      bool                                                     // eval mode
+	loadPkgMu     sync.Mutex                                               // load pkg mutex
+	MethodChecker MethodChecker                                            // method checker
 }
 
 func (ctx *Context) setRoot(root string) {
@@ -227,9 +226,9 @@ func NewContext(mode Mode) *Context {
 		}
 	}
 	if mode&OptionLoadRutimeImethod != 0 {
-		ctx.IcallCheck = runtimeCheck{}
+		ctx.MethodChecker = runtimeChecker
 	} else if mode&OptionLoadAllImethod == 0 {
-		ctx.IcallCheck = defaultCheck{}
+		ctx.MethodChecker = defaultChecker
 	}
 
 	return ctx
@@ -1188,10 +1187,7 @@ import (
 	return parser.ParseFile(fset, "gossa_builtin.go", src, 0)
 }
 
-type defaultCheck struct {
-}
-
-func (p defaultCheck) NewCheck(prog *ssa.Program) func(typ reflect.Type, method reflectx.Method) bool {
+func defaultChecker(prog *ssa.Program) func(typ reflect.Type, method reflectx.Method) bool {
 	return func(typ reflect.Type, method reflectx.Method) bool {
 		if ast.IsExported(method.Name) {
 			return true
@@ -1203,20 +1199,15 @@ func (p defaultCheck) NewCheck(prog *ssa.Program) func(typ reflect.Type, method 
 	}
 }
 
-type runtimeCheck struct {
-}
-
-func (p runtimeCheck) NewCheck(prog *ssa.Program) func(typ reflect.Type, method reflectx.Method) bool {
-	rtyps := make(map[string]bool)
+func runtimeChecker(prog *ssa.Program) func(typ reflect.Type, method reflectx.Method) bool {
+	rtyps := make(map[string]struct{})
 	for _, typ := range prog.RuntimeTypes() {
 	retry:
 		switch t := typ.(type) {
 		case *types.Named:
 			obj := t.Obj()
 			if pkg := obj.Pkg(); pkg != nil {
-				rtyps[pkg.Path()+"."+obj.Name()] = true
-			} else {
-				rtyps[obj.Name()] = true
+				rtyps[pkg.Path()+"."+obj.Name()] = struct{}{}
 			}
 		case *typesalias.Alias:
 			typ = typesalias.Unalias(t)
