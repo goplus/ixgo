@@ -1212,14 +1212,19 @@ func (p runtimeCheck) NewCheck(prog *ssa.Program) func(typ reflect.Type, method 
 	retry:
 		switch t := typ.(type) {
 		case *types.Named:
-			rtyps[t.String()] = true
+			obj := t.Obj()
+			if pkg := obj.Pkg(); pkg != nil {
+				rtyps[pkg.Path()+"."+obj.Name()] = true
+			} else {
+				rtyps[obj.Name()] = true
+			}
 		case *typesalias.Alias:
 			typ = typesalias.Unalias(t)
 			goto retry
 		}
 	}
 	return func(typ reflect.Type, method reflectx.Method) bool {
-		if _, ok := rtyps[typ.String()]; ok {
+		if _, ok := rtyps[typ.PkgPath()+"."+typ.Name()]; ok {
 			if ast.IsExported(method.Name) {
 				return true
 			}
