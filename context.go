@@ -76,6 +76,7 @@ type Loader interface {
 	LookupReflect(typ types.Type) (reflect.Type, bool)
 	LookupTypes(typ reflect.Type) (types.Type, bool)
 	SetImport(path string, pkg *types.Package, load func() error) error
+	Iterate(f func(typ types.Type, value interface{}))
 }
 
 // MethodChecker returns a validator that reports whether method is valid for typ.
@@ -1207,23 +1208,11 @@ func runtimeChecker(ctx *Context, prog *ssa.Program) func(typ reflect.Type, meth
 			imthd[iface.Method(i).Name()] = struct{}{}
 		}
 	}
-	if loader, ok := ctx.Loader.(*TypesLoader); ok {
-		loader.tcache.Iterate(func(typ types.Type, value interface{}) {
-			if iface, ok := typ.Underlying().(*types.Interface); ok {
-				addIface(iface)
-			}
-		})
-	}
-	for _, pkg := range prog.AllPackages() {
-		for _, m := range pkg.Members {
-			switch t := m.(type) {
-			case *ssa.Type:
-				if iface, ok := t.Type().Underlying().(*types.Interface); ok {
-					addIface(iface)
-				}
-			}
+	ctx.Loader.Iterate(func(typ types.Type, value interface{}) {
+		if iface, ok := typ.Underlying().(*types.Interface); ok {
+			addIface(iface)
 		}
-	}
+	})
 	for _, typ := range prog.RuntimeTypes() {
 	retry:
 		switch t := typ.(type) {

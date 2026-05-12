@@ -86,6 +86,12 @@ func NewTypesLoader(ctx *Context, mode Mode) Loader {
 	return r
 }
 
+func (r *TypesLoader) Iterate(fn func(typ types.Type, value interface{})) {
+	r.ctx.loadPkgMu.Lock()
+	defer r.ctx.loadPkgMu.Unlock()
+	r.tcache.Iterate(fn)
+}
+
 func (r *TypesLoader) SetImport(path string, pkg *types.Package, load func() error) error {
 	r.packages[path] = pkg
 	if load != nil {
