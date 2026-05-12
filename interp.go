@@ -1176,6 +1176,10 @@ func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{
 		chexit:       make(chan int),
 		mainid:       goroutineID(),
 	}
+
+	ctx.loadPkgMu.Lock()
+	defer ctx.loadPkgMu.Unlock()
+
 	prog := mainpkg.Prog
 	if ctx.MethodChecker != nil {
 		check := ctx.MethodChecker(ctx, prog)
@@ -1186,9 +1190,6 @@ func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{
 			return check(typ, method)
 		})
 	}
-
-	ctx.loadPkgMu.Lock()
-	defer ctx.loadPkgMu.Unlock()
 
 	i.record = NewTypesRecord(ctx, rctx, mainpkg.Prog, ctx.Loader, i, ctx.nestedMap)
 	i.record.Load(mainpkg)
