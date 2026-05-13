@@ -232,6 +232,8 @@ func NewContext(mode Mode) *Context {
 		ctx.MethodChecker = defaultChecker
 	}
 
+	ctx.MethodChecker = runtimeChecker
+
 	return ctx
 }
 
