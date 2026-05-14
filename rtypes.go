@@ -19,7 +19,6 @@ package ixgo
 import (
 	"fmt"
 	"go/constant"
-	"go/importer"
 	"go/token"
 	"go/types"
 	"log"
@@ -58,7 +57,6 @@ func init() {
 }
 
 type TypesLoader struct {
-	importer  types.Importer
 	ctx       *Context
 	tcache    *typeutil.Map
 	curpkg    *Package
@@ -82,7 +80,6 @@ func NewTypesLoader(ctx *Context, mode Mode) Loader {
 	r.packages["unsafe"] = types.Unsafe
 	r.rcache.Store(tyErrorInterface, typesError)
 	r.rcache.Store(tyEmptyInterface, typesEmptyInterface)
-	r.importer = importer.Default()
 	return r
 }
 

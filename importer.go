@@ -18,23 +18,20 @@ package ixgo
 
 import (
 	"fmt"
-	"go/importer"
 	"go/types"
 )
 
 type Importer struct {
-	ctx         *Context
-	pkgs        map[string]*types.Package
-	importing   map[string]bool
-	defaultImpl types.Importer
+	ctx       *Context
+	pkgs      map[string]*types.Package
+	importing map[string]bool
 }
 
 func NewImporter(ctx *Context) *Importer {
 	return &Importer{
-		ctx:         ctx,
-		pkgs:        make(map[string]*types.Package),
-		importing:   make(map[string]bool),
-		defaultImpl: importer.Default(),
+		ctx:       ctx,
+		pkgs:      make(map[string]*types.Package),
+		importing: make(map[string]bool),
 	}
 }
 
