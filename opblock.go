@@ -1373,6 +1373,9 @@ retry:
 		return reflect.Interface
 	case *types.Tuple:
 		return reflect.Slice
+	case *types.Alias:
+		typ = types.Unalias(t)
+		goto retry
 	}
 	return reflect.Invalid
 }
