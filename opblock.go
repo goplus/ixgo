@@ -1373,6 +1373,35 @@ retry:
 		return reflect.Interface
 	case *types.Tuple:
 		return reflect.Slice
+	case *types.Alias:
+		typ = types.Unalias(t)
+		goto retry
 	}
 	return reflect.Invalid
+}
+
+func makeDefer(interp *Interp, pfn *function, instr *ssa.Defer) func(fr *frame) {
+	iv, ia, ib := getCallIndex(pfn, &instr.Call)
+	if instr.DeferStack == nil {
+		return func(fr *frame) {
+			fn, args := interp.prepareCall(fr, &instr.Call, iv, ia, ib)
+			fr._defer = &_defer{
+				fn:      fn,
+				args:    args,
+				ssaArgs: instr.Call.Args,
+				tail:    fr._defer,
+			}
+		}
+	}
+	id := pfn.regIndex(instr.DeferStack)
+	return func(fr *frame) {
+		fn, args := interp.prepareCall(fr, &instr.Call, iv, ia, ib)
+		defers := fr.reg(id).(**_defer)
+		*defers = &_defer{
+			fn:      fn,
+			args:    args,
+			ssaArgs: instr.Call.Args,
+			tail:    *defers,
+		}
+	}
 }

@@ -39,7 +39,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/goplus/ixgo/internal/typesalias"
 	"github.com/goplus/ixgo/load"
 	"github.com/goplus/ixgo/load/list"
 	"github.com/goplus/reflectx"
@@ -1221,8 +1220,8 @@ func runtimeChecker(ctx *Context, prog *ssa.Program) func(typ reflect.Type, meth
 			if pkg := obj.Pkg(); pkg != nil {
 				rtyps[pkg.Path()+"."+obj.Name()] = struct{}{}
 			}
-		case *typesalias.Alias:
-			typ = typesalias.Unalias(t)
+		case *types.Alias:
+			typ = types.Unalias(t)
 			goto retry
 		}
 	}

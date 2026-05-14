@@ -25,7 +25,6 @@ import (
 
 	"github.com/goplus/gogen"
 	"github.com/goplus/ixgo"
-	"github.com/goplus/ixgo/internal/typesalias"
 	"github.com/goplus/ixgo/internal/typesutil"
 	"github.com/goplus/mod/modfile"
 	"github.com/goplus/xgo/ast"
@@ -307,9 +306,9 @@ func (c *Context) Import(path string) (*types.Package, error) {
 					obj = types.NewFunc(obj.Pos(), pkg, obj.Name(), obj.Type().(*types.Signature))
 				case *types.TypeName:
 					switch typ := obj.Type().(type) {
-					case *typesalias.Alias:
+					case *types.Alias:
 						obj = types.NewTypeName(obj.Pos(), pkg, obj.Name(), nil)
-						typesalias.NewAlias(obj.(*types.TypeName), typesalias.Rhs(typ))
+						types.NewAlias(obj.(*types.TypeName), typ.Rhs())
 					case *types.Named:
 						var methods []*types.Func
 						if n := typ.NumMethods(); n > 0 {
