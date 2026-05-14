@@ -5,7 +5,7 @@ go 1.24.0
 require (
 	github.com/goplus/gogen v1.23.0-pre.3.0.20260414234848-6641c10c9d6f
 	github.com/goplus/mod v0.20.2
-	github.com/goplus/reflectx v1.6.4
+	github.com/goplus/reflectx v1.7.0
 	github.com/goplus/xgo v1.7.2-0.20260414235301-df19f4a1b7c2
 	github.com/peterh/liner v1.2.2
 	github.com/qiniu/x v1.17.0
@@ -21,5 +21,6 @@ require (
 	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/mattn/go-runewidth v0.0.3 // indirect
 	golang.org/x/net v0.50.0 // indirect
+	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
 )
