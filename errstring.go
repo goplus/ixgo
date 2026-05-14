@@ -1,6 +1,3 @@
-//go:build !go1.20
-// +build !go1.20
-
 /*
  * Copyright (c) 2022 The GoPlus Authors (goplus.org). All rights reserved.
  *
@@ -22,19 +19,19 @@ package ixgo
 import "strings"
 
 const (
-	errDeclaredNotUsed     = "declared but not used"
-	errImportedNotUsed     = "imported but not used"
-	errAppendOutOfRange    = "growslice: cap out of range"
-	errSliceToArrayPointer = "cannot convert slice with length %v to pointer to array with length %v"
+	errDeclaredNotUsed     = "declared and not used"
+	errImportedNotUsed     = "imported and not used"
+	errAppendOutOfRange    = "len out of range"
+	errSliceToArrayPointer = "cannot convert slice with length %v to array or pointer to array with length %v"
 )
 
 func hasTypesNotUsedError(msg string) bool {
-	return strings.HasSuffix(msg, errDeclaredNotUsed) || strings.HasSuffix(msg, errImportedNotUsed)
+	return strings.HasPrefix(msg, errDeclaredNotUsed+":") || strings.HasSuffix(msg, errImportedNotUsed)
 }
 
 func isTypesDeclaredNotUsed(msg string) (string, bool) {
-	if strings.HasSuffix(msg, errDeclaredNotUsed) {
-		return msg[0 : len(msg)-len(errDeclaredNotUsed)-1], true
+	if strings.HasPrefix(msg, errDeclaredNotUsed+":") {
+		return msg[len(errDeclaredNotUsed)+2:], true
 	}
 	return "", false
 }
