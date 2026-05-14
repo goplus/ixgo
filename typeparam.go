@@ -23,13 +23,22 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/goplus/ixgo/internal/typesalias"
 	"golang.org/x/tools/go/ssa"
 	"golang.org/x/tools/go/types/typeutil"
 )
 
 func hasTypeParam(typ types.Type) bool {
-	return typesalias.HasTypeParam(typ)
+	switch t := typ.(type) {
+	case *types.TypeParam:
+		return true
+	case *types.Named:
+		return t.TypeParams() != nil
+	case *types.Signature:
+		return t.TypeParams() != nil
+	case *types.Alias:
+		return t.TypeParams() != nil
+	}
+	return false
 }
 
 type nestedStack struct {
