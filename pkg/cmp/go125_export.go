@@ -12,13 +12,11 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackageLazy("cmp", func() *ixgo.Package {
-		return &ixgo.Package{
-			Name:   "cmp",
-			Path:   "cmp",
-			Deps:   map[string]string{},
-			Source: source,
-		}
+	ixgo.RegisterPackage(&ixgo.Package{
+		Name:   "cmp",
+		Path:   "cmp",
+		Deps:   map[string]string{},
+		Source: source,
 	})
 }
 

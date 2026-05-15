@@ -9,20 +9,18 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackageLazy("github.com/goplus/ixgo/x/isync", func() *ixgo.Package {
-		return &ixgo.Package{
-			Name: "isync",
-			Path: "github.com/goplus/ixgo/x/isync",
-			Deps: map[string]string{
-				"github.com/goplus/ixgo/x/abi":    "abi",
-				"github.com/goplus/ixgo/x/goarch": "goarch",
-				"math/rand":                       "rand",
-				"sync":                            "sync",
-				"sync/atomic":                     "atomic",
-				"unsafe":                          "unsafe",
-			},
-			Source: source,
-		}
+	ixgo.RegisterPackage(&ixgo.Package{
+		Name: "isync",
+		Path: "github.com/goplus/ixgo/x/isync",
+		Deps: map[string]string{
+			"github.com/goplus/ixgo/x/abi":    "abi",
+			"github.com/goplus/ixgo/x/goarch": "goarch",
+			"math/rand":                       "rand",
+			"sync":                            "sync",
+			"sync/atomic":                     "atomic",
+			"unsafe":                          "unsafe",
+		},
+		Source: source,
 	})
 }
 

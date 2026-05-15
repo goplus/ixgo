@@ -12,19 +12,17 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackageLazy("unique", func() *ixgo.Package {
-		return &ixgo.Package{
-			Name: "unique",
-			Path: "unique",
-			Deps: map[string]string{
-				"internal/abi":         "abi",
-				"internal/stringslite": "stringslite",
-				"internal/sync":        "sync",
-				"runtime":              "runtime",
-				"sync":                 "sync",
-				"unsafe":               "unsafe",
-				"weak":                 "weak",
-			},
-		}
+	ixgo.RegisterPackage(&ixgo.Package{
+		Name: "unique",
+		Path: "unique",
+		Deps: map[string]string{
+			"internal/abi":         "abi",
+			"internal/stringslite": "stringslite",
+			"internal/sync":        "sync",
+			"runtime":              "runtime",
+			"sync":                 "sync",
+			"unsafe":               "unsafe",
+			"weak":                 "weak",
+		},
 	})
 }

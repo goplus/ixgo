@@ -12,15 +12,13 @@ import (
 )
 
 func init() {
-	ixgo.RegisterPackageLazy("iter", func() *ixgo.Package {
-		return &ixgo.Package{
-			Name: "iter",
-			Path: "iter",
-			Deps: map[string]string{
-				"internal/race": "race",
-				"runtime":       "runtime",
-				"unsafe":        "unsafe",
-			},
-		}
+	ixgo.RegisterPackage(&ixgo.Package{
+		Name: "iter",
+		Path: "iter",
+		Deps: map[string]string{
+			"internal/race": "race",
+			"runtime":       "runtime",
+			"unsafe":        "unsafe",
+		},
 	})
 }
