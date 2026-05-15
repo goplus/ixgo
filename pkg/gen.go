@@ -44,8 +44,9 @@ func init() {
 	}
 }
 
-var lazyPkgs = map[string]bool{
+var lazyMap = map[string]bool{
 	"archive":          true,
+	"bufio":            true,
 	"compress":         true,
 	"container":        true,
 	"crypto":           true,
@@ -80,11 +81,11 @@ func isLazyPkg(pkg string) bool {
 	if pkg == "unicode" {
 		return true
 	}
-	if _, ok := lazyPkgs[pkg]; ok {
+	if _, ok := lazyMap[pkg]; ok {
 		return true
 	}
 	if pos := strings.Index(pkg, "/"); pos != -1 {
-		if _, ok := lazyPkgs[pkg[:pos]]; ok {
+		if _, ok := lazyMap[pkg[:pos]]; ok {
 			return true
 		}
 	}

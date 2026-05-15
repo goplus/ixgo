@@ -33,6 +33,7 @@ func init() {
 			"internal/runtime/atomic":      "atomic",
 			"internal/runtime/exithook":    "exithook",
 			"internal/runtime/gc":          "gc",
+			"internal/runtime/gc/scan":     "scan",
 			"internal/runtime/maps":        "maps",
 			"internal/runtime/math":        "math",
 			"internal/runtime/pprof/label": "label",
