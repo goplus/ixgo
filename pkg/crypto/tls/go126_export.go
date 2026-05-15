@@ -31,6 +31,7 @@ func init() {
 				"crypto/ecdsa":                    "ecdsa",
 				"crypto/ed25519":                  "ed25519",
 				"crypto/elliptic":                 "elliptic",
+				"crypto/fips140":                  "fips140",
 				"crypto/hkdf":                     "hkdf",
 				"crypto/hmac":                     "hmac",
 				"crypto/hpke":                     "hpke",

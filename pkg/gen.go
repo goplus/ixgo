@@ -44,17 +44,52 @@ func init() {
 	}
 }
 
-var commonPkgs = map[string]bool{
-	"bytes":   true,
-	"errors":  true,
-	"fmt":     true,
-	"io":      true,
-	"math":    true,
-	"os":      true,
-	"strconv": true,
-	"strings": true,
-	"sync":    true,
-	"time":    true,
+var lazyMap = map[string]bool{
+	"archive":          true,
+	"bufio":            true,
+	"compress":         true,
+	"container":        true,
+	"crypto":           true,
+	"database":         true,
+	"debug":            true,
+	"encoding":         true,
+	"expvar":           true,
+	"go":               true,
+	"hash":             true,
+	"html":             true,
+	"image":            true,
+	"index":            true,
+	"log":              true,
+	"mime":             true,
+	"net":              true,
+	"regexp":           true,
+	"structs":          true,
+	"testing":          true,
+	"text":             true,
+	"runtime/coverage": true,
+	"runtime/debug":    true,
+	"runtime/metrics":  true,
+	"runtime/pprof":    true,
+	"runtime/trace":    true,
+	"os/exec":          true,
+	"os/signal":        true,
+	"os/user":          true,
+	//"unicode":          true,
+}
+
+func isLazyPkg(pkg string) bool {
+	if pkg == "unicode" {
+		return true
+	}
+	if _, ok := lazyMap[pkg]; ok {
+		return true
+	}
+	if pos := strings.Index(pkg, "/"); pos != -1 {
+		if _, ok := lazyMap[pkg[:pos]]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func main() {
@@ -119,20 +154,21 @@ func main() {
 	pkgs := stdList()
 
 	log.Println(gover, name, tags)
-	log.Println(pkgs)
 
 	npkgs := normalPkgs(pkgs)
 	var cpkgs []string
-	var opkgs []string
+	var lazyPkgs []string
 	for _, pkg := range npkgs {
-		if commonPkgs[pkg] {
-			cpkgs = append(cpkgs, pkg)
+		if isLazyPkg(pkg) {
+			lazyPkgs = append(lazyPkgs, pkg)
 		} else {
-			opkgs = append(opkgs, pkg)
+			cpkgs = append(cpkgs, pkg)
 		}
 	}
+	log.Println(cpkgs)
+	log.Println("lazy", lazyPkgs)
 
-	// common pkgs
+	// pkgs
 	cmd := exec.Command("qexp", "-outdir", ".", "-addtags", tags, "-filename", name)
 	cmd.Args = append(cmd.Args, cpkgs...)
 	cmd.Stderr = os.Stderr
@@ -145,7 +181,7 @@ func main() {
 	// lazy pkgs
 	cmd = exec.Command("qexp", "-outdir", ".", "-addtags", tags, "-filename", name)
 	cmd.Args = append(cmd.Args, "-lazy")
-	cmd.Args = append(cmd.Args, opkgs...)
+	cmd.Args = append(cmd.Args, lazyPkgs...)
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
 	err = cmd.Run()
@@ -153,7 +189,7 @@ func main() {
 		panic(err)
 	}
 
-	// log
+	// lazy log
 	cmd = exec.Command("qexp", "-outdir", ".", "-addtags", tags, "-filename", name, "-code")
 	cmd.Args = append(cmd.Args, "-lazy")
 	cmd.Args = append(cmd.Args, "log")
@@ -171,7 +207,6 @@ func main() {
 	gpkgs := genericPkgs(pkgs)
 	if len(gpkgs) > 0 {
 		cmd = exec.Command("qexp", "-outdir", ".", "-addtags", tags, "-filename", name, "-src")
-		cmd.Args = append(cmd.Args, "-lazy")
 		cmd.Args = append(cmd.Args, gpkgs...)
 		cmd.Stderr = os.Stderr
 		cmd.Stdout = os.Stdout
@@ -189,7 +224,6 @@ func main() {
 			continue
 		}
 		cmd := exec.Command("qexp", "-outdir", ".", "-addtags", tags, "-filename", name, "-contexts", osarch)
-		cmd.Args = append(cmd.Args, "-lazy")
 		cmd.Args = append(cmd.Args, "syscall")
 		cmd.Stderr = os.Stderr
 		cmd.Stdout = os.Stdout

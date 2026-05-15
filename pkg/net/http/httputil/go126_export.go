@@ -24,6 +24,7 @@ func init() {
 				"context":                               "context",
 				"errors":                                "errors",
 				"fmt":                                   "fmt",
+				"internal/godebug":                      "godebug",
 				"io":                                    "io",
 				"log":                                   "log",
 				"mime":                                  "mime",

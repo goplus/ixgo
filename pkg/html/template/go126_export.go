@@ -33,6 +33,7 @@ func init() {
 				"path/filepath":       "filepath",
 				"reflect":             "reflect",
 				"regexp":              "regexp",
+				"slices":              "slices",
 				"strconv":             "strconv",
 				"strings":             "strings",
 				"sync":                "sync",
