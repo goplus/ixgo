@@ -3,24 +3,23 @@ module github.com/goplus/ixgo
 go 1.24.0
 
 require (
-	github.com/goplus/gogen v1.23.0-pre.3.0.20260414234848-6641c10c9d6f
+	github.com/goplus/gogen v1.23.0-pre.5
 	github.com/goplus/mod v0.20.2
 	github.com/goplus/reflectx v1.7.0
-	github.com/goplus/xgo v1.7.2-0.20260414235301-df19f4a1b7c2
+	github.com/goplus/xgo v1.7.2
 	github.com/peterh/liner v1.2.2
 	github.com/qiniu/x v1.17.0
 	github.com/timandy/routine v1.1.5
 	github.com/visualfc/funcval v0.1.4
 	github.com/visualfc/goembed v0.3.4
 	github.com/visualfc/xtype v0.3.0
-	golang.org/x/mod v0.29.0
-	golang.org/x/tools v0.38.0
+	golang.org/x/mod v0.32.0
+	golang.org/x/tools v0.41.0
 )
 
 require (
 	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/mattn/go-runewidth v0.0.3 // indirect
 	golang.org/x/net v0.50.0 // indirect
-	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
 )
