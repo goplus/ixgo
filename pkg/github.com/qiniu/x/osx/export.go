@@ -22,10 +22,8 @@ func init() {
 		},
 		Interfaces: map[string]reflect.Type{},
 		NamedTypes: map[string]reflect.Type{
-			"BLineIter":   reflect.TypeOf((*q.BLineIter)(nil)).Elem(),
-			"BLineReader": reflect.TypeOf((*q.BLineReader)(nil)).Elem(),
-			"LineIter":    reflect.TypeOf((*q.LineIter)(nil)).Elem(),
-			"LineReader":  reflect.TypeOf((*q.LineReader)(nil)).Elem(),
+			"BLineIter": reflect.TypeOf((*q.BLineIter)(nil)).Elem(),
+			"LineIter":  reflect.TypeOf((*q.LineIter)(nil)).Elem(),
 		},
 		AliasTypes: map[string]reflect.Type{},
 		Vars:       map[string]reflect.Value{},

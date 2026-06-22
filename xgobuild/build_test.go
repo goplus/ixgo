@@ -290,13 +290,9 @@ import (
 var r io.Reader
 //line main.xgo:6
 func main() {
+	for
 //line main.xgo:6:1
-	for _xgo_it := osx.Lines(r).XGo_Enum(); ; {
-		var _xgo_ok bool
-		line, _xgo_ok := _xgo_it.Next()
-		if !_xgo_ok {
-			break
-		}
+	line := range osx.Lines(r) {
 //line main.xgo:7:1
 		fmt.Println(line)
 	}
