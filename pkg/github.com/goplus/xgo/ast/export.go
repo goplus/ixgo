@@ -61,6 +61,7 @@ func init() {
 				"ElemEllipsis":      reflect.TypeOf((*q.ElemEllipsis)(nil)).Elem(),
 				"Ellipsis":          reflect.TypeOf((*q.Ellipsis)(nil)).Elem(),
 				"EmptyStmt":         reflect.TypeOf((*q.EmptyStmt)(nil)).Elem(),
+				"EnumType":          reflect.TypeOf((*q.EnumType)(nil)).Elem(),
 				"EnvExpr":           reflect.TypeOf((*q.EnvExpr)(nil)).Elem(),
 				"ErrWrapExpr":       reflect.TypeOf((*q.ErrWrapExpr)(nil)).Elem(),
 				"ExprStmt":          reflect.TypeOf((*q.ExprStmt)(nil)).Elem(),
