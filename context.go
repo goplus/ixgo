@@ -269,20 +269,6 @@ func (ctx *Context) SetPanic(fn func(*PanicInfo)) {
 
 type Frame = frame
 
-func (fr *Frame) CallerFrames() (frames []runtime.Frame) {
-	rpc := make([]uintptr, 64)
-	n := runtimeCallers(fr, 1, rpc)
-	fs := runtime.CallersFrames(rpc[:n])
-	for {
-		f, more := runtimeFramesNext(fr, fs)
-		frames = append(frames, f)
-		if !more {
-			break
-		}
-	}
-	return
-}
-
 type PanicInfo struct {
 	funcInstr
 	*Frame
