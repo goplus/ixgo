@@ -5,7 +5,7 @@ go 1.24.0
 require (
 	github.com/goplus/gogen v1.23.3
 	github.com/goplus/mod v0.20.2
-	github.com/goplus/reflectx v1.7.1-0.20260701065815-36c179f3d48f
+	github.com/goplus/reflectx v1.7.1
 	github.com/goplus/xgo v1.7.3
 	github.com/peterh/liner v1.2.2
 	github.com/qiniu/x v1.18.0

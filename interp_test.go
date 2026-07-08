@@ -3095,7 +3095,10 @@ func main() {
 		t.Fatal(err)
 	}
 
-	_, orgAllocate, _ := ixgo.IcallStat()
+	capacity, orgAllocate, _ := ixgo.IcallStat()
+	if capacity == 0 {
+		t.Skip("skip unused icall")
+	}
 	orgCached := ixgo.IcallCached()
 	defer func() {
 		_, allocate, _ := ixgo.IcallStat()
