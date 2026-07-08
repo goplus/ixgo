@@ -25,7 +25,6 @@ import (
 
 	"github.com/goplus/ixgo"
 	"github.com/goplus/ixgo/cmd/internal/base"
-	_ "github.com/goplus/ixgo/pkg"
 	"github.com/goplus/ixgo/repl"
 	"github.com/peterh/liner"
 )
