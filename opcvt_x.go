@@ -40,11 +40,17 @@ func makeTypeChangeInstr(pfn *function, instr *ssa.ChangeType) func(fr *frame) {
 	}
 	kind := typ.Kind()
 	switch kind {
-	case reflect.Ptr, reflect.Chan, reflect.Map, reflect.Func, reflect.Slice:
+	case reflect.Ptr, reflect.Chan, reflect.Map, reflect.Slice:
 		t := xtype.TypeOfType(typ)
 		return func(fr *frame) {
 			x := fr.reg(ix)
 			fr.setReg(ir, xtype.ConvertPtr(t, x))
+		}
+	case reflect.Func:
+		t := xtype.TypeOfType(typ)
+		return func(fr *frame) {
+			x := fr.reg(ix)
+			fr.setReg(ir, xtype.ConvertFunc(t, x))
 		}
 	case reflect.Struct, reflect.Array:
 		t := xtype.TypeOfType(typ)

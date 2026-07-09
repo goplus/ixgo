@@ -12,7 +12,7 @@ require (
 	github.com/visualfc/funcval v0.1.5
 	github.com/visualfc/gid v0.3.1
 	github.com/visualfc/goembed v0.3.4
-	github.com/visualfc/xtype v0.3.1
+	github.com/visualfc/xtype v0.3.2
 	golang.org/x/mod v0.32.0
 	golang.org/x/tools v0.41.0
 )

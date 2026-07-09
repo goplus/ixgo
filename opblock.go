@@ -339,7 +339,7 @@ func findExternFunc(interp *Interp, fn *ssa.Function) (ext reflect.Value, ok boo
 		typ := interp.preToType(fn.Type())
 		ftyp := ext.Type()
 		if typ != ftyp && checkFuncCompatible(typ, ftyp) {
-			ext = xtype.ConvertFunc(ext, xtype.TypeOfType(typ))
+			ext = xtype.ConvertFuncValue(xtype.TypeOfType(typ), ext)
 		}
 		return
 	}
