@@ -1,7 +1,6 @@
 // export by github.com/goplus/ixgo/cmd/qexp
 
 //go:build llgo
-// +build llgo
 
 package abi
 
@@ -51,6 +50,7 @@ func init() {
 		Funcs: map[string]reflect.Value{
 			"IsExported": reflect.ValueOf(q.IsExported),
 			"NoEscape":   reflect.ValueOf(q.NoEscape),
+			"TypeOf":     reflect.ValueOf(q.TypeOf),
 		},
 		TypedConsts: map[string]ixgo.TypedConst{
 			"Array":               {Typ: reflect.TypeOf(q.Array), Value: constant.MakeInt64(int64(q.Array))},

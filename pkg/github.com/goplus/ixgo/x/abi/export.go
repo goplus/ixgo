@@ -1,7 +1,6 @@
 // export by github.com/goplus/ixgo/cmd/qexp
 
 //go:build !llgo
-// +build !llgo
 
 package abi
 
