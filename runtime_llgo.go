@@ -5,6 +5,7 @@ package ixgo
 
 import (
 	"runtime"
+	"runtime/debug"
 	"sync/atomic"
 )
 
@@ -13,7 +14,7 @@ func runtimeGC(fr *frame) {
 }
 
 func debugStack(fr *frame) []byte {
-	return nil
+	return debug.Stack()
 }
 
 func init() {
