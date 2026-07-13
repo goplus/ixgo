@@ -29,7 +29,6 @@ import (
 	"github.com/goplus/ixgo/cmd/internal/version"
 
 	_ "github.com/goplus/ixgo/pkg"
-	_ "github.com/goplus/reflectx/icall/icall8192"
 )
 
 func mainUsage() {

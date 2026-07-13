@@ -25,7 +25,6 @@ import (
 
 	"github.com/goplus/ixgo"
 	"github.com/goplus/ixgo/cmd/internal/base"
-	_ "github.com/goplus/ixgo/pkg"
 	"github.com/goplus/ixgo/repl"
 	"github.com/peterh/liner"
 )
@@ -68,9 +67,7 @@ func (u *LinerUI) Printf(format string, a ...interface{}) {
 	fmt.Printf(format, a...)
 }
 
-var (
-	welcomeGo string = fmt.Sprintf("iXGo v1.0.0 (build %v %v/%v)", runtime.Version(), runtime.GOOS, runtime.GOARCH)
-)
+var ()
 
 var helpGo string = `Use ?expr to dump expr information
 Use ?pkg.symbol to dump pkg symbol information
@@ -87,6 +84,14 @@ var (
 	supportGoplus bool
 )
 
+func welcomeGo() string {
+	var ext string
+	if base.LLGo {
+		ext = "llgo "
+	}
+	return fmt.Sprintf("iXGo v1.0.0 (build %v%v %v/%v)", ext, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+}
+
 func runCmd(cmd *base.Command, args []string) {
 	err := flag.Parse(args)
 	if err != nil {
@@ -96,12 +101,11 @@ func runCmd(cmd *base.Command, args []string) {
 		flagGoPlus = false
 	}
 	var help string
-	var welcome string
+	welcome := welcomeGo()
 	if supportGoplus && flagGoPlus {
-		welcome = welcomeGo + " (XGo version " + gopVersion + ")"
+		welcome += " (XGo version " + gopVersion + ")"
 		help = helpGop
 	} else {
-		welcome = welcomeGo
 		help = helpGo
 	}
 	fmt.Println(welcome)

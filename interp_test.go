@@ -42,6 +42,7 @@ import (
 	_ "github.com/goplus/ixgo/pkg/errors"
 	_ "github.com/goplus/ixgo/pkg/fmt"
 	_ "github.com/goplus/ixgo/pkg/io"
+	_ "github.com/goplus/ixgo/pkg/iter"
 	_ "github.com/goplus/ixgo/pkg/log"
 	_ "github.com/goplus/ixgo/pkg/math"
 	_ "github.com/goplus/ixgo/pkg/os"
@@ -3095,7 +3096,10 @@ func main() {
 		t.Fatal(err)
 	}
 
-	_, orgAllocate, _ := ixgo.IcallStat()
+	capacity, orgAllocate, _ := ixgo.IcallStat()
+	if capacity == 0 {
+		t.Skip("skip unused icall")
+	}
 	orgCached := ixgo.IcallCached()
 	defer func() {
 		_, allocate, _ := ixgo.IcallStat()
@@ -3413,5 +3417,65 @@ func TestAlias(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestIter(t *testing.T) {
+	src := `
+package main
+
+import (
+	"fmt"
+	"iter"
+)
+
+// Pairs returns an iterator that yields consecutive pairs from seq.
+func Pairs[V any](seq iter.Seq[V]) iter.Seq2[V, V] {
+	return func(yield func(V, V) bool) {
+		next, stop := iter.Pull(seq)
+		defer stop() // ensure stop is called to prevent goroutine leak
+
+		for {
+			v1, ok1 := next()
+			if !ok1 {
+				return
+			}
+			v2, ok2 := next()
+			// if ok2 is false, v2 is the zero value; still yield the last pair
+			if !yield(v1, v2) {
+				return
+			}
+			if !ok2 {
+				return
+			}
+		}
+	}
+}
+
+// Count generates a simple sequence from 1 to n.
+func Count(n int) iter.Seq[int] {
+	return func(yield func(int) bool) {
+		for i := 1; i <= n; i++ {
+			if !yield(i) {
+				return
+			}
+		}
+	}
+}
+
+func main() {
+	// use Pairs to convert Count(5) into paired iteration
+	for a, b := range Pairs(Count(5)) {
+		fmt.Printf("(%d, %d)\n", a, b)
+	}
+	// output:
+	// (1, 2)
+	// (3, 4)
+	// (5, 0)  // when odd count, second value is zero value
+}
+	`
+	_, err := ixgo.RunFile("main.go", src, nil, 0)
+	if err != nil {
+		t.Fatal(err)
 	}
 }

@@ -1,3 +1,6 @@
+//go:build !llgo
+// +build !llgo
+
 /*
  * Copyright (c) 2022 The GoPlus Authors (goplus.org). All rights reserved.
  *
@@ -394,4 +397,18 @@ func inlineFunc(entry uintptr) *funcinl {
 
 func isInlineFunc(f *runtime.Func) bool {
 	return (*funcinl)(unsafe.Pointer(f)).ones == ^uint32(0)
+}
+
+func (fr *Frame) CallerFrames() (frames []runtime.Frame) {
+	rpc := make([]uintptr, 64)
+	n := runtimeCallers(fr, 1, rpc)
+	fs := runtime.CallersFrames(rpc[:n])
+	for {
+		f, more := runtimeFramesNext(fr, fs)
+		frames = append(frames, f)
+		if !more {
+			break
+		}
+	}
+	return
 }

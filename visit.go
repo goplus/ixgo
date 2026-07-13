@@ -224,7 +224,7 @@ func (visit *visitor) function(fn *ssa.Function) {
 						typ := visit.intp.preToType(fn.Type())
 						ftyp := ext.Type()
 						if typ != ftyp {
-							ext = xtype.ConvertFunc(ext, xtype.TypeOfType(typ))
+							ext = xtype.ConvertFuncValue(xtype.TypeOfType(typ), ext)
 						}
 						visit.intp.ctx.override[fnPath] = ext
 						return
