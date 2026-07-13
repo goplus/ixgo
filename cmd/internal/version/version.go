@@ -14,7 +14,7 @@
  limitations under the License.
 */
 
-// Package build implements the ``ixgo version'' command.
+// Package build implements the “ixgo version” command.
 package version
 
 import (
@@ -41,5 +41,9 @@ func init() {
 }
 
 func versionCmd(cmd *base.Command, args []string) {
-	fmt.Printf("ixgo build %v %v/%v\n", runtime.Version(), runtime.GOOS, runtime.GOARCH)
+	var ext string
+	if base.LLGo {
+		ext = "llgo "
+	}
+	fmt.Printf("ixgo build %v%v %v/%v\n", ext, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 }
