@@ -4,6 +4,7 @@
 package ixgo
 
 import (
+	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"sync/atomic"
@@ -37,4 +38,41 @@ func init() {
 			runtime.Goexit()
 		}
 	})
+	RegisterExternal("runtime.Caller", runtimeCaller)
+	RegisterExternal("runtime.FuncForPC", runtimeFuncForPC)
+}
+
+func runtimeCaller(fr *frame, skip int) (pc uintptr, file string, line int, ok bool) {
+	pc = fr.pc()
+	if pfn := findFuncByPC(fr.interp, int(pc)); pfn != nil {
+		pos := pfn.PosForPC(int(pc) - pfn.base - 1)
+		if !pos.IsValid() {
+			return
+		}
+		fpos := fr.interp.ctx.FileSet.Position(pos)
+		if fpos.Filename == "" {
+			return
+		}
+		file, line, ok = filepath.ToSlash(fpos.Filename), fpos.Line, true
+	}
+	return
+}
+
+func runtimeFuncForPC(fr *frame, pc uintptr) *runtime.Func {
+	if pfn := findFuncByPC(fr.interp, int(pc)); pfn != nil {
+		return runtimeFunc(pfn)
+	}
+	return runtime.FuncForPC(pc)
+}
+
+type funcinl struct {
+	entry uintptr
+	name  string
+	pc    uintptr
+	file  string
+	line  int
+}
+
+func inlineFunc(entry uintptr) *funcinl {
+	return &funcinl{entry: entry}
 }
