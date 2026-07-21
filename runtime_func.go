@@ -76,3 +76,41 @@ func runtimeFuncFileLine(fr *frame, f *runtime.Func, pc uintptr) (file string, l
 	}
 	return f.FileLine(pc)
 }
+
+const supportFuncVal = funcval.IsSupport
+
+func dynamicFunCall(interp *Interp, iv register, ir register, ia []register) func(fr *frame) {
+	return func(fr *frame) {
+		fn := fr.reg(iv)
+		if fv, n := funcval.Get(fn); n == 1 {
+			if c := (*makeFuncVal)(unsafe.Pointer(fv)); c.interp == interp {
+				if c.pfn.Recover == nil {
+					interp.callFunctionByStackNoRecoverWithEnv(fr, c.pfn, ir, ia, c.env)
+				} else {
+					interp.callFunctionByStackWithEnv(fr, c.pfn, ir, ia, c.env)
+				}
+				return
+			}
+		}
+		v := reflect.ValueOf(fn)
+		interp.callExternalByStack(fr, v, ir, ia)
+	}
+}
+
+func (pfn *function) makeFunction(typ reflect.Type, env []value) reflect.Value {
+	interp := pfn.Interp
+	return reflect.MakeFunc(typ, func(args []reflect.Value) []reflect.Value {
+		return interp.callFunctionByReflect(interp.tryDeferFrame(), pfn, typ, args, env)
+	})
+}
+
+// makeFuncVal sync with function.makeFunction
+type makeFuncVal struct {
+	funcval.FuncVal
+	interp *Interp
+	pfn    *function
+	typ    reflect.Type
+	env    []interface{}
+}
+
+type interpExt struct{}
