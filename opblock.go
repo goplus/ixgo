@@ -25,11 +25,9 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"unsafe"
 
 	"github.com/goplus/ixgo/load"
 	"github.com/goplus/reflectx"
-	"github.com/visualfc/funcval"
 	"github.com/visualfc/xtype"
 	"golang.org/x/tools/go/ssa"
 )
@@ -1160,44 +1158,14 @@ func makeCallInstr(pfn *function, interp *Interp, instr ssa.Value, call *ssa.Cal
 	if typ.Kind() != reflect.Func {
 		panic("unsupport")
 	}
-	if !funcval.IsSupport || (interp.ctx.Mode&DisableDynamicFuncCallAnalysis != 0) {
-		return func(fr *frame) {
-			fn := fr.reg(iv)
-			v := reflect.ValueOf(fn)
-			interp.callExternalByStack(fr, v, ir, ia)
-		}
+	if supportFuncVal && (interp.ctx.Mode&DisableDynamicFuncCallAnalysis == 0) {
+		return dynamicFunCall(interp, iv, ir, ia)
 	}
 	return func(fr *frame) {
 		fn := fr.reg(iv)
-		if fv, n := funcval.Get(fn); n == 1 {
-			if c := (*makeFuncVal)(unsafe.Pointer(fv)); c.interp == interp {
-				if c.pfn.Recover == nil {
-					interp.callFunctionByStackNoRecoverWithEnv(fr, c.pfn, ir, ia, c.env)
-				} else {
-					interp.callFunctionByStackWithEnv(fr, c.pfn, ir, ia, c.env)
-				}
-				return
-			}
-		}
 		v := reflect.ValueOf(fn)
 		interp.callExternalByStack(fr, v, ir, ia)
 	}
-}
-
-// makeFuncVal sync with function.makeFunction
-// func (pfn *function) makeFunction(typ reflect.Type, env []value) reflect.Value {
-// 	interp := pfn.Interp
-// 	return reflect.MakeFunc(typ, func(args []reflect.Value) []reflect.Value {
-// 		return interp.callFunctionByReflect(interp.tryDeferFrame(), pfn, typ, args, env)
-// 	})
-// }
-
-type makeFuncVal struct {
-	funcval.FuncVal
-	interp *Interp
-	pfn    *function
-	typ    reflect.Type
-	env    []interface{}
 }
 
 var (

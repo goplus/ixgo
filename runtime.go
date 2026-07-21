@@ -30,7 +30,6 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/visualfc/funcval"
 	"golang.org/x/tools/go/ssa"
 )
 
@@ -62,40 +61,6 @@ func init() {
 	RegisterExternal("runtime.Stack", runtimeStack)
 	RegisterExternal("runtime/debug.Stack", debugStack)
 	RegisterExternal("runtime/debug.PrintStack", debugPrintStack)
-
-	if funcval.IsSupport {
-		RegisterExternal("(reflect.Value).Pointer", func(fr *frame, v reflect.Value) uintptr {
-			if v.Kind() == reflect.Func {
-				if fv, n := funcval.Get(v.Interface()); n == 1 {
-					if c := (*makeFuncVal)(unsafe.Pointer(fv)); c.interp == fr.interp {
-						return uintptr(c.pfn.base)
-					}
-				}
-			}
-			return v.Pointer()
-		})
-	}
-}
-
-func runtimeFuncFileLine(fr *frame, f *runtime.Func, pc uintptr) (file string, line int) {
-	entry := f.Entry()
-	if isInlineFunc(f) && pc > entry {
-		interp := fr.interp
-		if pfn := findFuncByEntry(interp, int(entry)); pfn != nil {
-			// pc-1 : fn.instr.pos
-			pos := pfn.PosForPC(int(pc - entry - 1))
-			if !pos.IsValid() {
-				return "?", 0
-			}
-			fpos := interp.ctx.FileSet.Position(pos)
-			if fpos.Filename == "" {
-				return "??", fpos.Line
-			}
-			file, line = filepath.ToSlash(fpos.Filename), fpos.Line
-			return
-		}
-	}
-	return f.FileLine(pc)
 }
 
 func runtimeCaller(fr *frame, skip int) (pc uintptr, file string, line int, ok bool) {

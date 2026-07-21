@@ -100,6 +100,7 @@ type Interp struct {
 	deferCount   int32                                       // fast has defer check
 	goexited     int32                                       // is call runtime.Goexit
 	exited       int32                                       // is call os.Exit
+	interpExt
 }
 
 func (i *Interp) MainPkg() *ssa.Package {
@@ -177,13 +178,6 @@ func (i *Interp) FindMethod(mtyp reflect.Type, fn *types.Func) func([]reflect.Va
 		}
 	}
 	panic(fmt.Sprintf("Not found method %v", fn))
-}
-
-func (pfn *function) makeFunction(typ reflect.Type, env []value) reflect.Value {
-	interp := pfn.Interp
-	return reflect.MakeFunc(typ, func(args []reflect.Value) []reflect.Value {
-		return interp.callFunctionByReflect(interp.tryDeferFrame(), pfn, typ, args, env)
-	})
 }
 
 type _defer struct {

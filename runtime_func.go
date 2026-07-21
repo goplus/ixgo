@@ -4,9 +4,38 @@
 package ixgo
 
 import (
+	"path/filepath"
+	"reflect"
 	"runtime"
 	"unsafe"
+
+	"github.com/visualfc/funcval"
 )
+
+func init() {
+	if funcval.IsSupport {
+		RegisterExternal("(reflect.Value).Pointer", func(fr *frame, v reflect.Value) uintptr {
+			if v.Kind() == reflect.Func {
+				if fv, n := funcval.Get(v.Interface()); n == 1 {
+					if c := (*makeFuncVal)(unsafe.Pointer(fv)); c.interp == fr.interp {
+						return uintptr(c.pfn.base)
+					}
+				}
+			}
+			return v.Pointer()
+		})
+		RegisterExternal("(reflect.Value).UnsafePointer", func(fr *frame, v reflect.Value) unsafe.Pointer {
+			if v.Kind() == reflect.Func {
+				if fv, n := funcval.Get(v.Interface()); n == 1 {
+					if c := (*makeFuncVal)(unsafe.Pointer(fv)); c.interp == fr.interp {
+						return unsafe.Pointer(uintptr(c.pfn.base))
+					}
+				}
+			}
+			return v.UnsafePointer()
+		})
+	}
+}
 
 //go:linkname runtimePanic runtime.gopanic
 func runtimePanic(e interface{})
@@ -26,3 +55,62 @@ func inlineFunc(entry uintptr) *funcinl {
 func isInlineFunc(f *runtime.Func) bool {
 	return (*funcinl)(unsafe.Pointer(f)).ones == ^uint32(0)
 }
+
+func runtimeFuncFileLine(fr *frame, f *runtime.Func, pc uintptr) (file string, line int) {
+	entry := f.Entry()
+	if isInlineFunc(f) && pc > entry {
+		interp := fr.interp
+		if pfn := findFuncByEntry(interp, int(entry)); pfn != nil {
+			// pc-1 : fn.instr.pos
+			pos := pfn.PosForPC(int(pc - entry - 1))
+			if !pos.IsValid() {
+				return "?", 0
+			}
+			fpos := interp.ctx.FileSet.Position(pos)
+			if fpos.Filename == "" {
+				return "??", fpos.Line
+			}
+			file, line = filepath.ToSlash(fpos.Filename), fpos.Line
+			return
+		}
+	}
+	return f.FileLine(pc)
+}
+
+const supportFuncVal = funcval.IsSupport
+
+func dynamicFunCall(interp *Interp, iv register, ir register, ia []register) func(fr *frame) {
+	return func(fr *frame) {
+		fn := fr.reg(iv)
+		if fv, n := funcval.Get(fn); n == 1 {
+			if c := (*makeFuncVal)(unsafe.Pointer(fv)); c.interp == interp {
+				if c.pfn.Recover == nil {
+					interp.callFunctionByStackNoRecoverWithEnv(fr, c.pfn, ir, ia, c.env)
+				} else {
+					interp.callFunctionByStackWithEnv(fr, c.pfn, ir, ia, c.env)
+				}
+				return
+			}
+		}
+		v := reflect.ValueOf(fn)
+		interp.callExternalByStack(fr, v, ir, ia)
+	}
+}
+
+func (pfn *function) makeFunction(typ reflect.Type, env []value) reflect.Value {
+	interp := pfn.Interp
+	return reflect.MakeFunc(typ, func(args []reflect.Value) []reflect.Value {
+		return interp.callFunctionByReflect(interp.tryDeferFrame(), pfn, typ, args, env)
+	})
+}
+
+// makeFuncVal sync with function.makeFunction
+type makeFuncVal struct {
+	funcval.FuncVal
+	interp *Interp
+	pfn    *function
+	typ    reflect.Type
+	env    []interface{}
+}
+
+type interpExt struct{}
