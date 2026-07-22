@@ -3,10 +3,10 @@ module github.com/goplus/ixgo
 go 1.24.0
 
 require (
-	github.com/goplus/gogen v1.23.3
-	github.com/goplus/mod v0.20.2
+	github.com/goplus/gogen v1.23.5
+	github.com/goplus/mod v0.21.1
 	github.com/goplus/reflectx v1.7.2
-	github.com/goplus/xgo v1.7.3
+	github.com/goplus/xgo v1.7.5
 	github.com/peterh/liner v1.2.2
 	github.com/qiniu/x v1.18.0
 	github.com/visualfc/funcval v0.1.5
@@ -22,5 +22,6 @@ require (
 	github.com/mattn/go-runewidth v0.0.3 // indirect
 	github.com/timandy/routine v1.1.6 // indirect
 	golang.org/x/net v0.50.0 // indirect
+	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
 )

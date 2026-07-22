@@ -74,6 +74,7 @@ func init() {
 				"ForPhraseStmt":     reflect.TypeOf((*q.ForPhraseStmt)(nil)).Elem(),
 				"ForStmt":           reflect.TypeOf((*q.ForStmt)(nil)).Elem(),
 				"FuncDecl":          reflect.TypeOf((*q.FuncDecl)(nil)).Elem(),
+				"FuncDecorator":     reflect.TypeOf((*q.FuncDecorator)(nil)).Elem(),
 				"FuncLit":           reflect.TypeOf((*q.FuncLit)(nil)).Elem(),
 				"FuncType":          reflect.TypeOf((*q.FuncType)(nil)).Elem(),
 				"GenDecl":           reflect.TypeOf((*q.GenDecl)(nil)).Elem(),
