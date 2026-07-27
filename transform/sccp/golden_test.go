@@ -45,11 +45,6 @@ func TestSCCPGoGolden(t *testing.T) {
 
 			got := packageSSA(fn.Pkg)
 			outPath := filepath.Join(dir, "out.txt")
-			if os.Getenv("LLAR_UPDATE_SCCP_GOLDEN") == "1" {
-				if err := os.WriteFile(outPath, got, 0666); err != nil {
-					t.Fatal(err)
-				}
-			}
 			want, err := os.ReadFile(outPath)
 			if err != nil {
 				t.Fatal(err)
