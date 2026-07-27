@@ -49,6 +49,7 @@ func TestSCCPGoGolden(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			want = bytes.ReplaceAll(want, []byte("\r\n"), []byte("\n"))
 			if !bytes.Equal(got, want) {
 				t.Fatalf("rewritten SSA does not match out.txt\n\nwant:\n%s\ngot:\n%s", want, got)
 			}
