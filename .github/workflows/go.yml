@@ -27,6 +27,9 @@ jobs:
     - name: Test xgobuild
       run: go test -race -v ./xgobuild
 
+    - name: Test transform
+      run: go test -race -v ./transform/...
+
     - name: Install ixgo
       run: go install -v ./cmd/ixgo
 
