@@ -1,0 +1,7 @@
+# Name: example.com/test.target
+# Package: example.com/test
+# Location: in.go:3:6
+func target(condition bool) (int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int32, int64, bool, bool, bool, bool, bool, int64):
+0:                                                                entry P:0 S:0
+	return 41:int64, 2:int64, 43:int64, 22:int64, 462:int64, 0:int64, 0:int64, 21:int64, 0:int64, 0:int64, -1:int64, 1:int64, 1:int32, 21:int64, false:bool, false:bool, true:bool, true:bool, true:bool, 22020096:int64
+

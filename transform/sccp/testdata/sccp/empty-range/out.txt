@@ -1,0 +1,29 @@
+# Name: example.com/test.target
+# Package: example.com/test
+# Location: in.go:7:6
+func target() int:
+0:                                                                entry P:0 S:1
+	t0 = new [0]int (slicelit)                                      *[0]int
+	t1 = slice t0[:]                                                  []int
+	t2 = len(t1)                                                        int
+	jump 1
+1:                                               rangeindex.loop P:2 S:2 idom:0
+	t3 = phi [0: -1:int, 2: t4] #rangeindex                             int
+	t4 = t3 + 1:int                                                     int
+	t5 = t4 < t2                                                       bool
+	if t5 goto 2 else 3
+2:                                               rangeindex.body P:1 S:1 idom:1
+	t6 = &t1[t4]                                                       *int
+	t7 = *t6                                                            int
+	t8 = *ints                                                       []*int
+	t9 = *next                                                   func() int
+	t10 = t9()                                                          int
+	t11 = &t8[t10]                                                    **int
+	t12 = *t11                                                         *int
+	*index = t4
+	*t12 = t7
+	jump 1
+3:                                               rangeindex.done P:1 S:0 idom:1
+	t13 = *index                                                        int
+	return t13
+

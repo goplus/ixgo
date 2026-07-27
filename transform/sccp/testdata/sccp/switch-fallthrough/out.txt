@@ -1,0 +1,19 @@
+# Name: example.com/test.switches
+# Package: example.com/test
+# Location: in.go:3:6
+func switches() bool:
+0:                                                                entry P:0 S:0
+	return true:bool
+
+# Name: example.com/test.target
+# Package: example.com/test
+# Location: in.go:66:6
+func target() int:
+0:                                                                entry P:0 S:2
+	t0 = switches()                                                    bool
+	if t0 goto 1 else 2
+1:                                                       if.then P:1 S:0 idom:0
+	return 0:int
+2:                                                       if.done P:1 S:0 idom:0
+	return 1:int
+

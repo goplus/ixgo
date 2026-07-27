@@ -1,0 +1,26 @@
+# Name: (*example.com/test.ET).Error
+# Package: example.com/test
+# Location: in.go:5:12
+func (*ET) Error() string:
+0:                                                                entry P:0 S:0
+	return "err":string
+
+# Name: example.com/test.target
+# Package: example.com/test
+# Location: in.go:7:6
+func target() int:
+0:                                                                entry P:0 S:2
+	t0 = make error <- *ET (nil:*ET)                                  error
+	t1 = t0 == nil:error                                               bool
+	if t1 goto 1 else 2
+1:                                                       if.then P:1 S:0 idom:0
+	return 1:int
+2:                                                       if.done P:1 S:2 idom:0
+	t2 = make error <- *ET (nil:*ET)                                  error
+	t3 = t2 != nil:error                                               bool
+	if t3 goto 3 else 4
+3:                                                       if.then P:1 S:0 idom:2
+	return 0:int
+4:                                                       if.done P:1 S:0 idom:2
+	return 2:int
+

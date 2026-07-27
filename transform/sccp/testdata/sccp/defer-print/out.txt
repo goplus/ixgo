@@ -1,0 +1,20 @@
+# Name: example.com/test.target
+# Package: example.com/test
+# Location: in.go:3:6
+# Recover: 1
+# Locals:
+#   0:	t0 int
+func target() int:
+0:                                                                entry P:0 S:0
+	t0 = local int ()                                                  *int
+	defer println(42:int, true:bool, false:bool, true:bool, 1.5:float64, "world":string, nil:chan int, nil:[]int, nil:map[string]int, nil:func(), 255:byte)
+	defer println(1:int, 2:int, 3:int, 4:int, 5:int, 6:int, 7:int, 8:int, 9:int, 10:int)
+	defer print("printing: ":string)
+	*t0 = 0:int
+	rundefers
+	t1 = *t0                                                            int
+	return t1
+1:                                                              recover P:0 S:0
+	t2 = *t0                                                            int
+	return t2
+

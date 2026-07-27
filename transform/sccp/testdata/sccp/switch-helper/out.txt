@@ -1,0 +1,20 @@
+# Name: example.com/test.target
+# Package: example.com/test
+# Location: in.go:3:6
+func target(x int) int:
+0:                                                                entry P:0 S:2
+	t0 = x > 0:int                                                     bool
+	if t0 goto 1 else 3
+1:                                                   switch.body P:1 S:0 idom:0
+	return 5:int
+2:                                                   switch.body P:1 S:1 idom:3
+	jump 4
+3:                                                   switch.next P:1 S:2 idom:0
+	t4 = x < 1:int                                                     bool
+	if t4 goto 2 else 4
+4:                                                   switch.body P:2 S:0 idom:3
+	t5 = phi [2: 6:int, 3: 0:int] #y                                    int
+	t6 = t5 + 7:int                                                     int
+	t7 = 2:int + t6                                                     int
+	return t7
+

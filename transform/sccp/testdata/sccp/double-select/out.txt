@@ -1,0 +1,41 @@
+# Name: example.com/test.target
+# Package: example.com/test
+# Location: in.go:3:6
+# Recover: 1
+func target(n int, c1 chan<- int, c2 chan<- int, c3 chan<- int, c4 chan<- int):
+0:                                                                entry P:0 S:1
+	defer close(c1)
+	defer close(c2)
+	defer close(c3)
+	defer close(c4)
+	jump 2
+1:                                                              recover P:0 S:0
+	return
+2:                                                      for.loop P:2 S:2 idom:0
+	t0 = phi [0: 0:int, 5: t5] #i                                       int
+	t1 = t0 < n                                                        bool
+	if t1 goto 3 else 4
+3:                                                      for.body P:1 S:2 idom:2
+	t2 = select blocking [c1<-t0, c2<-t0, c3<-t0, c4<-t0] (index int, ok bool)
+	t3 = extract t2 #0                                                  int
+	t4 = t3 == 0:int                                                   bool
+	if t4 goto 5 else 6
+4:                                                      for.done P:1 S:0 idom:2
+	rundefers
+	return
+5:                                                   select.done P:4 S:1 idom:3
+	t5 = t0 + 1:int                                                     int
+	jump 2
+6:                                                   select.next P:1 S:2 idom:3
+	t6 = t3 == 1:int                                                   bool
+	if t6 goto 5 else 7
+7:                                                   select.next P:1 S:2 idom:6
+	t7 = t3 == 2:int                                                   bool
+	if t7 goto 5 else 8
+8:                                                   select.next P:1 S:2 idom:7
+	t8 = t3 == 3:int                                                   bool
+	if t8 goto 5 else 9
+9:                                                   select.next P:1 S:0 idom:8
+	t9 = make interface{} <- string ("blocking select m...":string) interface{}
+	panic t9
+
