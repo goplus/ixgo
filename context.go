@@ -709,6 +709,7 @@ func (ctx *Context) RunPkg(mainPkg *ssa.Package, input string, args []string) (e
 	if err != nil {
 		return 2, err
 	}
+	defer interp.UnsafeRelease()
 	return ctx.RunInterp(interp, input, args)
 }
 
@@ -811,6 +812,7 @@ func (ctx *Context) TestPkg(pkg *ssa.Package, input string, args []string) error
 		failed = true
 		fmt.Printf("create interp failed: %v\n", err)
 	}
+	defer interp.UnsafeRelease()
 	if err = interp.RunInit(); err != nil {
 		failed = true
 		fmt.Printf("init error: %v\n", err)
