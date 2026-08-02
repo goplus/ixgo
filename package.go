@@ -70,7 +70,8 @@ func (p *lazyLoad) Package() *Package {
 	return p.load()
 }
 
-// RegisterPackage register a pkg.
+// RegisterPackage registers pkg. Package registration and merging are setup
+// operations and must finish before an interpreter using the package is built.
 func RegisterPackage(pkg *Package) {
 	if p, ok := registerPkgs[pkg.Path]; ok {
 		p.Package().merge(pkg)
@@ -79,7 +80,8 @@ func RegisterPackage(pkg *Package) {
 	registerPkgs[pkg.Path] = &baseLoad{pkg: pkg}
 }
 
-// RegisterPackageLazy registers a pkg with lazy initialization.
+// RegisterPackageLazy registers a package with lazy initialization. Registration
+// must finish before an interpreter using the package is built.
 func RegisterPackageLazy(pkg string, load func() *Package) {
 	if p, ok := registerPkgs[pkg]; ok {
 		p.Package().merge(load())
@@ -109,6 +111,7 @@ type Package struct {
 	AliasTypes    map[string]reflect.Type
 	Vars          map[string]reflect.Value
 	Funcs         map[string]reflect.Value
+	DirectCalls   map[string]DirectCallBinding // qexp bindings keyed by canonical function or method key
 	TypedConsts   map[string]TypedConst
 	UntypedConsts map[string]UntypedConst
 	Deps          map[string]string // path -> name
@@ -133,6 +136,14 @@ func (p *Package) merge(same *Package) {
 	for k, v := range same.Funcs {
 		p.Funcs[k] = v
 	}
+	if same.DirectCalls != nil {
+		if p.DirectCalls == nil {
+			p.DirectCalls = make(map[string]DirectCallBinding)
+		}
+		for k, v := range same.DirectCalls {
+			p.DirectCalls[k] = v
+		}
+	}
 	for k, v := range same.UntypedConsts {
 		p.UntypedConsts[k] = v
 	}
@@ -150,11 +161,16 @@ func (p *Package) merge(same *Package) {
 }
 
 var (
+	externMu     sync.RWMutex
 	externValues = make(map[string]reflect.Value)
 )
 
-// RegisterExternal is register external variable address or func
+// RegisterExternal registers an external variable address or function. Configure
+// overrides before interpreter construction; running interpreters do not provide
+// uniform hot-update semantics across already-bound and cached callsites.
 func RegisterExternal(key string, i interface{}) {
+	externMu.Lock()
+	defer externMu.Unlock()
 	if i == nil {
 		delete(externValues, key)
 		return
@@ -166,4 +182,11 @@ func RegisterExternal(key string, i interface{}) {
 	default:
 		log.Printf("register external must variable address or func. not %v\n", v.Kind())
 	}
+}
+
+func lookupExternal(key string) (reflect.Value, bool) {
+	externMu.RLock()
+	v, ok := externValues[key]
+	externMu.RUnlock()
+	return v, ok
 }

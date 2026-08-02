@@ -49,6 +49,58 @@ func joinList(list []string) string {
 	return "\n\t" + strings.Join(list, ",\n\t") + ",\n"
 }
 
+const (
+	reflectImportPlaceholder  = "\x00qexp-reflect\x00"
+	aliasImportPlaceholder    = "\x00qexp-alias\x00"
+	constantImportPlaceholder = "\x00qexp-constant\x00"
+	tokenImportPlaceholder    = "\x00qexp-token\x00"
+)
+
+func joinGeneratedList(list []string, replacements ...string) string {
+	if len(list) == 0 {
+		return ""
+	}
+	replacer := strings.NewReplacer(replacements...)
+	rendered := make([]string, len(list))
+	for i, item := range list {
+		rendered[i] = replacer.Replace(item)
+	}
+	return joinList(rendered)
+}
+
+func packageConstsUseToken(pkg *Package) bool {
+	for _, constants := range [][]string{pkg.UntypedConsts, pkg.TypedConsts} {
+		for _, constant := range constants {
+			if strings.Contains(constant, tokenImportPlaceholder+".") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func linkDeclarationNames(links []string) []string {
+	var names []string
+	for _, link := range links {
+		for rest := link; ; {
+			index := strings.Index(rest, "func ")
+			if index < 0 {
+				break
+			}
+			rest = rest[index+len("func "):]
+			end := strings.IndexByte(rest, '(')
+			if end < 0 {
+				break
+			}
+			if name := strings.TrimSpace(rest[:end]); name != "" {
+				names = append(names, name)
+			}
+			rest = rest[end+1:]
+		}
+	}
+	return names
+}
+
 const EmptyPackage = "empty package"
 
 var (
@@ -56,37 +108,6 @@ var (
 )
 
 func exportPkg(pkg *Package, sname string, id string, tagList []string, fname string) ([]byte, error) {
-	var imports []string
-	if pkg.usedPkg {
-		imports = append(imports, fmt.Sprintf("q %q", pkg.Path))
-		imports = append(imports, "")
-	} else if !flagExportCode {
-		imports = append(imports, fmt.Sprintf("_ %q", pkg.Path))
-	}
-	if !pkg.IsEmpty() {
-		imports = append(imports, `"reflect"`)
-	}
-	if len(pkg.UntypedConsts) > 0 || len(pkg.TypedConsts) > 0 {
-		imports = append(imports, `"go/constant"`)
-		var hasToken bool
-		for _, c := range pkg.UntypedConsts {
-			if strings.Index(c, "token.") >= 0 {
-				hasToken = true
-				break
-			}
-		}
-		if !hasToken {
-			for _, c := range pkg.TypedConsts {
-				if strings.Index(c, "token.") >= 0 {
-					hasToken = true
-					break
-				}
-			}
-		}
-		if hasToken {
-			imports = append(imports, `"go/token"`)
-		}
-	}
 	tmpl := template_pkg
 	if pkg.IsEmpty() {
 		tmpl = template_empty_pkg
@@ -98,38 +119,84 @@ func exportPkg(pkg *Package, sname string, id string, tagList []string, fname st
 		if pkg.IsEmpty() {
 			tmpl = template_emtpy_link_pkg
 		}
-		if len(pkg.Links) > 0 {
-			imports = append(imports, `_ "unsafe"`)
-		}
 	}
+	sourcePath, sourceName := pkg.Path, pkg.Name
 	if flagCustomPkg != "" {
 		pkg.Path = path.Clean(flagCustomPkg)
 		pkg.Name = path.Base(pkg.Path)
 	}
 	if flagExportLazy {
 		tmpl = strings.Replace(tmpl, "$INIT", "", 1)
-		tmpl = strings.Replace(tmpl, "ixgo.RegisterPackage(",
-			`ixgo.RegisterPackageLazy("$PKGPATH",func() *ixgo.Package {$INIT 
+		tmpl = strings.Replace(tmpl, "$IXGO.RegisterPackage(",
+			`$IXGO.RegisterPackageLazy("$PKGPATH",func() *$IXGO.Package {$INIT
 	return `, 1)
 		tmpl = strings.Replace(tmpl, "})", "}\n\t})", 1)
 	}
 
-	var ext string
-	if len(pkg.Alias) != 0 && flagExportAlias {
-		imports = append(imports, `"github.com/goplus/ixgo/alias"`)
-		ext = "\nAlias: map[string]alias.Type{" + joinList(pkg.Alias) + "},"
+	reserved := append([]string{"source", fname + "TypesData"}, pkg.directCalls.declarationNames()...)
+	reserved = append(reserved, linkDeclarationNames(pkg.Links)...)
+	imports := newImportPlanner(reserved...)
+	if pkg.usedPkg {
+		if _, err := imports.addRequired(sourcePath, sourceName, sname, importGroupPackage); err != nil {
+			return nil, err
+		}
+	} else if !flagExportCode {
+		imports.addBlank(sourcePath, importGroupPackage)
 	}
+	reflectAlias := "reflect"
+	if !pkg.IsEmpty() {
+		reflectAlias = imports.add("reflect", "reflect", "reflect", importGroupSupport)
+	}
+	var constantAlias, tokenAlias string
+	if len(pkg.UntypedConsts) > 0 || len(pkg.TypedConsts) > 0 {
+		constantAlias = imports.add("go/constant", "constant", "constant", importGroupSupport)
+		if packageConstsUseToken(pkg) {
+			tokenAlias = imports.add("go/token", "token", "token", importGroupSupport)
+		}
+	}
+	if len(pkg.Links) > 0 {
+		imports.addBlank("unsafe", importGroupSupport)
+	}
+
+	var ext, aliasAlias string
+	if len(pkg.Alias) != 0 && flagExportAlias {
+		aliasAlias = imports.add("github.com/goplus/ixgo/alias", "alias", "alias", importGroupSupport)
+		ext = fmt.Sprintf("\nAlias: map[string]%s.Type{%s},", aliasAlias,
+			joinGeneratedList(pkg.Alias, aliasImportPlaceholder, aliasAlias))
+	}
+	runtimeAlias := imports.add("github.com/goplus/ixgo", "ixgo", "ixgo", importGroupRuntime)
+	typesDataAlias := ""
+	if pkg.TypesData != nil {
+		imports.addBlank("embed", importGroupRuntime)
+		typesDataAlias = imports.add("github.com/goplus/ixgo/xgobuild/typesdata", "typesdata", "typesdata", importGroupRuntime)
+	}
+	entries, adapters := pkg.directCalls.render(sname, runtimeAlias, reflectAlias, imports)
+	var directCalls string
+	if len(entries) != 0 {
+		directCalls = fmt.Sprintf("\nDirectCalls: map[string]%s.DirectCallBinding{%s},", runtimeAlias, joinList(entries))
+	}
+	directCallAdapters := strings.Join(adapters, "\n\n")
 	r := strings.NewReplacer("$PKGNAME", pkg.Name,
-		"$IMPORTS", strings.Join(imports, "\n"),
+		"$IMPORTS", strings.Join(imports.declarations(), "\n"),
+		"$IXGO", runtimeAlias,
+		"$REFLECT", reflectAlias,
+		"$TYPESDATA", typesDataAlias,
 		"$PKGPATH", pkg.Path,
 		"$DEPS", joinList(pkg.Deps),
-		"$NAMEDTYPES", joinList(pkg.NamedTypes),
-		"$INTERFACES", joinList(pkg.Interfaces),
-		"$ALIASTYPES", joinList(pkg.AliasTypes),
-		"$VARS", joinList(pkg.Vars),
-		"$FUNCS", joinList(pkg.Funcs),
-		"$TYPEDCONSTS", joinList(pkg.TypedConsts),
-		"$UNTYPEDCONSTS", joinList(pkg.UntypedConsts),
+		"$NAMEDTYPES", joinGeneratedList(pkg.NamedTypes, reflectImportPlaceholder, reflectAlias),
+		"$INTERFACES", joinGeneratedList(pkg.Interfaces, reflectImportPlaceholder, reflectAlias),
+		"$ALIASTYPES", joinGeneratedList(pkg.AliasTypes, reflectImportPlaceholder, reflectAlias),
+		"$VARS", joinGeneratedList(pkg.Vars, reflectImportPlaceholder, reflectAlias),
+		"$FUNCS", joinGeneratedList(pkg.Funcs, reflectImportPlaceholder, reflectAlias),
+		"$DIRECTCALLS", directCalls,
+		"$DIRECTCALLADAPTERS", directCallAdapters,
+		"$TYPEDCONSTS", joinGeneratedList(pkg.TypedConsts,
+			reflectImportPlaceholder, reflectAlias,
+			constantImportPlaceholder, constantAlias,
+			tokenImportPlaceholder, tokenAlias),
+		"$UNTYPEDCONSTS", joinGeneratedList(pkg.UntypedConsts,
+			constantImportPlaceholder, constantAlias,
+			tokenImportPlaceholder, tokenAlias),
 		"$TAGS", strings.Join(tagList, "\n"),
 		"$SOURCE", pkg.Source,
 		"$LINKS", strings.Join(pkg.Links, "\n"),
@@ -137,7 +204,7 @@ func exportPkg(pkg *Package, sname string, id string, tagList []string, fname st
 		"$TYPESNAME", fname+"TypesData",
 		"$TYPESFILE", fname+".types",
 		"$EXT", ext,
-		"$INIT", pkg.AliasInit)
+		"$INIT", strings.ReplaceAll(pkg.AliasInit, aliasImportPlaceholder, aliasAlias))
 	src := r.Replace(tmpl)
 	data, err := format.Source([]byte(src))
 	if err != nil {
@@ -154,24 +221,24 @@ package $PKGNAME
 
 import (
 	$IMPORTS
-
-	"github.com/goplus/ixgo"
 )
 
 func init() {$INIT
-	ixgo.RegisterPackage(&ixgo.Package {
+	$IXGO.RegisterPackage(&$IXGO.Package {
 		Name: "$PKGNAME",
 		Path: "$PKGPATH",
 		Deps: map[string]string{$DEPS},
-		Interfaces: map[string]reflect.Type{$INTERFACES},
-		NamedTypes: map[string]reflect.Type{$NAMEDTYPES},
-		AliasTypes: map[string]reflect.Type{$ALIASTYPES},
-		Vars: map[string]reflect.Value{$VARS},
-		Funcs: map[string]reflect.Value{$FUNCS},
-		TypedConsts: map[string]ixgo.TypedConst{$TYPEDCONSTS},
-		UntypedConsts: map[string]ixgo.UntypedConst{$UNTYPEDCONSTS},$EXT
+		Interfaces: map[string]$REFLECT.Type{$INTERFACES},
+		NamedTypes: map[string]$REFLECT.Type{$NAMEDTYPES},
+		AliasTypes: map[string]$REFLECT.Type{$ALIASTYPES},
+		Vars: map[string]$REFLECT.Value{$VARS},
+		Funcs: map[string]$REFLECT.Value{$FUNCS},$DIRECTCALLS
+		TypedConsts: map[string]$IXGO.TypedConst{$TYPEDCONSTS},
+		UntypedConsts: map[string]$IXGO.UntypedConst{$UNTYPEDCONSTS},$EXT
 	})
 }
+
+$DIRECTCALLADAPTERS
 `
 
 var template_pkg_types = `// export by github.com/goplus/ixgo/cmd/qexp
@@ -182,30 +249,28 @@ package $PKGNAME
 
 import (
 	$IMPORTS
-
-	"github.com/goplus/ixgo"
-	"github.com/goplus/ixgo/xgobuild/typesdata"
-	_ "embed"
 )
 
 //go:embed $TYPESFILE
 var $TYPESNAME []byte
 
 func init() {$INIT
-	ixgo.RegisterPackage(&ixgo.Package {
+	$IXGO.RegisterPackage(&$IXGO.Package {
 		Name: "$PKGNAME",
 		Path: "$PKGPATH",
 		Deps: map[string]string{$DEPS},
-		Interfaces: map[string]reflect.Type{$INTERFACES},
-		NamedTypes: map[string]reflect.Type{$NAMEDTYPES},
-		AliasTypes: map[string]reflect.Type{$ALIASTYPES},
-		Vars: map[string]reflect.Value{$VARS},
-		Funcs: map[string]reflect.Value{$FUNCS},
-		TypedConsts: map[string]ixgo.TypedConst{$TYPEDCONSTS},
-		UntypedConsts: map[string]ixgo.UntypedConst{$UNTYPEDCONSTS},
-		Import: typesdata.ImportFunc("$PKGPATH", $TYPESNAME),$EXT
+		Interfaces: map[string]$REFLECT.Type{$INTERFACES},
+		NamedTypes: map[string]$REFLECT.Type{$NAMEDTYPES},
+		AliasTypes: map[string]$REFLECT.Type{$ALIASTYPES},
+		Vars: map[string]$REFLECT.Value{$VARS},
+		Funcs: map[string]$REFLECT.Value{$FUNCS},$DIRECTCALLS
+		TypedConsts: map[string]$IXGO.TypedConst{$TYPEDCONSTS},
+		UntypedConsts: map[string]$IXGO.UntypedConst{$UNTYPEDCONSTS},
+		Import: $TYPESDATA.ImportFunc("$PKGPATH", $TYPESNAME),$EXT
 	})
 }
+
+$DIRECTCALLADAPTERS
 `
 
 var template_empty_pkg = `// export by github.com/goplus/ixgo/cmd/qexp
@@ -216,17 +281,17 @@ package $PKGNAME
 
 import (
 	$IMPORTS
-
-	"github.com/goplus/ixgo"
 )
 
 func init() {$INIT
-	ixgo.RegisterPackage(&ixgo.Package {
+	$IXGO.RegisterPackage(&$IXGO.Package {
 		Name: "$PKGNAME",
 		Path: "$PKGPATH",
 		Deps: map[string]string{$DEPS},$EXT
 	})
 }
+
+$DIRECTCALLADAPTERS
 `
 
 var template_link_pkg = `// export by github.com/goplus/ixgo/cmd/qexp
@@ -237,27 +302,27 @@ package $PKGNAME
 
 import (
 	$IMPORTS
-
-	"github.com/goplus/ixgo"
 )
 
 func init() {$INIT
-	ixgo.RegisterPackage(&ixgo.Package {
+	$IXGO.RegisterPackage(&$IXGO.Package {
 		Name: "$PKGNAME",
 		Path: "$PKGPATH",
 		Deps: map[string]string{$DEPS},
-		Interfaces: map[string]reflect.Type{$INTERFACES},
-		NamedTypes: map[string]reflect.Type{$NAMEDTYPES},
-		AliasTypes: map[string]reflect.Type{$ALIASTYPES},
-		Vars: map[string]reflect.Value{$VARS},
-		Funcs: map[string]reflect.Value{$FUNCS},
-		TypedConsts: map[string]ixgo.TypedConst{$TYPEDCONSTS},
-		UntypedConsts: map[string]ixgo.UntypedConst{$UNTYPEDCONSTS},
+		Interfaces: map[string]$REFLECT.Type{$INTERFACES},
+		NamedTypes: map[string]$REFLECT.Type{$NAMEDTYPES},
+		AliasTypes: map[string]$REFLECT.Type{$ALIASTYPES},
+		Vars: map[string]$REFLECT.Value{$VARS},
+		Funcs: map[string]$REFLECT.Value{$FUNCS},$DIRECTCALLS
+		TypedConsts: map[string]$IXGO.TypedConst{$TYPEDCONSTS},
+		UntypedConsts: map[string]$IXGO.UntypedConst{$UNTYPEDCONSTS},
 		Source: source,$EXT
 	})
 }
 $LINKS
 var source = $SOURCE
+
+$DIRECTCALLADAPTERS
 `
 
 var template_emtpy_link_pkg = `// export by github.com/goplus/ixgo/cmd/qexp
@@ -268,12 +333,10 @@ package $PKGNAME
 
 import (
 	$IMPORTS
-
-	"github.com/goplus/ixgo"
 )
 
 func init() {$INIT
-	ixgo.RegisterPackage(&ixgo.Package {
+	$IXGO.RegisterPackage(&$IXGO.Package {
 		Name: "$PKGNAME",
 		Path: "$PKGPATH",
 		Deps: map[string]string{$DEPS},
@@ -282,4 +345,6 @@ func init() {$INIT
 }
 $LINKS
 var source = $SOURCE
+
+$DIRECTCALLADAPTERS
 `

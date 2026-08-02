@@ -181,6 +181,7 @@ type Package struct {
 	AliasTypes    []string
 	Vars          []string
 	Funcs         []string
+	directCalls   directCallOutput
 	Consts        []string
 	TypedConsts   []string
 	UntypedConsts []string
@@ -195,7 +196,7 @@ type Package struct {
 func (p *Package) IsEmpty() bool {
 	return len(p.NamedTypes) == 0 && len(p.Interfaces) == 0 &&
 		len(p.AliasTypes) == 0 && len(p.Vars) == 0 &&
-		len(p.Funcs) == 0 && len(p.Consts) == 0 &&
+		len(p.Funcs) == 0 && p.directCalls.isEmpty() && len(p.Consts) == 0 &&
 		len(p.TypedConsts) == 0 && len(p.UntypedConsts) == 0
 }
 
@@ -211,30 +212,31 @@ func unmarshalFloat(str string) constant.Value {
 */
 
 func (p *Program) constToLit(named string, c constant.Value) string {
+	constantPkg, tokenPkg := constantImportPlaceholder, tokenImportPlaceholder
 	switch c.Kind() {
 	case constant.Bool:
 		if named != "" {
-			return fmt.Sprintf("constant.MakeBool(bool(%v))", named)
+			return fmt.Sprintf("%s.MakeBool(bool(%v))", constantPkg, named)
 		}
-		return fmt.Sprintf("constant.MakeBool(%v)", constant.BoolVal(c))
+		return fmt.Sprintf("%s.MakeBool(%v)", constantPkg, constant.BoolVal(c))
 	case constant.String:
 		if named != "" {
-			return fmt.Sprintf("constant.MakeString(string(%v))", named)
+			return fmt.Sprintf("%s.MakeString(string(%v))", constantPkg, named)
 		}
-		return fmt.Sprintf("constant.MakeString(%q)", constant.StringVal(c))
+		return fmt.Sprintf("%s.MakeString(%q)", constantPkg, constant.StringVal(c))
 	case constant.Int:
 		if v, ok := constant.Int64Val(c); ok {
 			if named != "" {
-				return fmt.Sprintf("constant.MakeInt64(int64(%v))", named)
+				return fmt.Sprintf("%s.MakeInt64(int64(%v))", constantPkg, named)
 			}
-			return fmt.Sprintf("constant.MakeInt64(%v)", v)
+			return fmt.Sprintf("%s.MakeInt64(%v)", constantPkg, v)
 		} else if v, ok := constant.Uint64Val(c); ok {
 			if named != "" {
-				return fmt.Sprintf("constant.MakeUint64(uint64(%v))", named)
+				return fmt.Sprintf("%s.MakeUint64(uint64(%v))", constantPkg, named)
 			}
-			return fmt.Sprintf("constant.MakeUint64(%v)", v)
+			return fmt.Sprintf("%s.MakeUint64(%v)", constantPkg, v)
 		}
-		return fmt.Sprintf("constant.MakeFromLiteral(%q, token.INT, 0)", c.ExactString())
+		return fmt.Sprintf("%s.MakeFromLiteral(%q, %s.INT, 0)", constantPkg, c.ExactString(), tokenPkg)
 	case constant.Float:
 		s := c.ExactString()
 		if pos := strings.IndexByte(s, '/'); pos >= 0 {
@@ -245,34 +247,34 @@ func (p *Program) constToLit(named string, c constant.Value) string {
 			// 50000000000000000000000000000000000000000000000000000000000000
 			if strings.HasPrefix(sy, "1") && strings.Count(sy, "0") == len(sy)-1 {
 				if len(sx) == len(sy) {
-					return fmt.Sprintf("constant.MakeFromLiteral(\"%v.%v\", token.FLOAT, 0)", sx[:1], sx[1:])
+					return fmt.Sprintf("%s.MakeFromLiteral(\"%v.%v\", %s.FLOAT, 0)", constantPkg, sx[:1], sx[1:], tokenPkg)
 				} else if len(sx) == len(sy)-1 {
-					return fmt.Sprintf("constant.MakeFromLiteral(\"0.%v\", token.FLOAT, 0)", sx)
+					return fmt.Sprintf("%s.MakeFromLiteral(\"0.%v\", %s.FLOAT, 0)", constantPkg, sx, tokenPkg)
 				} else if len(sx) < len(sy) {
-					return fmt.Sprintf("constant.MakeFromLiteral(\"%v.%ve-%v\", token.FLOAT, 0)", sx[:1], sx[1:], len(sy)-len(sx))
+					return fmt.Sprintf("%s.MakeFromLiteral(\"%v.%ve-%v\", %s.FLOAT, 0)", constantPkg, sx[:1], sx[1:], len(sy)-len(sx), tokenPkg)
 				}
 			} else if strings.HasPrefix(sy, "5") && strings.Count(sy, "0") == len(sy)-1 {
 				if len(sx) == len(sy) {
 					c := constant.BinaryOp(constant.MakeFromLiteral(sx, token.INT, 0), token.MUL, constant.MakeInt64(2))
 					sx = c.ExactString()
-					return fmt.Sprintf("constant.MakeFromLiteral(\"%v.%v\", token.FLOAT, 0)", sx[:1], sx[1:])
+					return fmt.Sprintf("%s.MakeFromLiteral(\"%v.%v\", %s.FLOAT, 0)", constantPkg, sx[:1], sx[1:], tokenPkg)
 				}
 			} else if strings.HasPrefix(sx, "1") && strings.Count(sx, "0") == len(sx)-1 {
 				// skip
 			}
-			x := fmt.Sprintf("constant.MakeFromLiteral(%q, token.INT, 0)", sx)
-			y := fmt.Sprintf("constant.MakeFromLiteral(%q, token.INT, 0)", sy)
-			return fmt.Sprintf("constant.BinaryOp(%v, token.QUO, %v)", x, y)
+			x := fmt.Sprintf("%s.MakeFromLiteral(%q, %s.INT, 0)", constantPkg, sx, tokenPkg)
+			y := fmt.Sprintf("%s.MakeFromLiteral(%q, %s.INT, 0)", constantPkg, sy, tokenPkg)
+			return fmt.Sprintf("%s.BinaryOp(%v, %s.QUO, %v)", constantPkg, x, tokenPkg, y)
 		}
 		if pos := strings.LastIndexAny(s, "123456789"); pos != -1 {
 			sx := s[:pos+1]
-			return fmt.Sprintf("constant.MakeFromLiteral(\"%v.%ve+%v\", token.FLOAT, 0)", sx[:1], sx[1:], len(s)-1)
+			return fmt.Sprintf("%s.MakeFromLiteral(\"%v.%ve+%v\", %s.FLOAT, 0)", constantPkg, sx[:1], sx[1:], len(s)-1, tokenPkg)
 		}
-		return fmt.Sprintf("constant.MakeFromLiteral(%q, token.FLOAT, 0)", s)
+		return fmt.Sprintf("%s.MakeFromLiteral(%q, %s.FLOAT, 0)", constantPkg, s, tokenPkg)
 	case constant.Complex:
 		re := p.constToLit("", constant.Real(c))
 		im := p.constToLit("", constant.Imag(c))
-		return fmt.Sprintf("constant.BinaryOp(%v, token.ADD, constan.MakeImag(%v))", re, im)
+		return fmt.Sprintf("%s.BinaryOp(%v, %s.ADD, %s.MakeImag(%v))", constantPkg, re, tokenPkg, constantPkg, im)
 	default:
 		panic("unreachable")
 	}
@@ -356,7 +358,7 @@ func (p *Program) ExportSource(e *Package, info *loader.PackageInfo) error {
 					var buf bytes.Buffer
 					printer.Fprint(&buf, p.fset, decl)
 					links = append(links, buf.String())
-					e.Funcs = append(e.Funcs, fmt.Sprintf("%q : reflect.ValueOf(%v)", fnName, lcName))
+					e.Funcs = append(e.Funcs, fmt.Sprintf("%q : %s.ValueOf(%v)", fnName, reflectImportPlaceholder, lcName))
 				}
 			}
 		}
@@ -405,14 +407,14 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 			if typ := t.Type().String(); strings.HasPrefix(typ, "untyped ") {
 				e.UntypedConsts = append(e.UntypedConsts, fmt.Sprintf("%q: {Typ: %q, Value: %v}", t.Name(), t.Type().String(), p.constToLit(named, t.Val())))
 			} else {
-				e.TypedConsts = append(e.TypedConsts, fmt.Sprintf("%q: {Typ: reflect.TypeOf(%v), Value: %v}", t.Name(), pkgName+"."+t.Name(), p.constToLit(named, t.Val())))
+				e.TypedConsts = append(e.TypedConsts, fmt.Sprintf("%q: {Typ: %s.TypeOf(%v), Value: %v}", t.Name(), reflectImportPlaceholder, pkgName+"."+t.Name(), p.constToLit(named, t.Val())))
 			}
 			if alias, ok := ma.aliasType(t.Type(), pkg); ok {
 				e.Alias = append(e.Alias, fmt.Sprintf("%q: %v", t.Name(), alias))
 			}
 			e.usedPkg = true
 		case *types.Var:
-			e.Vars = append(e.Vars, fmt.Sprintf("%q : reflect.ValueOf(&%v)", t.Name(), pkgName+"."+t.Name()))
+			e.Vars = append(e.Vars, fmt.Sprintf("%q : %s.ValueOf(&%v)", t.Name(), reflectImportPlaceholder, pkgName+"."+t.Name()))
 			if alias, ok := ma.aliasType(t.Type(), pkg); ok {
 				e.Alias = append(e.Alias, fmt.Sprintf("%q: %v", t.Name(), alias))
 			}
@@ -425,7 +427,7 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 				foundGeneric = true
 				continue
 			}
-			e.Funcs = append(e.Funcs, fmt.Sprintf("%q : reflect.ValueOf(%v)", t.Name(), pkgName+"."+t.Name()))
+			e.Funcs = append(e.Funcs, fmt.Sprintf("%q : %s.ValueOf(%v)", t.Name(), reflectImportPlaceholder, pkgName+"."+t.Name()))
 			if alias, ok := ma.aliasType(t.Type(), pkg); ok {
 				e.Alias = append(e.Alias, fmt.Sprintf("%q: %v", t.Name(), alias))
 			}
@@ -442,20 +444,20 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 				name := obj.Name()
 				switch typ := obj.Type().(type) {
 				case *types.Basic:
-					e.AliasTypes = append(e.AliasTypes, fmt.Sprintf("%q: reflect.TypeOf((*%v)(nil)).Elem()", name, typ.Name()))
+					e.AliasTypes = append(e.AliasTypes, fmt.Sprintf("%q: %s.TypeOf((*%v)(nil)).Elem()", name, reflectImportPlaceholder, typ.Name()))
 				// case *types.Named:
 				// 	e.AliasTypes = append(e.AliasTypes, fmt.Sprintf("%q: reflect.TypeOf((*%v.%v)(nil)).Elem()", name, sname, name))
 				default:
-					e.AliasTypes = append(e.AliasTypes, fmt.Sprintf("%q: reflect.TypeOf((*%v.%v)(nil)).Elem()", name, sname, name))
+					e.AliasTypes = append(e.AliasTypes, fmt.Sprintf("%q: %s.TypeOf((*%v.%v)(nil)).Elem()", name, reflectImportPlaceholder, sname, name))
 				}
 				e.usedPkg = true
 				continue
 			}
 			typeName := t.Name()
 			if types.IsInterface(t.Type()) {
-				e.Interfaces = append(e.Interfaces, fmt.Sprintf("%q : reflect.TypeOf((*%v.%v)(nil)).Elem()", typeName, pkgName, typeName))
+				e.Interfaces = append(e.Interfaces, fmt.Sprintf("%q : %s.TypeOf((*%v.%v)(nil)).Elem()", typeName, reflectImportPlaceholder, pkgName, typeName))
 			} else {
-				e.NamedTypes = append(e.NamedTypes, fmt.Sprintf("%q : reflect.TypeOf((*%v.%v)(nil)).Elem()", typeName, pkgName, typeName))
+				e.NamedTypes = append(e.NamedTypes, fmt.Sprintf("%q : %s.TypeOf((*%v.%v)(nil)).Elem()", typeName, reflectImportPlaceholder, pkgName, typeName))
 			}
 			if named, ok := t.Type().(*types.Named); ok {
 				if alias, ok := ma.aliasNamed(named, pkg); ok {
@@ -486,6 +488,13 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 		}
 		sort.Strings(inits)
 		e.AliasInit = fmt.Sprintf("var (\n\t%v\n)", strings.Join(inits, "\n\t"))
+	}
+	if flagDirectCalls != "" {
+		directCalls, err := generateDirectCalls(pkg, flagDirectCalls)
+		if err != nil {
+			return nil, err
+		}
+		e.directCalls = directCalls
 	}
 
 	return e, nil
@@ -570,18 +579,18 @@ func (p *Alias) aliasNamed(t *types.Named, pkg *types.Package) (string, bool) {
 	}
 
 	if len(list) == 0 {
-		return fmt.Sprintf(`&alias.Named{
+		return fmt.Sprintf(`&%s.Named{
 	Underlying: %v,
-}`, under), true
+}`, aliasImportPlaceholder, under), true
 	}
 
-	return fmt.Sprintf(`&alias.Named{
+	return fmt.Sprintf(`&%s.Named{
 	Underlying: %v,
-	Methods: map[string]*alias.Func{
+	Methods: map[string]*%s.Func{
 		%v,
 	},
 }`,
-		under, strings.Join(list, ",\n")), true
+		aliasImportPlaceholder, under, aliasImportPlaceholder, strings.Join(list, ",\n")), true
 }
 
 func (p *Alias) aliasType(t types.Type, pkg *types.Package) (string, bool) {
@@ -589,25 +598,25 @@ func (p *Alias) aliasType(t types.Type, pkg *types.Package) (string, bool) {
 	case *types.Named:
 	case *types.Pointer:
 		if s, ok := p.aliasType(t.Elem(), pkg); ok {
-			return fmt.Sprintf("&alias.Pointer{Elem:%v}", s), true
+			return fmt.Sprintf("&%s.Pointer{Elem:%v}", aliasImportPlaceholder, s), true
 		}
 	case *types.Array:
 		if s, ok := p.aliasType(t.Elem(), pkg); ok {
-			return fmt.Sprintf("&alias.Array{Elem:%v}", s), true
+			return fmt.Sprintf("&%s.Array{Elem:%v}", aliasImportPlaceholder, s), true
 		}
 	case *types.Chan:
 		if s, ok := p.aliasType(t.Elem(), pkg); ok {
-			return fmt.Sprintf("&alias.Chan{Elem:%v}", s), true
+			return fmt.Sprintf("&%s.Chan{Elem:%v}", aliasImportPlaceholder, s), true
 		}
 	case *types.Slice:
 		if s, ok := p.aliasType(t.Elem(), pkg); ok {
-			return fmt.Sprintf("&alias.Slice{Elem:%v}", s), true
+			return fmt.Sprintf("&%s.Slice{Elem:%v}", aliasImportPlaceholder, s), true
 		}
 	case *types.Map:
 		k, ok1 := p.aliasType(t.Key(), pkg)
 		v, ok2 := p.aliasType(t.Elem(), pkg)
 		if ok1 || ok2 {
-			return fmt.Sprintf("&alias.Map{Key:%v,Elem:%v}", k, v), true
+			return fmt.Sprintf("&%s.Map{Key:%v,Elem:%v}", aliasImportPlaceholder, k, v), true
 		}
 	case *types.Struct:
 		n := t.NumFields()
@@ -624,13 +633,13 @@ func (p *Alias) aliasType(t types.Type, pkg *types.Package) (string, bool) {
 			list[i] = s
 		}
 		if has {
-			return fmt.Sprintf("&alias.Struct{Fields:[]alias.Type{%v}}", strings.Join(list, ",")), true
+			return fmt.Sprintf("&%s.Struct{Fields:[]%s.Type{%v}}", aliasImportPlaceholder, aliasImportPlaceholder, strings.Join(list, ",")), true
 		}
 	case *types.Signature:
 		params, ok1 := p.aliasTuple(t.Params(), pkg)
 		results, ok2 := p.aliasTuple(t.Results(), pkg)
 		if ok1 || ok2 {
-			return fmt.Sprintf("&alias.Func{\nParams:%v,\nResults:%v,\n}", params, results), true
+			return fmt.Sprintf("&%s.Func{\nParams:%v,\nResults:%v,\n}", aliasImportPlaceholder, params, results), true
 		}
 	case *types.Interface:
 		return p.aliasInterface(t, pkg)
@@ -652,7 +661,7 @@ func (p *Alias) aliasType(t types.Type, pkg *types.Package) (string, bool) {
 		info := &aliasVar{}
 		if opkg == nil {
 			info.name = "alias_" + t.Obj().Name()
-			info.info = fmt.Sprintf("&alias.Builtin{Typ: %q}", t.Obj().Name())
+			info.info = fmt.Sprintf("&%s.Builtin{Typ: %q}", aliasImportPlaceholder, t.Obj().Name())
 		} else {
 			var named string
 			if opkg == pkg {
@@ -662,7 +671,7 @@ func (p *Alias) aliasType(t types.Type, pkg *types.Package) (string, bool) {
 				named = opkg.Path() + "." + t.Obj().Name()
 				info.name = "alias_" + opkg.Name() + "_" + t.Obj().Name()
 			}
-			info.info = fmt.Sprintf("&alias.Alias{Typ: %q}", named)
+			info.info = fmt.Sprintf("&%s.Alias{Typ: %q}", aliasImportPlaceholder, named)
 		}
 		base := info.name
 		for p.used[info.name] {
@@ -690,12 +699,12 @@ func (p *Alias) aliasInterface(t *types.Interface, pkg *types.Package) (string, 
 	if len(list) == 0 {
 		return "nil", false
 	}
-	return fmt.Sprintf(`&alias.Interface{
-	Methods: map[string]*alias.Func{
+	return fmt.Sprintf(`&%s.Interface{
+	Methods: map[string]*%s.Func{
 		%v,
 	},
 }`,
-		strings.Join(list, ",\n")), true
+		aliasImportPlaceholder, aliasImportPlaceholder, strings.Join(list, ",\n")), true
 }
 
 func (p *Alias) aliasTuple(tuple *types.Tuple, pkg *types.Package) (ret string, has bool) {
@@ -710,5 +719,5 @@ func (p *Alias) aliasTuple(tuple *types.Tuple, pkg *types.Package) (ret string, 
 	if !has {
 		return "nil", false
 	}
-	return fmt.Sprintf("[]alias.Type{%v}", strings.Join(list, ",")), has
+	return fmt.Sprintf("[]%s.Type{%v}", aliasImportPlaceholder, strings.Join(list, ",")), has
 }

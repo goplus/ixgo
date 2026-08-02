@@ -67,7 +67,9 @@ const (
 	LastMode                       = OptionLoadAllImethod             // Last Mode
 )
 
-// Loader types loader interface
+// Loader provides type and host-package loading. Packages must enumerate loaded
+// type packages whose host implementations can be returned by Installed;
+// interpreter construction uses that view to snapshot optional call adapters.
 type Loader interface {
 	Import(path string) (*types.Package, error)
 	Installed(path string) (*Package, bool)
@@ -295,7 +297,8 @@ func (ctx *Context) handlePanic(fr *frame, fn funcInstr, err error) error {
 	return err
 }
 
-// RegisterExternal register external value must variable address or func.
+// RegisterExternal overrides an external variable address or function for this
+// Context. Configure overrides before building an interpreter from the Context.
 func (ctx *Context) RegisterExternal(key string, i interface{}) {
 	if i == nil {
 		delete(ctx.override, key)
