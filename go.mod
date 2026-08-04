@@ -5,12 +5,12 @@ go 1.24.0
 require (
 	github.com/goplus/gogen v1.23.5
 	github.com/goplus/mod v0.21.1
-	github.com/goplus/reflectx v1.7.3
+	github.com/goplus/reflectx v1.7.4
 	github.com/goplus/xgo v1.7.5
 	github.com/peterh/liner v1.2.2
 	github.com/qiniu/x v1.18.0
 	github.com/visualfc/funcval v0.1.5
-	github.com/visualfc/gid v0.3.1
+	github.com/visualfc/gid v0.3.2
 	github.com/visualfc/goembed v0.3.4
 	github.com/visualfc/xtype v0.3.2
 	golang.org/x/mod v0.32.0
