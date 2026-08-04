@@ -1,0 +1,70 @@
+# Name: example.com/test.target
+# Package: example.com/test
+# Location: in.go:3:6
+func target() int:
+0:                                                                entry P:0 S:2
+	t0 = new []int (pv)                                              *[]int
+	t1 = new [3]int (slicelit)                                      *[3]int
+	t2 = &t1[0:int]                                                    *int
+	*t2 = 3:int
+	t3 = &t1[1:int]                                                    *int
+	*t3 = 4:int
+	t4 = &t1[2:int]                                                    *int
+	*t4 = 5:int
+	t5 = slice t1[:]                                                  []int
+	*t0 = t5
+	t6 = *t0                                                          []int
+	t7 = &t6[1:int]                                                    *int
+	t8 = *t7                                                            int
+	t9 = t8 != 9:int                                                   bool
+	if t9 goto 1 else 2
+1:                                                       if.then P:1 S:1 idom:0
+	t10 = *t0                                                         []int
+	t11 = new [1]int (varargs)                                      *[1]int
+	t12 = &t11[0:int]                                                  *int
+	*t12 = 9:int
+	t13 = slice t11[:]                                                []int
+	t14 = append(t10, t13...)                                         []int
+	*t0 = t14
+	jump 2
+2:                                                       if.done P:2 S:2 idom:0
+	t15 = make closure target$1 [t0]                            func() bool
+	t16 = t15()                                                        bool
+	if t16 goto 3 else 4
+3:                                                       if.then P:1 S:0 idom:2
+	t17 = *t0                                                         []int
+	t18 = &t17[0:int]                                                  *int
+	t19 = *t18                                                          int
+	return t19
+4:                                                       if.done P:1 S:0 idom:2
+	return 0:int
+
+# Name: example.com/test.target$1
+# Package: example.com/test
+# Location: in.go:8:11
+# Parent: target
+# Free variables:
+#   0:	pv *[]int
+func target$1() bool:
+0:                                                                entry P:0 S:2
+	t0 = *pv                                                          []int
+	t1 = len(t0)                                                        int
+	t2 = t1 == 101:int                                                 bool
+	if t2 goto 1 else 2
+1:                                                       if.then P:1 S:0 idom:0
+	return false:bool
+2:                                                       if.done P:1 S:2 idom:0
+	t3 = *pv                                                          []int
+	t4 = *pv                                                          []int
+	t5 = &t4[1:int]                                                    *int
+	t6 = *t5                                                            int
+	t7 = t6 & 1:int                                                     int
+	t8 = &t3[t7]                                                       *int
+	t9 = *t8                                                            int
+	t10 = t9 != 101:int                                                bool
+	if t10 goto 3 else 4
+3:                                                       if.then P:1 S:0 idom:2
+	return true:bool
+4:                                                       if.done P:1 S:0 idom:2
+	return false:bool
+

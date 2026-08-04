@@ -1,0 +1,52 @@
+# Name: example.com/test.target
+# Package: example.com/test
+# Location: in.go:3:6
+func target() bool:
+0:                                                                entry P:0 S:1
+	jump 1
+1:                                                      for.loop P:2 S:2 idom:0
+	t0 = phi [0: 0:int64, 6: t5] #a                                   int64
+	t2 = phi [0: 2:int64, 6: t12] #i                                  int64
+	t3 = t2 < 10:int64                                                 bool
+	if t3 goto 2 else 3
+2:                                                      for.body P:1 S:1 idom:1
+	jump 4
+3:                                                      for.done P:1 S:2 idom:1
+	t4 = t0 != 0:int64                                                 bool
+	if t4 goto 11 else 12
+4:                                                      for.loop P:2 S:2 idom:2
+	t5 = phi [2: t0, 8: t15] #a                                       int64
+	t7 = phi [2: t2, 8: t17] #j                                       int64
+	t8 = t7 < 10:int64                                                 bool
+	if t8 goto 5 else 6
+5:                                                      for.body P:1 S:2 idom:4
+	t9 = t2 * t7                                                      int64
+	t10 = 0:int64 % t9                                                int64
+	t11 = t10 == 0:int64                                               bool
+	if t11 goto 10 else 8
+6:                                                      for.done P:1 S:1 idom:4
+	t12 = t2 + 1:int64                                                int64
+	jump 1
+7:                                                       if.then P:1 S:1 idom:9
+	t13 = t2 * t7                                                     int64
+	t14 = 0:int64 / t13                                               int64
+	jump 8
+8:                                                       if.done P:4 S:1 idom:5
+	t15 = phi [5: t5, 10: t5, 9: t5, 7: t14] #a                       int64
+	t17 = t7 + 1:int64                                                int64
+	jump 4
+9:                                                    cond.true P:1 S:2 idom:10
+	t18 = t2 * t7                                                     int64
+	t19 = 0:int64 / t18                                               int64
+	t20 = t19 == 1:int64                                               bool
+	if t20 goto 7 else 8
+10:                                                    cond.true P:1 S:2 idom:5
+	t21 = t7 > 1:int64                                                 bool
+	if t21 goto 9 else 8
+11:                                                    binop.rhs P:1 S:1 idom:3
+	t22 = t0 != 0:int64                                                bool
+	jump 12
+12:                                                   binop.done P:2 S:0 idom:3
+	t23 = phi [3: false:bool, 11: t22] #&&                             bool
+	return t23
+

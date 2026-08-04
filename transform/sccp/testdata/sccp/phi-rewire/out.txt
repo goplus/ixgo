@@ -1,0 +1,15 @@
+# Name: example.com/test.parameter
+# Package: example.com/test
+# Location: in.go:15:6
+func parameter(input int, dynamic bool) int:
+0:                                                                entry P:0 S:0
+	return input
+
+# Name: example.com/test.target
+# Package: example.com/test
+# Location: in.go:3:6
+func target(input int) int:
+0:                                                                entry P:0 S:0
+	t0 = input > 0:int                                                 bool
+	return 1:int
+

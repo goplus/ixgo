@@ -1,0 +1,56 @@
+# Name: example.com/test.exceptional
+# Package: example.com/test
+# Location: in.go:43:6
+func exceptional(condition bool):
+0:                                                                entry P:0 S:0
+	t2 = -1:float64 / 0:float64                                     float64
+	*float64Sink = t2
+	t3 = -1:float64 * 0:float64                                     float64
+	*float64Sink = t3
+	t4 = -0:float64                                                 float64
+	*float64Sink = t4
+	return
+
+# Name: example.com/test.fold32
+# Package: example.com/test
+# Location: in.go:7:6
+func fold32(condition bool):
+0:                                                                entry P:0 S:0
+	*float32Sink = 10:float32
+	*float32Sink = 5:float32
+	*float32Sink = 18.75:float32
+	*float32Sink = 3:float32
+	*float32Sink = -7.5:float32
+	*boolSink = false:bool
+	*boolSink = true:bool
+	*boolSink = false:bool
+	*boolSink = false:bool
+	*boolSink = true:bool
+	*boolSink = true:bool
+	return
+
+# Name: example.com/test.fold64
+# Package: example.com/test
+# Location: in.go:25:6
+func fold64(condition bool):
+0:                                                                entry P:0 S:0
+	*float64Sink = 10:float64
+	*float64Sink = 5:float64
+	*float64Sink = 18.75:float64
+	*float64Sink = 3:float64
+	*float64Sink = -7.5:float64
+	*boolSink = false:bool
+	*boolSink = true:bool
+	*boolSink = false:bool
+	*boolSink = false:bool
+	*boolSink = true:bool
+	*boolSink = true:bool
+	return
+
+# Name: example.com/test.target
+# Package: example.com/test
+# Location: in.go:53:6
+func target() int:
+0:                                                                entry P:0 S:0
+	return 0:int
+

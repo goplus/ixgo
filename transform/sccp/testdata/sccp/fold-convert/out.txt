@@ -1,0 +1,48 @@
+# Name: example.com/test.conversions
+# Package: example.com/test
+# Location: in.go:11:6
+func conversions(condition bool):
+0:                                                                entry P:0 S:0
+	*int8Sink = -7:int8
+	*uint8Sink = 249:uint8
+	*float32Sink = -7:float32
+	*float64Sink = -7:float64
+	*int16Sink = 255:int16
+	*uint8Sink = 255:uint8
+	*float32Sink = 255:float32
+	*float64Sink = 255:float64
+	*float64Sink = 1.25:float64
+	*int32Sink = 2:int32
+	*uint8Sink = 2:uint8
+	*float32Sink = 2.9:float32
+	t16 = convert string <- int16 (-7:int16)                         string
+	*stringSink = t16
+	return
+
+# Name: example.com/test.dynamic
+# Package: example.com/test
+# Location: in.go:42:6
+func dynamic(value int16):
+0:                                                                entry P:0 S:0
+	t0 = convert float64 <- int16 (value)                           float64
+	*float64Sink = t0
+	return
+
+# Name: example.com/test.rejected
+# Package: example.com/test
+# Location: in.go:33:6
+func rejected(condition bool):
+0:                                                                entry P:0 S:0
+	t2 = convert int32 <- float64 (1e+30:float64)                     int32
+	*int32Sink = t2
+	t3 = convert uint8 <- float64 (-1:float64)                        uint8
+	*uint8Sink = t3
+	return
+
+# Name: example.com/test.target
+# Package: example.com/test
+# Location: in.go:46:6
+func target() int:
+0:                                                                entry P:0 S:0
+	return 0:int
+

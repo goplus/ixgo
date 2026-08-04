@@ -1,0 +1,143 @@
+# Name: example.com/test.booleans
+# Package: example.com/test
+# Location: in.go:72:6
+func booleans(condition bool):
+0:                                                                entry P:0 S:0
+	*boolSink = false:bool
+	*boolSink = false:bool
+	*boolSink = true:bool
+	return
+
+# Name: example.com/test.capture
+# Package: example.com/test
+# Location: in.go:112:6
+func capture(input int) func() int:
+0:                                                                entry P:0 S:0
+	t0 = new int (input)                                               *int
+	*t0 = input
+	t1 = make closure capture$1 [t0]                             func() int
+	return t1
+
+# Name: example.com/test.capture$1
+# Package: example.com/test
+# Location: in.go:113:9
+# Parent: capture
+# Free variables:
+#   0:	input *int
+func capture$1() int:
+0:                                                                entry P:0 S:0
+	t0 = *input                                                         int
+	t1 = t0 > 0:int                                                    bool
+	t3 = *input                                                         int
+	t4 = t3 + 1:int                                                     int
+	return t4
+
+# Name: example.com/test.dynamic
+# Package: example.com/test
+# Location: in.go:107:6
+func dynamic(input int8):
+0:                                                                entry P:0 S:0
+	t0 = -input                                                        int8
+	*int8Sink = t0
+	t1 = ^input                                                        int8
+	*int8Sink = t1
+	return
+
+# Name: example.com/test.negativeShift
+# Package: example.com/test
+# Location: in.go:99:6
+func negativeShift(condition bool):
+0:                                                                entry P:0 S:0
+	t1 = 1:int8 << -1:int                                              int8
+	*int8Sink = t1
+	return
+
+# Name: example.com/test.signed
+# Package: example.com/test
+# Location: in.go:10:6
+func signed(condition bool):
+0:                                                                entry P:0 S:0
+	*int8Sink = 10:int8
+	*int8Sink = 4:int8
+	*int8Sink = 21:int8
+	*int8Sink = 2:int8
+	*int8Sink = 1:int8
+	*int8Sink = 3:int8
+	*int8Sink = 7:int8
+	*int8Sink = 4:int8
+	*int8Sink = 4:int8
+	*int8Sink = -7:int8
+	*int8Sink = -8:int8
+	*int8Sink = 28:int8
+	*int8Sink = 1:int8
+	*boolSink = false:bool
+	*boolSink = true:bool
+	*boolSink = false:bool
+	*boolSink = false:bool
+	*boolSink = true:bool
+	*boolSink = true:bool
+	return
+
+# Name: example.com/test.signedZero
+# Package: example.com/test
+# Location: in.go:91:6
+func signedZero(condition bool):
+0:                                                                entry P:0 S:0
+	t1 = 1:int8 % 0:int8                                               int8
+	*int8Sink = t1
+	return
+
+# Name: example.com/test.target
+# Package: example.com/test
+# Location: in.go:127:6
+func target() int:
+0:                                                                entry P:0 S:0
+	return 0:int
+
+# Name: example.com/test.unsigned
+# Package: example.com/test
+# Location: in.go:46:6
+func unsigned(condition bool):
+0:                                                                entry P:0 S:0
+	*uint8Sink = 10:uint8
+	*uint8Sink = 4:uint8
+	*uint8Sink = 21:uint8
+	*uint8Sink = 2:uint8
+	*uint8Sink = 1:uint8
+	*uint8Sink = 3:uint8
+	*uint8Sink = 7:uint8
+	*uint8Sink = 4:uint8
+	*uint8Sink = 4:uint8
+	*uint8Sink = 249:uint8
+	*uint8Sink = 248:uint8
+	*uint8Sink = 28:uint8
+	*uint8Sink = 1:uint8
+	*boolSink = false:bool
+	*boolSink = true:bool
+	*boolSink = false:bool
+	*boolSink = false:bool
+	*boolSink = true:bool
+	*boolSink = true:bool
+	return
+
+# Name: example.com/test.unsignedZero
+# Package: example.com/test
+# Location: in.go:82:6
+func unsignedZero(condition bool):
+0:                                                                entry P:0 S:0
+	t1 = 1:uint8 / 0:uint8                                            uint8
+	*uint8Sink = t1
+	t2 = 1:uint8 % 0:uint8                                            uint8
+	*uint8Sink = t2
+	return
+
+# Name: example.com/test.widths
+# Package: example.com/test
+# Location: in.go:36:6
+func widths(condition bool):
+0:                                                                entry P:0 S:0
+	*uint32Sink = 2:uint32
+	*uint64Sink = 3:uint64
+	*uintptrSink = 4:uintptr
+	return
+

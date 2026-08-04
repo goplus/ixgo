@@ -1,0 +1,90 @@
+# Name: example.com/test.assertions
+# Package: example.com/test
+# Location: in.go:17:6
+func assertions() bool:
+0:                                                                entry P:0 S:2
+	t0 = make interface{} <- int (5:int)                        interface{}
+	t1 = typeassert,ok t0.(int)                        (value int, ok bool)
+	t2 = extract t1 #0                                                  int
+	t3 = extract t1 #1                                                 bool
+	if t3 goto 1 else 2
+1:                                                     binop.rhs P:1 S:1 idom:0
+	t4 = t2 == 5:int                                                   bool
+	jump 2
+2:                                                    binop.done P:2 S:0 idom:0
+	t5 = phi [0: false:bool, 1: t4] #&&                                bool
+	return t5
+
+# Name: example.com/test.interfaces
+# Package: example.com/test
+# Location: in.go:3:6
+func interfaces() bool:
+0:                                                                entry P:0 S:2
+	t0 = nil:interface{} == nil:interface{}                            bool
+	t1 = interfaces$1(nil:interface{}, nil:interface{})                bool
+	t2 = t0 == t1                                                      bool
+	if t2 goto 3 else 2
+1:                                                     binop.rhs P:1 S:1 idom:3
+	t3 = make interface{} <- int (5:int)                        interface{}
+	t4 = make interface{} <- int (5:int)                        interface{}
+	t5 = t3 == t4                                                      bool
+	t6 = make interface{} <- int (5:int)                        interface{}
+	t7 = interfaces$3(5:int, t6)                                       bool
+	t8 = t5 == t7                                                      bool
+	jump 2
+2:                                                    binop.done P:3 S:0 idom:0
+	t9 = phi [0: false:bool, 3: false:bool, 1: t8] #&&                 bool
+	return t9
+3:                                                     cond.true P:1 S:2 idom:0
+	t10 = make interface{} <- int (5:int)                       interface{}
+	t11 = make interface{} <- int (5:int)                       interface{}
+	t12 = t11 == t10                                                   bool
+	t13 = make interface{} <- int (5:int)                       interface{}
+	t14 = interfaces$2(t13, 5:int)                                     bool
+	t15 = t12 == t14                                                   bool
+	if t15 goto 1 else 2
+
+# Name: example.com/test.interfaces$1
+# Package: example.com/test
+# Location: in.go:8:8
+# Parent: interfaces
+func interfaces$1(i1 interface{}, i2 interface{}) bool:
+0:                                                                entry P:0 S:0
+	t0 = i1 == i2                                                      bool
+	return t0
+
+# Name: example.com/test.interfaces$2
+# Package: example.com/test
+# Location: in.go:9:8
+# Parent: interfaces
+func interfaces$2(n interface{}, i int) bool:
+0:                                                                entry P:0 S:0
+	t0 = make interface{} <- int (i)                            interface{}
+	t1 = n == t0                                                       bool
+	return t1
+
+# Name: example.com/test.interfaces$3
+# Package: example.com/test
+# Location: in.go:10:8
+# Parent: interfaces
+func interfaces$3(i int, n interface{}) bool:
+0:                                                                entry P:0 S:0
+	t0 = make interface{} <- int (i)                            interface{}
+	t1 = t0 == n                                                       bool
+	return t1
+
+# Name: example.com/test.target
+# Package: example.com/test
+# Location: in.go:23:6
+func target() int:
+0:                                                                entry P:0 S:2
+	t0 = interfaces()                                                  bool
+	if t0 goto 3 else 2
+1:                                                       if.then P:1 S:0 idom:3
+	return 0:int
+2:                                                       if.done P:2 S:0 idom:0
+	return 1:int
+3:                                                     cond.true P:1 S:2 idom:0
+	t1 = assertions()                                                  bool
+	if t1 goto 1 else 2
+
