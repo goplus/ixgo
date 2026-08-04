@@ -72,7 +72,12 @@ func resolveInvokeDirectCall(interp *Interp, receiver reflect.Type, method strin
 		return nil, false
 	}
 	binding, ok := lookupDirectCallBinding(interp, pkgPath, key)
-	if !ok || !signature.matches(binding.Target.Type(), receiver) || !binding.matchesTarget(reflectFunc, reflectFunc.Type()) {
+	if !ok || !signature.matches(binding.Target.Type(), receiver) {
+		return nil, false
+	}
+	// The signature is validated above; this check only confirms that the
+	// binding points at the method expression resolved for this receiver.
+	if !binding.matchesTarget(reflectFunc, reflectFunc.Type()) {
 		return nil, false
 	}
 	return binding.Adapter, true

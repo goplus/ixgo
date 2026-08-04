@@ -31,9 +31,8 @@ type DirectCallContext struct {
 	args   []register
 }
 
-// DirectCallArg returns the argument at index using its generated static type. A
-// nil interface value is converted to the zero value of T, matching the
-// reflective external-call path.
+// DirectCallArg returns the argument at index using its generated static type.
+// A nil interface value is converted to the zero value of T.
 func DirectCallArg[T any](ctx DirectCallContext, index int) T {
 	v := ctx.frame.reg(ctx.args[index])
 	if v == nil {

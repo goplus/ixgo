@@ -63,7 +63,7 @@ func init() {
 	flag.BoolVar(&flagExportAlias, "alias", false, "export types alias data")
 	flag.BoolVar(&flagExportLazy, "lazy", false, "deferred initialization of registered packages to first use")
 	flag.StringVar(&flagAliasTypes, "alias_types", "", "set export types alias list, split by ;")
-	flag.StringVar(&flagDirectCalls, "directcalls", "", "generate direct adapters for calls (supports all, *, Type.*, and *.* selectors)")
+	flag.StringVar(&flagDirectCalls, "directcalls", "", "generate direct adapters for Func, Type.Method, *, Type.*, *.*, or all selectors (separate selectors with , or ;)")
 }
 
 // Cmd - ixgo build
