@@ -392,6 +392,7 @@ func (g *directCallGenerator) adapterName(selector string, receiver types.Type) 
 	return allocateIdentifier(base, g.usedNames)
 }
 
+// directCallMethodKey must match the runtime key format in direct_call.go.
 func directCallMethodKey(receiver types.Type, method string) string {
 	qualified := types.TypeString(receiver, func(pkg *types.Package) string { return pkg.Path() })
 	return "(" + qualified + ")." + method

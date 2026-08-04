@@ -140,6 +140,7 @@ func (p *Package) merge(same *Package) {
 		if p.DirectCalls == nil {
 			p.DirectCalls = make(map[string]DirectCallBinding)
 		}
+		// Registration is setup-only; later registrations replace prior bindings.
 		for k, v := range same.DirectCalls {
 			p.DirectCalls[k] = v
 		}
@@ -184,6 +185,8 @@ func RegisterExternal(key string, i interface{}) {
 	}
 }
 
+// lookupExternal is for interpreter and instruction setup. Keep it out of
+// per-call closures to avoid a process-wide lock on the dispatch path.
 func lookupExternal(key string) (reflect.Value, bool) {
 	externMu.RLock()
 	v, ok := externValues[key]

@@ -298,7 +298,8 @@ func (ctx *Context) handlePanic(fr *frame, fn funcInstr, err error) error {
 }
 
 // RegisterExternal overrides an external variable address or function for this
-// Context. Configure overrides before building an interpreter from the Context.
+// Context. Context overrides are not synchronized; configure them before
+// building an interpreter from the Context.
 func (ctx *Context) RegisterExternal(key string, i interface{}) {
 	if i == nil {
 		delete(ctx.override, key)

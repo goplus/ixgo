@@ -156,6 +156,8 @@ func (r *invokeResolver) resolveUncached(receiver reflect.Type) (invokeTarget, b
 		return invokeTarget{}, true
 	}
 
+	// reflectx-synthesized receiver types are recorded in msets during program
+	// visitation, so only stable host methods reach this cacheable branch.
 	reflectFunc, ok := findExternMethod(receiver, r.name)
 	if !ok {
 		return invokeTarget{}, true
