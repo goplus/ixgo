@@ -7,10 +7,21 @@ A fast and fully compatible Go language interpreter.
 
 ### Go Version
 
-- Go1.24 ~ Go1.26
-- macOS Linux Windows  WebAssembly.
+- Go 1.24 ~ 1.26
 
-### ABI
+### Compilers
+
+- Go (gc)
+- [LLGo](https://github.com/goplus/llgo)
+
+### Platforms
+
+- macOS
+- Linux
+- Windows
+- WebAssembly
+
+### Go ABI
 
 - ABI0 stack-based ABI
 - ABIInternal [register-based Go calling convention proposal](https://golang.org/design/40724-register-calling)
