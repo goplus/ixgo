@@ -1206,9 +1206,9 @@ func (i *Interp) findMethod(typ reflect.Type, mname string) (fn *ssa.Function, o
 func makeCallMethodInstr(interp *Interp, instr ssa.Value, call *ssa.CallCommon, ir register, iv register, ia []register) func(fr *frame) {
 	mname := call.Method.Name()
 	ia = append([]register{iv}, ia...)
-	var found bool
-	var ext reflect.Value
 	return func(fr *frame) {
+		var found bool
+		var ext reflect.Value
 		v := fr.reg(iv)
 		if v == nil {
 			panic(fr.runtimeError(instr, "runtime error: invalid memory address or nil pointer dereference"))
