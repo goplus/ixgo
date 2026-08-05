@@ -138,6 +138,37 @@ func main() {
 	}
 }
 
+func TestLoopPhiParallelAssignment(t *testing.T) {
+	src := `package main
+
+func swapLoop(n int) (int, int) {
+	x, y := 1, 2
+	for i := 0; i < n; i++ {
+		x, y = y, x
+	}
+	return x, y
+}
+
+func main() {
+	tests := [...]struct{ n, x, y int }{
+		{0, 1, 2},
+		{1, 2, 1},
+		{2, 1, 2},
+		{3, 2, 1},
+	}
+	for _, test := range tests {
+		x, y := swapLoop(test.n)
+		if x != test.x || y != test.y {
+			panic("bad swap")
+		}
+	}
+}
+`
+	if _, err := ixgo.RunFile("main.go", src, nil, 0); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRegisterExternal(t *testing.T) {
 	ctx := ixgo.NewContext(0)
 	ctx.RegisterExternal("main.call", func(i, j int) int {

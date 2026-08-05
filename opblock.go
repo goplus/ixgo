@@ -381,17 +381,46 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 			}
 		}
 	case *ssa.Phi:
-		ir := pfn.regIndex(instr)
-		ie := make([]register, len(instr.Edges))
-		for i, v := range instr.Edges {
-			ie[i] = pfn.regIndex(v)
+		block := instr.Block()
+		if block.Instrs[0] != instr {
+			return func(fr *frame) {}
+		}
+		var phis []*ssa.Phi
+		for _, blockInstr := range block.Instrs {
+			phi, ok := blockInstr.(*ssa.Phi)
+			if !ok {
+				break
+			}
+			phis = append(phis, phi)
+		}
+		ir := make([]register, len(phis))
+		ie := make([][]register, len(phis))
+		for i, phi := range phis {
+			ir[i] = pfn.regIndex(phi)
+			ie[i] = make([]register, len(phi.Edges))
+			for j, edge := range phi.Edges {
+				ie[i][j] = pfn.regIndex(edge)
+			}
 		}
 		return func(fr *frame) {
-			for i, pred := range instr.Block().Preds {
+			predIndex := -1
+			for i, pred := range block.Preds {
 				if fr.pred == pred.Index {
-					fr.setReg(ir, fr.reg(ie[i]))
+					predIndex = i
 					break
 				}
+			}
+			if predIndex < 0 {
+				return
+			}
+			// Phi nodes are parallel assignments: read every input before
+			// overwriting any register that another phi may use.
+			values := make([]value, len(phis))
+			for i := range phis {
+				values[i] = fr.reg(ie[i][predIndex])
+			}
+			for i := range phis {
+				fr.setReg(ir[i], values[i])
 			}
 		}
 	case *ssa.Call:
