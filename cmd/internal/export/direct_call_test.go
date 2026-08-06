@@ -102,8 +102,8 @@ func TestGenerateDirectCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Join(append(testRegistryEntries(output), testAdapterDeclarations(output)...), "\n")
-	want := `"Add": {Target: reflect.ValueOf(q.Add), Adapter: func_Add}
-"(*List).Append": {Target: reflect.ValueOf((*q.List).Append), Adapter: method_ptr_List_Append}
+	want := `"Add": func_Add
+"(*List).Append": method_ptr_List_Append
 func func_Add(ctx ixgo.DirectCallContext) {
 	ctx.SetResult(q.Add(ixgo.DirectCallArg[int](ctx, 0), ixgo.DirectCallArg[int](ctx, 1)))
 }
@@ -158,7 +158,7 @@ func TestGenerateDirectCallDeduplicatesReceiverAlias(t *testing.T) {
 	}
 	entries := strings.Join(testRegistryEntries(output), "\n")
 	for _, key := range []string{
-		`"List.Len"`,
+		`"(List).Len"`,
 		`"(*List).Len"`,
 	} {
 		if got := strings.Count(entries, key); got != 1 {
@@ -204,7 +204,7 @@ func TestGenerateDirectCallWildcards(t *testing.T) {
 		t.Fatalf("deduplicated wildcard bindings = %d; want 4", got)
 	}
 	entries = strings.Join(testRegistryEntries(output), "\n")
-	for _, want := range []string{`"Value.Int"`, `"(*Value).Int"`} {
+	for _, want := range []string{`"(Value).Int"`, `"(*Value).Int"`} {
 		if !strings.Contains(entries, want) {
 			t.Fatalf("all-method wildcard does not contain %s:\n%s", want, entries)
 		}

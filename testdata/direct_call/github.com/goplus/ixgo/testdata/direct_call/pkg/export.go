@@ -35,11 +35,11 @@ func init() {
 			},
 		}
 	})
-	ixgo.RegisterDirectCalls("github.com/goplus/ixgo/testdata/direct_call/pkg", map[string]ixgo.DirectCallBinding{
-		"(*Number).Value": {Target: reflect.ValueOf((*q.Number).Value), Adapter: method_ptr_Number_Value},
-		"Add":             {Target: reflect.ValueOf(q.Add), Adapter: func_Add},
-		"Inspect":         {Target: reflect.ValueOf(q.Inspect), Adapter: func_Inspect},
-		"Number.Value":    {Target: reflect.ValueOf(q.Number.Value), Adapter: method_Number_Value},
+	ixgo.RegisterDirectCalls("github.com/goplus/ixgo/testdata/direct_call/pkg", map[string]ixgo.DirectCallAdapter{
+		"(*Number).Value": method_ptr_Number_Value,
+		"(Number).Value":  method_Number_Value,
+		"Add":             func_Add,
+		"Inspect":         func_Inspect,
 	})
 }
 

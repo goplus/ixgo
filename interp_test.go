@@ -41,6 +41,7 @@ import (
 	_ "github.com/goplus/ixgo/pkg/bytes"
 	_ "github.com/goplus/ixgo/pkg/errors"
 	_ "github.com/goplus/ixgo/pkg/fmt"
+	_ "github.com/goplus/ixgo/pkg/go/constant"
 	_ "github.com/goplus/ixgo/pkg/io"
 	_ "github.com/goplus/ixgo/pkg/iter"
 	_ "github.com/goplus/ixgo/pkg/log"
@@ -54,6 +55,7 @@ import (
 	_ "github.com/goplus/ixgo/pkg/time"
 	_ "github.com/goplus/ixgo/testdata/alias/github.com/goplus/ixgo/testdata/alias/msg"
 	_ "github.com/goplus/ixgo/testdata/alias/github.com/goplus/ixgo/testdata/alias/pkg"
+	_ "github.com/goplus/ixgo/testdata/direct_call/github.com/goplus/ixgo/testdata/direct_call/pkg"
 )
 
 // These are files in github.com/goplus/ixgo/testdata/.
@@ -3830,6 +3832,12 @@ func main() {
 		t.Fatal("must error")
 	}
 	if err.Error() != `duplicated definition of symbol pkg.v, from main and pkg` {
+		t.Fatal(err)
+	}
+}
+
+func TestGeneratedDirectCalls(t *testing.T) {
+	if _, err := ixgo.Run("./testdata/direct_call/cmd", nil, 0); err != nil {
 		t.Fatal(err)
 	}
 }
