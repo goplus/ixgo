@@ -14,22 +14,19 @@
  * limitations under the License.
  */
 
-package directfixture
+package ixgo_test
 
 import (
-	"go/constant"
-	"reflect"
+	"testing"
+
+	"github.com/goplus/ixgo"
+	_ "github.com/goplus/ixgo/pkg/go/constant"
+	_ "github.com/goplus/ixgo/pkg/reflect"
+	_ "github.com/goplus/ixgo/testdata/direct_call/github.com/goplus/ixgo/testdata/direct_call/pkg"
 )
 
-const Marker = 1
-
-type Value int
-
-func Inspect(typ reflect.Type, value constant.Value) int {
-	_, _ = typ, value
-	return 0
-}
-
-func (v Value) Number() int {
-	return int(v)
+func TestGeneratedDirectCalls(t *testing.T) {
+	if _, err := ixgo.Run("./testdata/direct_call/cmd", nil, 0); err != nil {
+		t.Fatal(err)
+	}
 }

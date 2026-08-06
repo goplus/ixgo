@@ -21,6 +21,7 @@ import (
 	"go/token"
 	"go/types"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -39,11 +40,9 @@ type directCallBinding struct {
 }
 
 type directCallRenderer struct {
-	pkg          *types.Package
-	pkgAlias     string
-	runtimeAlias string
-	reflectAlias string
-	imports      *importPlanner
+	pkg       *types.Package
+	pkgAlias  string
+	addImport func(string, string) string
 }
 
 func (r *directCallRenderer) typeExpr(typ types.Type) string {
@@ -52,7 +51,7 @@ func (r *directCallRenderer) typeExpr(typ types.Type) string {
 		if pkg == r.pkg {
 			return r.pkgAlias
 		}
-		return r.imports.addPackage(pkg, importGroupSupport)
+		return r.addImport(pkg.Path(), pkg.Name())
 	})
 }
 
@@ -68,13 +67,13 @@ func (r *directCallRenderer) targetExpr(binding directCallBinding) string {
 }
 
 func (r *directCallRenderer) registryEntry(binding directCallBinding) string {
-	return fmt.Sprintf("%q: {Target: %s.ValueOf(%s), Adapter: %s}", binding.key, r.reflectAlias, r.targetExpr(binding), binding.adapterName)
+	return fmt.Sprintf("%q: {Target: reflect.ValueOf(%s), Adapter: %s}", binding.key, r.targetExpr(binding), binding.adapterName)
 }
 
 func (r *directCallRenderer) adapterDeclaration(binding directCallBinding) string {
 	args := make([]string, len(binding.argumentTypes))
 	for i, typ := range binding.argumentTypes {
-		args[i] = fmt.Sprintf("%s.DirectCallArg[%s](ctx, %d)", r.runtimeAlias, r.typeExpr(typ), i)
+		args[i] = fmt.Sprintf("ixgo.DirectCallArg[%s](ctx, %d)", r.typeExpr(typ), i)
 	}
 	if binding.variadic {
 		args[len(args)-1] += "..."
@@ -83,7 +82,7 @@ func (r *directCallRenderer) adapterDeclaration(binding directCallBinding) strin
 	if binding.hasResult {
 		call = "ctx.SetResult(" + call + ")"
 	}
-	return fmt.Sprintf("func %s(ctx %s.DirectCallContext) {\n\t%s\n}", binding.adapterName, r.runtimeAlias, call)
+	return fmt.Sprintf("func %s(ctx ixgo.DirectCallContext) {\n\t%s\n}", binding.adapterName, call)
 }
 
 type directCallOutput struct {
@@ -95,21 +94,11 @@ func (o directCallOutput) isEmpty() bool {
 	return len(o.bindings) == 0
 }
 
-func (o directCallOutput) declarationNames() []string {
-	names := make([]string, len(o.bindings))
-	for i, binding := range o.bindings {
-		names[i] = binding.adapterName
-	}
-	return names
-}
-
-func (o directCallOutput) render(pkgAlias, runtimeAlias, reflectAlias string, imports *importPlanner) (entries, declarations []string) {
+func (o directCallOutput) render(pkgAlias string, addImport func(string, string) string) (entries, declarations []string) {
 	renderer := directCallRenderer{
-		pkg:          o.pkg,
-		pkgAlias:     pkgAlias,
-		runtimeAlias: runtimeAlias,
-		reflectAlias: reflectAlias,
-		imports:      imports,
+		pkg:       o.pkg,
+		pkgAlias:  pkgAlias,
+		addImport: addImport,
 	}
 	entries = make([]string, len(o.bindings))
 	declarations = make([]string, len(o.bindings))
@@ -380,16 +369,21 @@ func (g *directCallGenerator) newBinding(selector string, fn *types.Func, receiv
 func (g *directCallGenerator) adapterName(selector string, receiver types.Type) string {
 	var base string
 	if receiver == nil {
-		base = "qexpDirectCallFunc_" + selector
+		base = "func_" + selector
 	} else {
 		receiverName, name, _ := strings.Cut(selector, ".")
 		if _, pointer := types.Unalias(receiver).(*types.Pointer); pointer {
-			base = "qexpDirectCallMethod_Ptr_" + receiverName + "_" + name
+			base = "method_ptr_" + receiverName + "_" + name
 		} else {
-			base = "qexpDirectCallMethod_" + receiverName + "_" + name
+			base = "method_" + receiverName + "_" + name
 		}
 	}
-	return allocateIdentifier(base, g.usedNames)
+	name := base
+	for suffix := 2; g.usedNames[name]; suffix++ {
+		name = base + strconv.Itoa(suffix)
+	}
+	g.usedNames[name] = true
+	return name
 }
 
 // directCallMethodKey must match the runtime key format in direct_call.go.

@@ -1,4 +1,4 @@
-package directcall
+package host
 
 // Counter is a host type used by direct-call interpreter tests.
 type Counter int
@@ -8,7 +8,7 @@ func (c *Counter) Value() int {
 	return int(*c)
 }
 
-// FallbackCounter is a host type without a generated direct-call adapter.
+// FallbackCounter is a host type without a direct-call adapter.
 type FallbackCounter int
 
 // Value returns the current fallback counter value.

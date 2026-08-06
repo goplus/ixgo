@@ -17,13 +17,8 @@
 package export
 
 import (
-	"go/parser"
 	"go/token"
 	"go/types"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -58,9 +53,16 @@ func addTestType(pkg *types.Package, name string) *types.Named {
 }
 
 func renderTestDirectCalls(output directCallOutput) (entries, declarations, imports []string) {
-	planner := newImportPlanner(output.declarationNames()...)
-	entries, declarations = output.render("q", "ixgo", "reflect", planner)
-	return entries, declarations, planner.declarations()
+	aliases := make(map[string]string)
+	entries, declarations = output.render("q", func(path, name string) string {
+		if alias, ok := aliases[path]; ok {
+			return alias
+		}
+		aliases[path] = name
+		imports = append(imports, strconv.Quote(path))
+		return name
+	})
+	return
 }
 
 func testRegistryEntries(output directCallOutput) []string {
@@ -100,12 +102,12 @@ func TestGenerateDirectCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Join(append(testRegistryEntries(output), testAdapterDeclarations(output)...), "\n")
-	want := `"Add": {Target: reflect.ValueOf(q.Add), Adapter: qexpDirectCallFunc_Add}
-"(*List).Append": {Target: reflect.ValueOf((*q.List).Append), Adapter: qexpDirectCallMethod_Ptr_List_Append}
-func qexpDirectCallFunc_Add(ctx ixgo.DirectCallContext) {
+	want := `"Add": {Target: reflect.ValueOf(q.Add), Adapter: func_Add}
+"(*List).Append": {Target: reflect.ValueOf((*q.List).Append), Adapter: method_ptr_List_Append}
+func func_Add(ctx ixgo.DirectCallContext) {
 	ctx.SetResult(q.Add(ixgo.DirectCallArg[int](ctx, 0), ixgo.DirectCallArg[int](ctx, 1)))
 }
-func qexpDirectCallMethod_Ptr_List_Append(ctx ixgo.DirectCallContext) {
+func method_ptr_List_Append(ctx ixgo.DirectCallContext) {
 	(*q.List).Append(ixgo.DirectCallArg[*q.List](ctx, 0), ixgo.DirectCallArg[any](ctx, 1))
 }`
 	if got != want {
@@ -125,13 +127,13 @@ func TestGenerateDirectCallValueMethodAndVariadicFunction(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Join(testAdapterDeclarations(output), "\n")
-	want := `func qexpDirectCallFunc_Collect(ctx ixgo.DirectCallContext) {
+	want := `func func_Collect(ctx ixgo.DirectCallContext) {
 	ctx.SetResult(q.Collect(ixgo.DirectCallArg[string](ctx, 0), ixgo.DirectCallArg[[]int](ctx, 1)...))
 }
-func qexpDirectCallMethod_List_Len(ctx ixgo.DirectCallContext) {
+func method_List_Len(ctx ixgo.DirectCallContext) {
 	ctx.SetResult(q.List.Len(ixgo.DirectCallArg[q.List](ctx, 0)))
 }
-func qexpDirectCallMethod_Ptr_List_Len(ctx ixgo.DirectCallContext) {
+func method_ptr_List_Len(ctx ixgo.DirectCallContext) {
 	ctx.SetResult((*q.List).Len(ixgo.DirectCallArg[*q.List](ctx, 0)))
 }`
 	if got != want {
@@ -344,102 +346,14 @@ func TestGenerateDirectCallAdapterNamesDoNotCollide(t *testing.T) {
 	}
 	got := strings.Join(testAdapterDeclarations(output), "\n")
 	for _, name := range []string{
-		"qexpDirectCallMethod_A_B_C",
-		"qexpDirectCallMethod_A_B_C2",
-		"qexpDirectCallMethod_Ptr_A_B_C",
-		"qexpDirectCallMethod_Ptr_A_B_C2",
+		"method_A_B_C",
+		"method_A_B_C2",
+		"method_ptr_A_B_C",
+		"method_ptr_A_B_C2",
 	} {
 		if !strings.Contains(got, "func "+name+"(") {
 			t.Fatalf("generated adapters do not contain %q:\n%s", name, got)
 		}
-	}
-}
-
-func TestGeneratedDirectCallsCompileWithSharedImports(t *testing.T) {
-	const fixturePath = "github.com/goplus/ixgo/cmd/internal/export/testdata/directfixture"
-	prog := NewProgram(nil)
-	if err := prog.Load([]string{fixturePath}); err != nil {
-		t.Fatal(err)
-	}
-	pkg, err := prog.ExportPkg(fixturePath, "q")
-	if err != nil {
-		t.Fatal(err)
-	}
-	directCalls, err := generateDirectCalls(prog.prog.Package(fixturePath).Pkg, "Inspect,Value.Number")
-	if err != nil {
-		t.Fatal(err)
-	}
-	pkg.directCalls = directCalls
-
-	source, err := exportPkg(pkg, "q", "", nil, "export")
-	if err != nil {
-		t.Fatal(err)
-	}
-	file, err := parser.ParseFile(token.NewFileSet(), "export.go", source, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	importCounts := make(map[string]int)
-	for _, spec := range file.Imports {
-		path, err := strconv.Unquote(spec.Path.Value)
-		if err != nil {
-			t.Fatal(err)
-		}
-		importCounts[path]++
-	}
-	for _, path := range []string{"reflect", "go/constant"} {
-		if got := importCounts[path]; got != 1 {
-			t.Fatalf("generated import %q count = %d; want 1\n%s", path, got, source)
-		}
-	}
-	for _, key := range []string{
-		`"Value.Number"`,
-		`"(*Value).Number"`,
-	} {
-		if !strings.Contains(string(source), key) {
-			t.Fatalf("generated source does not contain %s\n%s", key, source)
-		}
-	}
-	for _, want := range []string{
-		`ixgo.RegisterPackage(&ixgo.Package{`,
-		`ixgo.RegisterDirectCalls("` + fixturePath + `", map[string]ixgo.DirectCallBinding{`,
-	} {
-		if !strings.Contains(string(source), want) {
-			t.Fatalf("generated source does not contain %q\n%s", want, source)
-		}
-	}
-	if strings.Contains(string(source), "DirectCalls:") {
-		t.Fatalf("generated package still embeds direct calls\n%s", source)
-	}
-
-	_, testFile, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("cannot locate repository root")
-	}
-	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(testFile), "..", "..", ".."))
-	tempDir := t.TempDir()
-	goMod := "module github.com/goplus/ixgo/cmd/internal/export/generatedtest\n\n" +
-		"go 1.24.0\n\n" +
-		"require github.com/goplus/ixgo v0.0.0\n\n" +
-		"replace github.com/goplus/ixgo => " + filepath.ToSlash(repoRoot) + "\n"
-	if err := os.WriteFile(filepath.Join(tempDir, "go.mod"), []byte(goMod), 0o666); err != nil {
-		t.Fatal(err)
-	}
-	goSum, err := os.ReadFile(filepath.Join(repoRoot, "go.sum"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(tempDir, "go.sum"), goSum, 0o666); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(tempDir, "export.go"), source, 0o666); err != nil {
-		t.Fatal(err)
-	}
-	cmd := exec.Command("go", "test", "-mod=mod", "-run", "^$", ".")
-	cmd.Dir = tempDir
-	cmd.Env = append(os.Environ(), "GOWORK=off")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("generated package does not compile: %v\n%s\n--- source ---\n%s", err, output, source)
 	}
 }
 
@@ -450,17 +364,17 @@ func TestExportPkgsReturnsDirectCallError(t *testing.T) {
 		flagDirectCalls, flagExportDir, flagCustomPkg, flagExportCode = oldDirectCalls, oldExportDir, oldCustomPkg, oldExportCode
 	})
 
-	if err := ExportPkgs([]string{"github.com/goplus/ixgo/testdata/directcall"}, nil); err == nil {
+	if err := ExportPkgs([]string{"github.com/goplus/ixgo/testdata/direct_call/pkg"}, nil); err == nil {
 		t.Fatal("invalid direct-call selector did not fail the export")
 	}
 
-	flagDirectCalls, flagCustomPkg = "Counter.Value", "example.com/custom"
-	if err := ExportPkgs([]string{"github.com/goplus/ixgo/testdata/directcall"}, nil); err == nil {
+	flagDirectCalls, flagCustomPkg = "Number.Value", "example.com/custom"
+	if err := ExportPkgs([]string{"github.com/goplus/ixgo/testdata/direct_call/pkg"}, nil); err == nil {
 		t.Fatal("directcalls combined with pkgpath did not fail the export")
 	}
 
 	flagCustomPkg, flagExportCode = "", true
-	if err := ExportPkgs([]string{"github.com/goplus/ixgo/testdata/directcall"}, nil); err == nil {
+	if err := ExportPkgs([]string{"github.com/goplus/ixgo/testdata/direct_call/pkg"}, nil); err == nil {
 		t.Fatal("directcalls combined with code did not fail the export")
 	}
 }

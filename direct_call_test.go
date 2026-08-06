@@ -23,7 +23,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	directcalltest "github.com/goplus/ixgo/testdata/directcall"
+	directcalltest "github.com/goplus/ixgo/testdata/direct_call/host"
 	"golang.org/x/tools/go/ssa"
 )
 
@@ -31,7 +31,7 @@ const (
 	testDirectCallPkgPath     = "ixgo.test/direct_call"
 	testDirectCallSelector    = "Add"
 	testDirectCallExternalKey = testDirectCallPkgPath + ".Add"
-	testDirectCallHostPkgPath = "github.com/goplus/ixgo/testdata/directcall"
+	testDirectCallHostPkgPath = "github.com/goplus/ixgo/testdata/direct_call/host"
 	testCounterSelector       = "(*Counter).Value"
 	testCounterExternalKey    = "(*" + testDirectCallHostPkgPath + ".Counter).Value"
 	testValueCounterSelector  = "ValueCounter.Value"
@@ -74,7 +74,7 @@ func registerStaticDirectCallPackage(binding DirectCallBinding) {
 
 func registerHostDirectCalls(bindings map[string]DirectCallBinding) {
 	RegisterPackage(&Package{
-		Name:       "directcall",
+		Name:       "host",
 		Path:       testDirectCallHostPkgPath,
 		Interfaces: map[string]reflect.Type{},
 		NamedTypes: map[string]reflect.Type{
@@ -234,7 +234,7 @@ func TestStaticMethodCallUsesDirectCall(t *testing.T) {
 
 	const source = `package main
 
-import host "github.com/goplus/ixgo/testdata/directcall"
+import host "github.com/goplus/ixgo/testdata/direct_call/host"
 
 func main() {
 	counter := host.Counter(7)
@@ -270,7 +270,7 @@ func TestInvokeUsesDirectCallsAndReflectFallback(t *testing.T) {
 
 	const source = `package main
 
-import host "github.com/goplus/ixgo/testdata/directcall"
+import host "github.com/goplus/ixgo/testdata/direct_call/host"
 
 type counter interface {
 	Value() int
@@ -309,7 +309,7 @@ func TestInvokeRequiresResolvedTarget(t *testing.T) {
 
 	const source = `package main
 
-import host "github.com/goplus/ixgo/testdata/directcall"
+import host "github.com/goplus/ixgo/testdata/direct_call/host"
 
 type counter interface {
 	Value() int
@@ -348,7 +348,7 @@ func TestDirectCallGoAndInvokeDeferUseRegularPath(t *testing.T) {
 
 	const source = `package main
 
-import host "github.com/goplus/ixgo/testdata/directcall"
+import host "github.com/goplus/ixgo/testdata/direct_call/host"
 
 type recorder interface {
 	Record(int)
