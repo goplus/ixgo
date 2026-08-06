@@ -17,23 +17,26 @@
 package ixgo
 
 import (
-	"fmt"
 	"go/token"
 	"go/types"
 	"reflect"
-	"strings"
-	"sync"
+	"sync/atomic"
 	"testing"
 
 	directcalltest "github.com/goplus/ixgo/testdata/directcall"
 	"golang.org/x/tools/go/ssa"
-	"golang.org/x/tools/go/ssa/ssautil"
 )
 
 const (
 	testDirectCallPkgPath     = "ixgo.test/direct_call"
-	testDirectCallKey         = testDirectCallPkgPath + ".Add"
+	testDirectCallSelector    = "Add"
+	testDirectCallExternalKey = testDirectCallPkgPath + ".Add"
 	testDirectCallHostPkgPath = "github.com/goplus/ixgo/testdata/directcall"
+	testCounterSelector       = "(*Counter).Value"
+	testCounterExternalKey    = "(*" + testDirectCallHostPkgPath + ".Counter).Value"
+	testValueCounterSelector  = "ValueCounter.Value"
+	testValuePointerSelector  = "(*ValueCounter).Value"
+	testRecorderSelector      = "(*Recorder).Record"
 )
 
 func directCallAdd(a, b int) int {
@@ -54,24 +57,22 @@ func newDirectCallBinding(target any, adapter DirectCallAdapter) DirectCallBindi
 
 func registerStaticDirectCallPackage(binding DirectCallBinding) {
 	RegisterPackage(&Package{
-		Name:       "directcall",
-		Path:       testDirectCallPkgPath,
-		Interfaces: map[string]reflect.Type{},
-		NamedTypes: map[string]reflect.Type{},
-		AliasTypes: map[string]reflect.Type{},
-		Vars:       map[string]reflect.Value{},
-		Funcs: map[string]reflect.Value{
-			"Add": reflect.ValueOf(directCallAdd),
-		},
-		DirectCalls: map[string]DirectCallBinding{
-			testDirectCallKey: binding,
-		},
+		Name:          "directcall",
+		Path:          testDirectCallPkgPath,
+		Interfaces:    map[string]reflect.Type{},
+		NamedTypes:    map[string]reflect.Type{},
+		AliasTypes:    map[string]reflect.Type{},
+		Vars:          map[string]reflect.Value{},
+		Funcs:         map[string]reflect.Value{"Add": reflect.ValueOf(directCallAdd)},
 		TypedConsts:   map[string]TypedConst{},
 		UntypedConsts: map[string]UntypedConst{},
 	})
+	RegisterDirectCalls(testDirectCallPkgPath, map[string]DirectCallBinding{
+		testDirectCallSelector: binding,
+	})
 }
 
-func registerHostDirectCallPackage(key string, binding DirectCallBinding) {
+func registerHostDirectCalls(bindings map[string]DirectCallBinding) {
 	RegisterPackage(&Package{
 		Name:       "directcall",
 		Path:       testDirectCallHostPkgPath,
@@ -82,28 +83,13 @@ func registerHostDirectCallPackage(key string, binding DirectCallBinding) {
 			"Recorder":        reflect.TypeOf(directcalltest.Recorder{}),
 			"ValueCounter":    reflect.TypeOf(directcalltest.ValueCounter(0)),
 		},
-		AliasTypes: map[string]reflect.Type{},
-		Vars:       map[string]reflect.Value{},
-		Funcs:      map[string]reflect.Value{},
-		DirectCalls: map[string]DirectCallBinding{
-			key: binding,
-		},
+		AliasTypes:    map[string]reflect.Type{},
+		Vars:          map[string]reflect.Value{},
+		Funcs:         map[string]reflect.Value{},
 		TypedConsts:   map[string]TypedConst{},
 		UntypedConsts: map[string]UntypedConst{},
 	})
-}
-
-type installedPackageLoader struct {
-	Loader
-	path string
-	pkg  *Package
-}
-
-func (l *installedPackageLoader) Installed(path string) (*Package, bool) {
-	if path == l.path {
-		return l.pkg, true
-	}
-	return l.Loader.Installed(path)
+	RegisterDirectCalls(testDirectCallHostPkgPath, bindings)
 }
 
 func clearExternalCallOverride(t testing.TB, key string) {
@@ -150,122 +136,68 @@ func TestDirectCallSignatureIncludesMethodReceiver(t *testing.T) {
 	}
 }
 
-func TestDirectCallMethodKey(t *testing.T) {
-	pkgPath, key, ok := directCallMethodKey(reflect.TypeOf((*directcalltest.Counter)(nil)), "Value")
-	if !ok {
-		t.Fatal("directCallMethodKey did not recognize a named pointer receiver")
-	}
-	if pkgPath != testDirectCallHostPkgPath {
-		t.Fatalf("package path = %q; want %q", pkgPath, testDirectCallHostPkgPath)
-	}
-	want := "(*" + testDirectCallHostPkgPath + ".Counter).Value"
-	if key != want {
-		t.Fatalf("method key = %q; want %q", key, want)
-	}
-}
-
-func TestInvokeSignatureMatchesExactTarget(t *testing.T) {
-	receiver := reflect.TypeOf((*directcalltest.Counter)(nil))
-	intType := reflect.TypeOf(int(0))
-	signature := invokeSignature{
-		params:  []reflect.Type{intType},
-		results: []reflect.Type{intType},
-	}
+func TestDirectCallMethodKeyUsesLocalSelector(t *testing.T) {
 	tests := []struct {
-		name   string
-		target any
-		match  bool
+		name string
+		typ  reflect.Type
+		want string
 	}{
-		{name: "exact", target: func(*directcalltest.Counter, int) int { return 0 }, match: true},
-		{name: "receiver", target: func(directcalltest.Counter, int) int { return 0 }},
-		{name: "parameter", target: func(*directcalltest.Counter, int64) int { return 0 }},
-		{name: "result", target: func(*directcalltest.Counter, int) int64 { return 0 }},
-		{name: "variadic", target: func(*directcalltest.Counter, ...int) int { return 0 }},
+		{name: "value", typ: reflect.TypeOf(directcalltest.ValueCounter(0)), want: "ValueCounter.Value"},
+		{name: "pointer", typ: reflect.TypeOf((*directcalltest.Counter)(nil)), want: "(*Counter).Value"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := signature.matches(reflect.TypeOf(test.target), receiver)
-			if got != test.match {
-				t.Fatalf("matches() = %v; want %v", got, test.match)
+			pkgPath, key, ok := directCallMethodKey(test.typ, "Value")
+			if !ok {
+				t.Fatal("directCallMethodKey did not recognize a named receiver")
+			}
+			if pkgPath != testDirectCallHostPkgPath {
+				t.Fatalf("package path = %q; want %q", pkgPath, testDirectCallHostPkgPath)
+			}
+			if key != test.want {
+				t.Fatalf("method key = %q; want %q", key, test.want)
 			}
 		})
 	}
-
-	signature.params[0] = reflect.TypeOf([]int(nil))
-	signature.variadic = true
-	if !signature.matches(reflect.TypeOf(func(*directcalltest.Counter, ...int) int { return 0 }), receiver) {
-		t.Fatal("variadic signature did not match an exact variadic target")
-	}
 }
 
-func TestPackageDirectCallMerge(t *testing.T) {
-	const (
-		pkgPath = "ixgo.test/direct_call_merge"
-		key     = pkgPath + ".Add"
-	)
-	RegisterPackage(&Package{
-		Name:          "merge",
-		Path:          pkgPath,
-		Interfaces:    map[string]reflect.Type{},
-		NamedTypes:    map[string]reflect.Type{},
-		AliasTypes:    map[string]reflect.Type{},
-		Vars:          map[string]reflect.Value{},
-		Funcs:         map[string]reflect.Value{},
-		TypedConsts:   map[string]TypedConst{},
-		UntypedConsts: map[string]UntypedConst{},
+func TestDirectCallRegistrationMergesAndReplaces(t *testing.T) {
+	const pkgPath = "ixgo.test/direct_call_registration"
+	first := newDirectCallBinding(directCallWrongAdd, func(DirectCallContext) {})
+	replacement := newDirectCallBinding(directCallAdd, func(DirectCallContext) {})
+	valueMethod := newDirectCallBinding(directcalltest.ValueCounter.Value, func(DirectCallContext) {})
+	pointerMethod := newDirectCallBinding((*directcalltest.Counter).Value, func(DirectCallContext) {})
+
+	RegisterDirectCalls(pkgPath, map[string]DirectCallBinding{
+		"Add": first,
+		"T.M": valueMethod,
 	})
-	want := newDirectCallBinding(directCallAdd, func(DirectCallContext) {})
-	RegisterPackage(&Package{Path: pkgPath, DirectCalls: map[string]DirectCallBinding{key: want}})
-
-	pkg, ok := LookupPackage(pkgPath)
-	if !ok {
-		t.Fatal("merged package was not registered")
-	}
-	if got, ok := pkg.DirectCalls[key]; !ok || got.Target != want.Target || got.Adapter == nil {
-		t.Fatalf("merged direct func = (%v, %v); want metadata for %q", got, ok, key)
-	}
-}
-
-func TestDirectCallBindingsAreSnapshotted(t *testing.T) {
-	const (
-		pkgPath = "ixgo.test/direct_call_snapshot"
-		addKey  = pkgPath + ".Add"
-		lateKey = pkgPath + ".Late"
-	)
-	initial := newDirectCallBinding(directCallAdd, func(DirectCallContext) {})
-	RegisterPackage(&Package{
-		Name:          "snapshot",
-		Path:          pkgPath,
-		Interfaces:    map[string]reflect.Type{},
-		NamedTypes:    map[string]reflect.Type{},
-		AliasTypes:    map[string]reflect.Type{},
-		Vars:          map[string]reflect.Value{},
-		Funcs:         map[string]reflect.Value{"Add": reflect.ValueOf(directCallAdd)},
-		DirectCalls:   map[string]DirectCallBinding{addKey: initial},
-		TypedConsts:   map[string]TypedConst{},
-		UntypedConsts: map[string]UntypedConst{},
+	RegisterDirectCalls(pkgPath, map[string]DirectCallBinding{
+		"Add":    replacement,
+		"(*T).M": pointerMethod,
 	})
 
-	ctx := NewContext(DisableAutoLoadPatchs)
-	if _, err := ctx.Loader.Import(pkgPath); err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		key  string
+		want DirectCallBinding
+	}{
+		{key: "Add", want: replacement},
+		{key: "T.M", want: valueMethod},
+		{key: "(*T).M", want: pointerMethod},
 	}
-	snapshot := snapshotDirectCallBindings(ctx.Loader, nil)
-	RegisterPackage(&Package{Path: pkgPath, DirectCalls: map[string]DirectCallBinding{
-		lateKey: newDirectCallBinding(directCallWrongAdd, func(DirectCallContext) {}),
-	}})
-
-	interp := &Interp{directCalls: snapshot}
-	if got, ok := lookupDirectCallBinding(interp, pkgPath, addKey); !ok || got.Target != initial.Target {
-		t.Fatalf("initial binding = (%v, %v); want snapshotted target", got, ok)
-	}
-	if _, ok := lookupDirectCallBinding(interp, pkgPath, lateKey); ok {
-		t.Fatal("binding registered after the snapshot became visible")
+	for _, test := range tests {
+		got, ok := lookupDirectCallBinding(pkgPath, test.key)
+		if !ok {
+			t.Fatalf("binding %q was not registered", test.key)
+		}
+		if got.Target != test.want.Target || got.Adapter == nil {
+			t.Fatalf("binding %q target = %v; want %v", test.key, got.Target, test.want.Target)
+		}
 	}
 }
 
 func TestStaticPackageCallUsesDirectCall(t *testing.T) {
-	clearExternalCallOverride(t, testDirectCallKey)
+	clearExternalCallOverride(t, testDirectCallExternalKey)
 	var calls int
 	registerStaticDirectCallPackage(newDirectCallBinding(directCallAdd, func(ctx DirectCallContext) {
 		calls++
@@ -290,323 +222,22 @@ func main() {
 	}
 }
 
-func TestPackageCallUsesInstalledPackage(t *testing.T) {
-	clearExternalCallOverride(t, testDirectCallKey)
-	registerStaticDirectCallPackage(newDirectCallBinding(directCallAdd, func(ctx DirectCallContext) {
-		ctx.SetResult(-1)
-	}))
-
-	ctx := NewContext(DisableAutoLoadPatchs)
-	if _, err := ctx.Loader.Import(testDirectCallPkgPath); err != nil {
-		t.Fatal(err)
-	}
-	var directCalls int
-	customAdd := func(a, b int) int { return a + b + 100 }
-	customPackage := &Package{
-		Name:  "directcall",
-		Path:  testDirectCallPkgPath,
-		Funcs: map[string]reflect.Value{"Add": reflect.ValueOf(customAdd)},
-		DirectCalls: map[string]DirectCallBinding{
-			testDirectCallKey: newDirectCallBinding(customAdd, func(ctx DirectCallContext) {
-				directCalls++
-				ctx.SetResult(customAdd(DirectCallArg[int](ctx, 0), DirectCallArg[int](ctx, 1)))
-			}),
-		},
-	}
-	ctx.Loader = &installedPackageLoader{Loader: ctx.Loader, path: testDirectCallPkgPath, pkg: customPackage}
-
-	const source = `package main
-
-import directcall "ixgo.test/direct_call"
-
-func main() {
-	if got := directcall.Add(20, 22); got != 142 {
-		panic(got)
-	}
-}
-`
-	if _, err := ctx.RunFile("main.go", source, nil); err != nil {
-		t.Fatal(err)
-	}
-	if directCalls != 1 {
-		t.Fatalf("installed direct adapter calls = %d; want 1", directCalls)
-	}
-}
-
-func TestGenericExternalCallKeepsInstantiatedKey(t *testing.T) {
-	ctx := NewContext(0)
-	ctx.RegisterExternal("main.Identity", func(int) int { return -1 })
-	ctx.RegisterExternal("main.Identity[int]", func(value int) int { return value + 1 })
-
-	const source = `package main
-
-func Identity[T any](value T) T { return value }
-
-func main() {
-	_ = Identity[int](41)
-}
-`
-	interp, err := ctx.LoadInterp("main.go", source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var instance *ssa.Function
-	for fn := range ssautil.AllFunctions(interp.mainpkg.Prog) {
-		if fn.String() == "main.Identity[int]" {
-			instance = fn
-			break
-		}
-	}
-	if instance == nil {
-		t.Fatal("generic function instance was not loaded")
-	}
-	external, ok := findExternFunc(interp, instance)
-	if !ok {
-		t.Fatal("instantiated external function was not resolved")
-	}
-	if got := external.Call([]reflect.Value{reflect.ValueOf(41)})[0].Interface(); got != 42 {
-		t.Fatalf("external result = %v; want 42", got)
-	}
-}
-
 func TestStaticMethodCallUsesDirectCall(t *testing.T) {
-	key := "(*" + testDirectCallHostPkgPath + ".Counter).Value"
-	clearExternalCallOverride(t, key)
+	clearExternalCallOverride(t, testCounterExternalKey)
 	var calls int
-	registerHostDirectCallPackage(key, newDirectCallBinding((*directcalltest.Counter).Value, func(ctx DirectCallContext) {
-		calls++
-		ctx.SetResult((*directcalltest.Counter).Value(DirectCallArg[*directcalltest.Counter](ctx, 0)))
-	}))
+	registerHostDirectCalls(map[string]DirectCallBinding{
+		testCounterSelector: newDirectCallBinding((*directcalltest.Counter).Value, func(ctx DirectCallContext) {
+			calls++
+			ctx.SetResult((*directcalltest.Counter).Value(DirectCallArg[*directcalltest.Counter](ctx, 0)))
+		}),
+	})
 
 	const source = `package main
 
 import host "github.com/goplus/ixgo/testdata/directcall"
 
 func main() {
-	var counter host.Counter
-	if counter.Value() != 0 {
-		panic("unexpected counter value")
-	}
-}
-`
-	if _, err := NewContext(0).RunFile("main.go", source, nil); err != nil {
-		t.Fatal(err)
-	}
-	if calls != 1 {
-		t.Fatalf("direct adapter calls = %d; want 1", calls)
-	}
-}
-
-func TestInvokeUsesDirectCall(t *testing.T) {
-	key := "(*" + testDirectCallHostPkgPath + ".Counter).Value"
-	clearExternalCallOverride(t, key)
-	var calls int
-	registerHostDirectCallPackage(key, newDirectCallBinding((*directcalltest.Counter).Value, func(ctx DirectCallContext) {
-		calls++
-		ctx.SetResult((*directcalltest.Counter).Value(DirectCallArg[*directcalltest.Counter](ctx, 0)))
-	}))
-
-	const source = `package main
-
-import host "github.com/goplus/ixgo/testdata/directcall"
-
-type counter interface {
-	Value() int
-}
-
-func value(v counter) int {
-	return v.Value()
-}
-
-func main() {
-	var c host.Counter
-	if value(&c) != 0 {
-		panic("unexpected counter value")
-	}
-}
-`
-	if _, err := NewContext(0).RunFile("main.go", source, nil); err != nil {
-		t.Fatal(err)
-	}
-	if calls != 1 {
-		t.Fatalf("direct adapter calls = %d; want 1", calls)
-	}
-}
-
-func TestInvokeCachesDirectAndFallbackTargets(t *testing.T) {
-	key := "(*" + testDirectCallHostPkgPath + ".Counter).Value"
-	clearExternalCallOverride(t, key)
-	registerHostDirectCallPackage(key, newDirectCallBinding((*directcalltest.Counter).Value, func(ctx DirectCallContext) {
-		ctx.SetResult((*directcalltest.Counter).Value(DirectCallArg[*directcalltest.Counter](ctx, 0)))
-	}))
-
-	intType := reflect.TypeOf(int(0))
-	ctx := NewContext(DisableAutoLoadPatchs)
-	if _, err := ctx.Loader.Import(testDirectCallHostPkgPath); err != nil {
-		t.Fatal(err)
-	}
-	resolver := &invokeResolver{
-		interp: &Interp{ctx: ctx, directCalls: snapshotDirectCallBindings(ctx.Loader, nil)},
-		name:   "Value", signature: invokeSignature{results: []reflect.Type{intType}},
-	}
-	directType := reflect.TypeOf((*directcalltest.Counter)(nil))
-	fallbackType := reflect.TypeOf((*directcalltest.FallbackCounter)(nil))
-
-	direct := resolver.resolve(directType)
-	if direct.direct == nil || direct.interpreted != nil || !direct.reflectFunc.IsValid() {
-		t.Fatalf("direct target = %#v; want adapter", direct)
-	}
-	fallback := resolver.resolve(fallbackType)
-	if fallback.direct != nil || fallback.interpreted != nil || !fallback.reflectFunc.IsValid() {
-		t.Fatalf("fallback target = %#v; want external method", fallback)
-	}
-
-	for _, receiver := range []reflect.Type{directType, fallbackType, directType, fallbackType} {
-		want, ok := resolver.targets.Load(receiver)
-		if !ok {
-			t.Fatalf("receiver %v was not cached", receiver)
-		}
-		got := resolver.resolve(receiver)
-		cached := want.(*invokeCacheEntry).target
-		if got.interpreted != cached.interpreted || (got.direct == nil) != (cached.direct == nil) || got.reflectFunc != cached.reflectFunc {
-			t.Fatalf("receiver %v resolved a different target", receiver)
-		}
-	}
-}
-
-func TestInvokeResolverDoesNotCacheReflectxMethod(t *testing.T) {
-	receiver := reflect.TypeOf((*directcalltest.FallbackCounter)(nil))
-	resolver := &invokeResolver{
-		interp: &Interp{msets: map[reflect.Type]map[string]*ssa.Function{receiver: {}}},
-		name:   "Value",
-	}
-
-	if target := resolver.resolve(receiver); !target.reflectFunc.IsValid() {
-		t.Fatal("reflectx method was not resolved")
-	}
-	if _, ok := resolver.targets.Load(receiver); ok || resolver.recent.Load() != nil {
-		t.Fatal("reflectx-owned method was cached across ResetIcall")
-	}
-}
-
-func TestInvokeUsesDirectAndFallbackTargets(t *testing.T) {
-	key := "(*" + testDirectCallHostPkgPath + ".Counter).Value"
-	clearExternalCallOverride(t, key)
-	var directCalls int
-	registerHostDirectCallPackage(key, newDirectCallBinding((*directcalltest.Counter).Value, func(ctx DirectCallContext) {
-		directCalls++
-		ctx.SetResult((*directcalltest.Counter).Value(DirectCallArg[*directcalltest.Counter](ctx, 0)))
-	}))
-
-	const source = `package main
-
-import host "github.com/goplus/ixgo/testdata/directcall"
-
-type counter interface {
-	Value() int
-}
-
-func value(v counter) int {
-	return v.Value()
-}
-
-func main() {
-	direct := host.Counter(7)
-	fallback := host.FallbackCounter(9)
-	for i := 0; i < 2; i++ {
-		if value(&direct) != 7 || value(&fallback) != 9 {
-			panic("unexpected counter value")
-		}
-	}
-}
-`
-	if _, err := NewContext(0).RunFile("main.go", source, nil); err != nil {
-		t.Fatal(err)
-	}
-	if directCalls != 2 {
-		t.Fatalf("direct adapter calls = %d; want 2", directCalls)
-	}
-}
-
-func TestInvokeResolverConcurrentColdCache(t *testing.T) {
-	key := "(*" + testDirectCallHostPkgPath + ".Counter).Value"
-	clearExternalCallOverride(t, key)
-	registerHostDirectCallPackage(key, newDirectCallBinding((*directcalltest.Counter).Value, func(ctx DirectCallContext) {
-		ctx.SetResult((*directcalltest.Counter).Value(DirectCallArg[*directcalltest.Counter](ctx, 0)))
-	}))
-
-	ctx := NewContext(DisableAutoLoadPatchs)
-	if _, err := ctx.Loader.Import(testDirectCallHostPkgPath); err != nil {
-		t.Fatal(err)
-	}
-	interp := &Interp{ctx: ctx, directCalls: snapshotDirectCallBindings(ctx.Loader, nil)}
-	intType := reflect.TypeOf(int(0))
-	tests := []struct {
-		name        string
-		receiver    reflect.Type
-		wantDirect  bool
-		wantReflect bool
-	}{
-		{name: "direct", receiver: reflect.TypeOf((*directcalltest.Counter)(nil)), wantDirect: true, wantReflect: true},
-		{name: "reflect", receiver: reflect.TypeOf((*directcalltest.FallbackCounter)(nil)), wantReflect: true},
-		{name: "miss", receiver: intType},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			resolver := &invokeResolver{
-				interp: interp,
-				name:   "Value",
-				signature: invokeSignature{
-					results: []reflect.Type{intType},
-				},
-			}
-			const goroutines = 32
-			start := make(chan struct{})
-			results := make(chan invokeTarget, goroutines)
-			var workers sync.WaitGroup
-			workers.Add(goroutines)
-			for range goroutines {
-				go func() {
-					defer workers.Done()
-					<-start
-					results <- resolver.resolve(test.receiver)
-				}()
-			}
-			close(start)
-			workers.Wait()
-			close(results)
-			for target := range results {
-				if got := target.direct != nil; got != test.wantDirect {
-					t.Fatalf("direct target = %v; want %v", got, test.wantDirect)
-				}
-				if got := target.reflectFunc.IsValid(); got != test.wantReflect {
-					t.Fatalf("reflect target = %v; want %v", got, test.wantReflect)
-				}
-			}
-		})
-	}
-}
-
-func TestDynamicValueReceiverPointerUsesDirectCall(t *testing.T) {
-	key := "(*" + testDirectCallHostPkgPath + ".ValueCounter).Value"
-	clearExternalCallOverride(t, key)
-	var calls int
-	registerHostDirectCallPackage(key, newDirectCallBinding((*directcalltest.ValueCounter).Value, func(ctx DirectCallContext) {
-		calls++
-		ctx.SetResult((*directcalltest.ValueCounter).Value(DirectCallArg[*directcalltest.ValueCounter](ctx, 0)))
-	}))
-
-	const source = `package main
-
-import host "github.com/goplus/ixgo/testdata/directcall"
-
-type counter interface {
-	Value() int
-}
-
-func main() {
-	value := host.ValueCounter(7)
-	var counter counter = &value
+	counter := host.Counter(7)
 	if got := counter.Value(); got != 7 {
 		panic(got)
 	}
@@ -620,14 +251,61 @@ func main() {
 	}
 }
 
+func TestInvokeUsesDirectCallsAndReflectFallback(t *testing.T) {
+	var pointerCalls, valueCalls, valuePointerCalls int
+	registerHostDirectCalls(map[string]DirectCallBinding{
+		testCounterSelector: newDirectCallBinding((*directcalltest.Counter).Value, func(ctx DirectCallContext) {
+			pointerCalls++
+			ctx.SetResult((*directcalltest.Counter).Value(DirectCallArg[*directcalltest.Counter](ctx, 0)))
+		}),
+		testValueCounterSelector: newDirectCallBinding(directcalltest.ValueCounter.Value, func(ctx DirectCallContext) {
+			valueCalls++
+			ctx.SetResult(directcalltest.ValueCounter.Value(DirectCallArg[directcalltest.ValueCounter](ctx, 0)))
+		}),
+		testValuePointerSelector: newDirectCallBinding((*directcalltest.ValueCounter).Value, func(ctx DirectCallContext) {
+			valuePointerCalls++
+			ctx.SetResult((*directcalltest.ValueCounter).Value(DirectCallArg[*directcalltest.ValueCounter](ctx, 0)))
+		}),
+	})
+
+	const source = `package main
+
+import host "github.com/goplus/ixgo/testdata/directcall"
+
+type counter interface {
+	Value() int
+}
+
+func value(v counter) int {
+	return v.Value()
+}
+
+func main() {
+	pointer := host.Counter(7)
+	valueCounter := host.ValueCounter(8)
+	valuePointer := host.ValueCounter(10)
+	fallback := host.FallbackCounter(9)
+	if value(&pointer) != 7 || value(valueCounter) != 8 || value(&valuePointer) != 10 || value(&fallback) != 9 {
+		panic("unexpected counter value")
+	}
+}
+`
+	if _, err := NewContext(0).RunFile("main.go", source, nil); err != nil {
+		t.Fatal(err)
+	}
+	if pointerCalls != 1 || valueCalls != 1 || valuePointerCalls != 1 {
+		t.Fatalf("direct adapter calls = (%d, %d, %d); want (1, 1, 1)", pointerCalls, valueCalls, valuePointerCalls)
+	}
+}
+
 func TestInvokeRequiresResolvedTarget(t *testing.T) {
-	key := "(*" + testDirectCallHostPkgPath + ".Counter).Value"
-	clearExternalCallOverride(t, key)
 	var directCalls int
-	registerHostDirectCallPackage(key, newDirectCallBinding(directCallWrongCounterValue, func(ctx DirectCallContext) {
-		directCalls++
-		ctx.SetResult(-1)
-	}))
+	registerHostDirectCalls(map[string]DirectCallBinding{
+		testCounterSelector: newDirectCallBinding(directCallWrongCounterValue, func(ctx DirectCallContext) {
+			directCalls++
+			ctx.SetResult(-1)
+		}),
+	})
 
 	const source = `package main
 
@@ -656,17 +334,17 @@ func main() {
 	}
 }
 
-func TestInvokeGoAndDeferPreserveCapturedArguments(t *testing.T) {
-	key := "(*" + testDirectCallHostPkgPath + ".Recorder).Record"
-	clearExternalCallOverride(t, key)
-	var directCalls int
-	registerHostDirectCallPackage(key, newDirectCallBinding((*directcalltest.Recorder).Record, func(ctx DirectCallContext) {
-		directCalls++
-		(*directcalltest.Recorder).Record(
-			DirectCallArg[*directcalltest.Recorder](ctx, 0),
-			DirectCallArg[int](ctx, 1),
-		)
-	}))
+func TestDirectCallGoAndInvokeDeferUseRegularPath(t *testing.T) {
+	var directCalls int32
+	registerHostDirectCalls(map[string]DirectCallBinding{
+		testRecorderSelector: newDirectCallBinding((*directcalltest.Recorder).Record, func(ctx DirectCallContext) {
+			atomic.AddInt32(&directCalls, 1)
+			(*directcalltest.Recorder).Record(
+				DirectCallArg[*directcalltest.Recorder](ctx, 0),
+				DirectCallArg[int](ctx, 1),
+			)
+		}),
+	})
 
 	const source = `package main
 
@@ -676,234 +354,39 @@ type recorder interface {
 	Record(int)
 }
 
-func values(yield func(int) bool) {
-	for value := 0; value < 3; value++ {
-		if !yield(value) {
-			return
-		}
-	}
-}
-
 func main() {
-	first := host.Recorder{Values: make(chan int, 4)}
-	second := host.Recorder{Values: make(chan int, 4)}
-	var sink recorder = &first
-
-	value := 7
-	go sink.Record(value)
-	sink = &second
-	value = 8
-	if got := <-first.Values; got != 7 {
+	target := host.Recorder{Values: make(chan int, 2)}
+	go target.Record(1)
+	if got := <-target.Values; got != 1 {
 		panic(got)
 	}
-	select {
-	case got := <-second.Values:
-		panic(got)
-	default:
-	}
 
-	sink = &first
+	var sink recorder = &target
 	defer func() {
-		for _, want := range []int{2, 1, 0} {
-			if got := <-first.Values; got != want {
-				panic(got)
-			}
-		}
-		select {
-		case got := <-second.Values:
+		if got := <-target.Values; got != 2 {
 			panic(got)
-		default:
-		}
-	}()
-	for value := range values {
-		defer sink.Record(value)
-	}
-	sink = &second
-}
-`
-	ctx := NewContext(0)
-	interp, err := ctx.LoadInterp("main.go", source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var hasDeferStack bool
-	for fn := range ssautil.AllFunctions(interp.mainpkg.Prog) {
-		for _, block := range fn.Blocks {
-			for _, instruction := range block.Instrs {
-				if instruction, ok := instruction.(*ssa.Defer); ok && instruction.DeferStack != nil {
-					hasDeferStack = true
-				}
-			}
-		}
-	}
-	if !hasDeferStack {
-		t.Fatal("test program did not exercise the DeferStack path")
-	}
-	if _, err := interp.RunMain(); err != nil {
-		t.Fatal(err)
-	}
-	if directCalls != 0 {
-		t.Fatalf("delayed direct adapter calls = %d; want reflective fallback", directCalls)
-	}
-}
-
-func TestInvokeGoAndDeferInterpretedMethod(t *testing.T) {
-	const source = `package main
-
-type recorder interface {
-	Record(int)
-}
-
-type localRecorder struct {
-	Values chan int
-}
-
-func (r *localRecorder) Record(value int) {
-	r.Values <- value
-}
-
-func main() {
-	first := localRecorder{Values: make(chan int, 3)}
-	second := localRecorder{Values: make(chan int, 3)}
-	var sink recorder = &first
-
-	value := 7
-	go sink.Record(value)
-	sink = &second
-	value = 8
-	if got := <-first.Values; got != 7 {
-		panic(got)
-	}
-
-	sink = &first
-	defer func() {
-		if got := <-first.Values; got != 2 {
-			panic(got)
-		}
-		select {
-		case got := <-second.Values:
-			panic(got)
-		default:
 		}
 	}()
 	defer sink.Record(2)
-	sink = &second
 }
 `
 	if _, err := NewContext(0).RunFile("main.go", source, nil); err != nil {
 		t.Fatal(err)
 	}
-}
-
-func TestInvokeGoAndDeferNilReceiver(t *testing.T) {
-	for _, statement := range []string{"go sink.Record(1)", "defer sink.Record(1)"} {
-		t.Run(strings.Fields(statement)[0], func(t *testing.T) {
-			source := fmt.Sprintf(`package main
-
-type recorder interface {
-	Record(int)
-}
-
-func main() {
-	var sink recorder
-	%s
-}
-`, statement)
-			if _, err := NewContext(0).RunFile("main.go", source, nil); err == nil ||
-				!strings.Contains(err.Error(), "invalid memory address or nil pointer dereference") {
-				t.Fatalf("error = %v; want nil-interface runtime error", err)
-			}
-		})
+	if got := atomic.LoadInt32(&directCalls); got != 0 {
+		t.Fatalf("go/defer direct adapter calls = %d; want 0", got)
 	}
 }
 
-func TestContextOverrideDoesNotAffectInterfaceInvoke(t *testing.T) {
-	key := "(*" + testDirectCallHostPkgPath + ".Counter).Value"
-	clearExternalCallOverride(t, key)
-	var directCalls, overrideCalls int
-	registerHostDirectCallPackage(key, newDirectCallBinding((*directcalltest.Counter).Value, func(ctx DirectCallContext) {
-		directCalls++
-		ctx.SetResult((*directcalltest.Counter).Value(DirectCallArg[*directcalltest.Counter](ctx, 0)))
-	}))
-	ctx := NewContext(0)
-	ctx.RegisterExternal(key, func(*directcalltest.Counter) int {
-		overrideCalls++
-		return -1
-	})
-
-	const source = `package main
-
-import host "github.com/goplus/ixgo/testdata/directcall"
-
-type counter interface {
-	Value() int
-}
-
-func value(v counter) int {
-	return v.Value()
-}
-
-func main() {
-	counter := host.Counter(7)
-	if got := value(&counter); got != 7 {
-		panic(got)
-	}
-}
-`
-	if _, err := ctx.RunFile("main.go", source, nil); err != nil {
-		t.Fatal(err)
-	}
-	if directCalls != 1 || overrideCalls != 0 {
-		t.Fatalf("calls: direct=%d override=%d; want 1, 0", directCalls, overrideCalls)
-	}
-}
-
-func TestRegisteredExternalDoesNotAffectInterfaceInvoke(t *testing.T) {
-	key := "(*" + testDirectCallHostPkgPath + ".Counter).Value"
-	clearExternalCallOverride(t, key)
-	var directCalls, overrideCalls int
-	registerHostDirectCallPackage(key, newDirectCallBinding((*directcalltest.Counter).Value, func(ctx DirectCallContext) {
-		directCalls++
-		ctx.SetResult((*directcalltest.Counter).Value(DirectCallArg[*directcalltest.Counter](ctx, 0)))
-	}))
-	RegisterExternal(key, func(*directcalltest.Counter) int {
-		overrideCalls++
-		return -1
-	})
-
-	const source = `package main
-
-import host "github.com/goplus/ixgo/testdata/directcall"
-
-type counter interface {
-	Value() int
-}
-
-func main() {
-	hostCounter := host.Counter(7)
-	var value counter = &hostCounter
-	if got := value.Value(); got != 7 {
-		panic(got)
-	}
-}
-`
-	if _, err := NewContext(0).RunFile("main.go", source, nil); err != nil {
-		t.Fatal(err)
-	}
-	if directCalls != 1 || overrideCalls != 0 {
-		t.Fatalf("calls: direct=%d override=%d; want 1, 0", directCalls, overrideCalls)
-	}
-}
-
-func TestContextOverrideSkipsPackageDirectCall(t *testing.T) {
-	clearExternalCallOverride(t, testDirectCallKey)
+func TestContextOverrideSkipsStaticDirectCall(t *testing.T) {
+	clearExternalCallOverride(t, testDirectCallExternalKey)
 	var directCalls, overrideCalls int
 	registerStaticDirectCallPackage(newDirectCallBinding(directCallAdd, func(ctx DirectCallContext) {
 		directCalls++
 		ctx.SetResult(-1)
 	}))
 	ctx := NewContext(0)
-	ctx.RegisterExternal(testDirectCallKey, func(a, b int) int {
+	ctx.RegisterExternal(testDirectCallExternalKey, func(a, b int) int {
 		overrideCalls++
 		return a + b + 1
 	})
@@ -926,14 +409,14 @@ func main() {
 	}
 }
 
-func TestRegisteredExternalSkipsPackageDirectCall(t *testing.T) {
-	clearExternalCallOverride(t, testDirectCallKey)
+func TestRegisteredExternalSkipsStaticDirectCall(t *testing.T) {
+	clearExternalCallOverride(t, testDirectCallExternalKey)
 	var directCalls, overrideCalls int
 	registerStaticDirectCallPackage(newDirectCallBinding(directCallAdd, func(ctx DirectCallContext) {
 		directCalls++
 		ctx.SetResult(-1)
 	}))
-	RegisterExternal(testDirectCallKey, func(a, b int) int {
+	RegisterExternal(testDirectCallExternalKey, func(a, b int) int {
 		overrideCalls++
 		return a + b + 1
 	})
@@ -956,8 +439,8 @@ func main() {
 	}
 }
 
-func TestPackageDirectCallRequiresResolvedTarget(t *testing.T) {
-	clearExternalCallOverride(t, testDirectCallKey)
+func TestStaticDirectCallRequiresResolvedTarget(t *testing.T) {
+	clearExternalCallOverride(t, testDirectCallExternalKey)
 	var directCalls int
 	registerStaticDirectCallPackage(newDirectCallBinding(directCallWrongAdd, func(ctx DirectCallContext) {
 		directCalls++
@@ -982,8 +465,8 @@ func main() {
 	}
 }
 
-func TestPackageDirectCallRequiresExactSignature(t *testing.T) {
-	clearExternalCallOverride(t, testDirectCallKey)
+func TestStaticDirectCallRequiresExactSignature(t *testing.T) {
+	clearExternalCallOverride(t, testDirectCallExternalKey)
 	var directCalls int
 	wrong := func(a, b int64) int64 { return a + b }
 	registerStaticDirectCallPackage(newDirectCallBinding(wrong, func(ctx DirectCallContext) {
@@ -1033,7 +516,7 @@ func BenchmarkDirectCall(b *testing.B) {
 			ctx.SetResult(directCallAdd(DirectCallArg[int](ctx, 0), DirectCallArg[int](ctx, 1)))
 		},
 	})
-	RegisterExternal(testDirectCallKey, nil)
+	RegisterExternal(testDirectCallExternalKey, nil)
 	interp := &Interp{preloadTypes: map[types.Type]reflect.Type{
 		types.Typ[types.Int]: reflect.TypeOf(int(0)),
 	}}
@@ -1059,16 +542,11 @@ func BenchmarkDirectCall(b *testing.B) {
 		}
 	})
 
-	methodKey := "(*" + testDirectCallHostPkgPath + ".Counter).Value"
-	registerHostDirectCallPackage(methodKey, newDirectCallBinding((*directcalltest.Counter).Value, func(ctx DirectCallContext) {
-		ctx.SetResult((*directcalltest.Counter).Value(DirectCallArg[*directcalltest.Counter](ctx, 0)))
-	}))
-	ctx := NewContext(DisableAutoLoadPatchs)
-	if _, err := ctx.Loader.Import(testDirectCallHostPkgPath); err != nil {
-		b.Fatal(err)
-	}
-	interp.ctx = ctx
-	interp.directCalls = snapshotDirectCallBindings(ctx.Loader, nil)
+	registerHostDirectCalls(map[string]DirectCallBinding{
+		testCounterSelector: newDirectCallBinding((*directcalltest.Counter).Value, func(ctx DirectCallContext) {
+			ctx.SetResult((*directcalltest.Counter).Value(DirectCallArg[*directcalltest.Counter](ctx, 0)))
+		}),
+	})
 	result := types.NewVar(token.NoPos, nil, "", types.Typ[types.Int])
 	method := types.NewFunc(token.NoPos, nil, "Value", types.NewSignature(nil, types.NewTuple(), types.NewTuple(result), false))
 	methodCall := &ssa.CallCommon{Method: method}
@@ -1077,7 +555,7 @@ func BenchmarkDirectCall(b *testing.B) {
 	methodArgs := []register{0}
 
 	b.Run("dynamic_direct", func(b *testing.B) {
-		call := makeInvokeInstr(interp, nil, methodCall, 1, 0, nil)
+		call := makeCallMethodInstr(interp, nil, methodCall, 1, 0, nil)
 		b.ReportAllocs()
 		for b.Loop() {
 			call(methodFrame)
@@ -1086,7 +564,7 @@ func BenchmarkDirectCall(b *testing.B) {
 	var fallback directcalltest.FallbackCounter
 	fallbackFrame := &frame{stack: []value{&fallback, nil}}
 	b.Run("dynamic_fallback", func(b *testing.B) {
-		call := makeInvokeInstr(interp, nil, methodCall, 1, 0, nil)
+		call := makeCallMethodInstr(interp, nil, methodCall, 1, 0, nil)
 		b.ReportAllocs()
 		for b.Loop() {
 			call(fallbackFrame)

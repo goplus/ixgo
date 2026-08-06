@@ -89,7 +89,6 @@ type Interp struct {
 	preloadTypes map[types.Type]reflect.Type                 // preload types.Type -> reflect.Type
 	funcs        map[*ssa.Function]*function                 // ssa.Function -> *function
 	msets        map[reflect.Type](map[string]*ssa.Function) // user defined type method sets
-	directCalls  map[string]map[string]DirectCallBinding     // immutable direct-call snapshot by package and symbol
 	chexit       chan int                                    // call os.Exit code by chan for runtime.Goexit
 	cherror      chan PanicError                             // call by go func error for context
 	deferMap     sync.Map                                    // defer goroutine id -> call frame
@@ -168,7 +167,7 @@ func (i *Interp) FindMethod(mtyp reflect.Type, fn *types.Func) func([]reflect.Va
 		}
 	}
 	name := fn.FullName()
-	if v, ok := lookupExternal(name); ok && v.Kind() == reflect.Func {
+	if v, ok := externValues[name]; ok && v.Kind() == reflect.Func {
 		if v.Type().IsVariadic() {
 			return func(args []reflect.Value) []reflect.Value {
 				return v.CallSlice(args)
@@ -609,7 +608,7 @@ func (i *DebugInfo) AsFunc() (*types.Func, bool) {
 // prepareCall determines the function value and argument values for a
 // function call in a Call, Go or Defer instruction, performing
 // interface method lookup if needed.
-func (i *Interp) prepareCall(fr *frame, instr funcInstr, call *ssa.CallCommon, iv register, ia []register, ib []register, resolver *invokeResolver) (fv value, args []value) {
+func (i *Interp) prepareCall(fr *frame, call *ssa.CallCommon, iv register, ia []register, ib []register) (fv value, args []value) {
 	if call.Method == nil {
 		switch f := call.Value.(type) {
 		case *ssa.Builtin:
@@ -641,20 +640,24 @@ func (i *Interp) prepareCall(fr *frame, instr funcInstr, call *ssa.CallCommon, i
 		}
 	} else {
 		v := fr.reg(iv)
-		if v == nil {
-			panic(fr.runtimeError(instr, "runtime error: invalid memory address or nil pointer dereference"))
-		}
 		rtype := reflect.TypeOf(v)
-		target := resolver.resolve(rtype)
-		if target.interpreted != nil {
-			fv = target.interpreted.Fn
-		} else if target.reflectFunc.IsValid() {
-			// Go and defer capture values here and execute later. Keep using the
-			// resolved reflective method instead of retaining frame registers for
-			// a direct adapter.
-			fv = target.reflectFunc
+		mname := call.Method.Name()
+		if mset, ok := i.msets[rtype]; ok {
+			if f, ok := mset[mname]; ok {
+				fv = f
+			} else {
+				ext, ok := findUserMethod(rtype, mname)
+				if !ok {
+					panic(fmt.Errorf("no code for method: %v.%v", rtype, mname))
+				}
+				fv = ext
+			}
 		} else {
-			panic(fmt.Errorf("no code for method: %v.%v", rtype, resolver.name))
+			ext, ok := findExternMethod(rtype, mname)
+			if !ok {
+				panic(fmt.Errorf("no code for method: %v.%v", rtype, mname))
+			}
+			fv = ext
 		}
 		args = append(args, v)
 	}
@@ -1172,7 +1175,6 @@ func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{
 	defer ctx.loadPkgMu.Unlock()
 
 	prog := mainpkg.Prog
-	i.directCalls = snapshotDirectCallBindings(ctx.Loader, prog)
 	if ctx.MethodChecker != nil {
 		check := ctx.MethodChecker(ctx, prog)
 		rctx.SetHasImethod(func(typ reflect.Type, method reflectx.Method) bool {

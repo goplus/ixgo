@@ -100,8 +100,8 @@ func TestGenerateDirectCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Join(append(testRegistryEntries(output), testAdapterDeclarations(output)...), "\n")
-	want := `"example.com/host.Add": {Target: reflect.ValueOf(q.Add), Adapter: qexpDirectCallFunc_Add}
-"(*example.com/host.List).Append": {Target: reflect.ValueOf((*q.List).Append), Adapter: qexpDirectCallMethod_Ptr_List_Append}
+	want := `"Add": {Target: reflect.ValueOf(q.Add), Adapter: qexpDirectCallFunc_Add}
+"(*List).Append": {Target: reflect.ValueOf((*q.List).Append), Adapter: qexpDirectCallMethod_Ptr_List_Append}
 func qexpDirectCallFunc_Add(ctx ixgo.DirectCallContext) {
 	ctx.SetResult(q.Add(ixgo.DirectCallArg[int](ctx, 0), ixgo.DirectCallArg[int](ctx, 1)))
 }
@@ -156,8 +156,8 @@ func TestGenerateDirectCallDeduplicatesReceiverAlias(t *testing.T) {
 	}
 	entries := strings.Join(testRegistryEntries(output), "\n")
 	for _, key := range []string{
-		`"(example.com/host.List).Len"`,
-		`"(*example.com/host.List).Len"`,
+		`"List.Len"`,
+		`"(*List).Len"`,
 	} {
 		if got := strings.Count(entries, key); got != 1 {
 			t.Fatalf("binding %s count = %d; want 1\n%s", key, got, entries)
@@ -183,7 +183,7 @@ func TestGenerateDirectCallWildcards(t *testing.T) {
 		t.Fatal(err)
 	}
 	entries := strings.Join(testRegistryEntries(output), "\n")
-	for _, want := range []string{`"example.com/host.Add"`, `"(*example.com/host.List).Append"`} {
+	for _, want := range []string{`"Add"`, `"(*List).Append"`} {
 		if !strings.Contains(entries, want) {
 			t.Fatalf("wildcard output does not contain %s:\n%s", want, entries)
 		}
@@ -202,7 +202,7 @@ func TestGenerateDirectCallWildcards(t *testing.T) {
 		t.Fatalf("deduplicated wildcard bindings = %d; want 4", got)
 	}
 	entries = strings.Join(testRegistryEntries(output), "\n")
-	for _, want := range []string{`"(example.com/host.Value).Int"`, `"(*example.com/host.Value).Int"`} {
+	for _, want := range []string{`"Value.Int"`, `"(*Value).Int"`} {
 		if !strings.Contains(entries, want) {
 			t.Fatalf("all-method wildcard does not contain %s:\n%s", want, entries)
 		}
@@ -393,12 +393,23 @@ func TestGeneratedDirectCallsCompileWithSharedImports(t *testing.T) {
 		}
 	}
 	for _, key := range []string{
-		`"(github.com/goplus/ixgo/cmd/internal/export/testdata/directfixture.Value).Number"`,
-		`"(*github.com/goplus/ixgo/cmd/internal/export/testdata/directfixture.Value).Number"`,
+		`"Value.Number"`,
+		`"(*Value).Number"`,
 	} {
 		if !strings.Contains(string(source), key) {
 			t.Fatalf("generated source does not contain %s\n%s", key, source)
 		}
+	}
+	for _, want := range []string{
+		`ixgo.RegisterPackage(&ixgo.Package{`,
+		`ixgo.RegisterDirectCalls("` + fixturePath + `", map[string]ixgo.DirectCallBinding{`,
+	} {
+		if !strings.Contains(string(source), want) {
+			t.Fatalf("generated source does not contain %q\n%s", want, source)
+		}
+	}
+	if strings.Contains(string(source), "DirectCalls:") {
+		t.Fatalf("generated package still embeds direct calls\n%s", source)
 	}
 
 	_, testFile, _, ok := runtime.Caller(0)

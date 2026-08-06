@@ -13,52 +13,8 @@ import (
 	_ "github.com/goplus/ixgo/pkg/bytes"
 	_ "github.com/goplus/ixgo/pkg/context"
 	_ "github.com/goplus/ixgo/pkg/fmt"
-	_ "github.com/goplus/ixgo/pkg/sync"
 	_ "github.com/goplus/ixgo/pkg/time"
 )
-
-func TestDynamicExternalMethodConcurrentInvokeRace(t *testing.T) {
-	const source = `package main
-
-import (
-	"bytes"
-	"sync"
-)
-
-type lenner interface {
-	Len() int
-}
-
-func length(v lenner) int {
-	return v.Len()
-}
-
-func main() {
-	buffer := bytes.NewBufferString("x")
-	reader := bytes.NewReader([]byte("x"))
-	var wg sync.WaitGroup
-	for i := 0; i < 16; i++ {
-		var value lenner = buffer
-		if i%2 != 0 {
-			value = reader
-		}
-		wg.Add(1)
-		go func(value lenner) {
-			defer wg.Done()
-			for j := 0; j < 1000; j++ {
-				if length(value) != 1 {
-					panic("unexpected buffer length")
-				}
-			}
-		}(value)
-	}
-	wg.Wait()
-}
-`
-	if _, err := ixgo.RunFile("main.go", source, nil, ixgo.SupportMultipleInterp); err != nil {
-		t.Fatal(err)
-	}
-}
 
 func TestInterpreter_ConcurrentRun1(t *testing.T) {
 	source := `

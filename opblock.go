@@ -257,7 +257,7 @@ func findExternValue(interp *Interp, name string) (ext reflect.Value, ok bool) {
 	ext, ok = interp.ctx.override[name]
 	if !ok {
 		// check extern value
-		ext, ok = lookupExternal(name)
+		ext, ok = externValues[name]
 	}
 	return
 }
@@ -270,7 +270,7 @@ func findExternLinkFunc(interp *Interp, link *load.Linkname) (ext reflect.Value,
 		return
 	}
 	// check extern value
-	ext, ok = lookupExternal(fullName)
+	ext, ok = externValues[fullName]
 	if ok {
 		return
 	}
@@ -305,7 +305,7 @@ func findExternVar(interp *Interp, pkgPath string, name string) (ext reflect.Val
 		return
 	}
 	// check extern value
-	ext, ok = lookupExternal(fullName)
+	ext, ok = externValues[fullName]
 	if ok {
 		return
 	}
@@ -343,7 +343,7 @@ func findExternFunc(interp *Interp, fn *ssa.Function) (ext reflect.Value, ok boo
 	}
 	if fn.Pkg != nil {
 		if recv := fn.Signature.Recv(); recv == nil {
-			if pkg, found := interp.installed(fn.Pkg.Pkg.Path()); found {
+			if pkg, found := LookupPackage(fn.Pkg.Pkg.Path()); found {
 				ext, ok = pkg.Funcs[fn.Name()]
 			}
 		} else if typ, found := interp.ctx.Loader.LookupReflect(recv.Type()); found {
@@ -920,9 +920,8 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 		}
 	case *ssa.Go:
 		iv, ia, ib := getCallIndex(pfn, &instr.Call)
-		resolver := newInvokeResolver(interp, &instr.Call)
 		return func(fr *frame) {
-			fn, args := interp.prepareCall(fr, instr, &instr.Call, iv, ia, ib, resolver)
+			fn, args := interp.prepareCall(fr, &instr.Call, iv, ia, ib)
 			atomic.AddInt32(&interp.goroutines, 1)
 			if interp.ctx.RunContext != nil {
 				go func() {
@@ -1153,9 +1152,9 @@ func makeCallInstr(pfn *function, interp *Interp, instr ssa.Value, call *ssa.Cal
 			}
 		}
 	}
-	// Interface method dispatch (SSA "invoke" mode).
+	// "dynamic method call" // ("invoke" mode)
 	if call.IsInvoke() {
-		return makeInvokeInstr(interp, instr, call, ir, iv, ia)
+		return makeCallMethodInstr(interp, instr, call, ir, iv, ia)
 	}
 	// dynamic func call
 	typ := interp.preToType(call.Value.Type())
@@ -1200,26 +1199,46 @@ func findExternMethod(typ reflect.Type, name string) (ext reflect.Value, ok bool
 	return
 }
 
-func makeInvokeInstr(interp *Interp, instr ssa.Value, call *ssa.CallCommon, ir register, iv register, ia []register) func(fr *frame) {
+func (i *Interp) findMethod(typ reflect.Type, mname string) (fn *ssa.Function, ok bool) {
+	if mset, mok := i.msets[typ]; mok {
+		fn, ok = mset[mname]
+	}
+	return
+}
+
+func makeCallMethodInstr(interp *Interp, instr ssa.Value, call *ssa.CallCommon, ir register, iv register, ia []register) func(fr *frame) {
+	mname := call.Method.Name()
 	ia = append([]register{iv}, ia...)
-	resolver := newInvokeResolver(interp, call)
 	return func(fr *frame) {
 		v := fr.reg(iv)
 		if v == nil {
 			panic(fr.runtimeError(instr, "runtime error: invalid memory address or nil pointer dereference"))
 		}
 		rtype := reflect.TypeOf(v)
-		target := resolver.resolve(rtype)
-		switch {
-		case target.interpreted != nil:
-			interp.callFunctionByStack(fr, target.interpreted, ir, ia)
-		case target.direct != nil:
-			interp.invokeDirectCall(fr, target.direct, ir, ia)
-		case target.reflectFunc.IsValid():
-			interp.callExternalByStack(fr, target.reflectFunc, ir, ia)
-		default:
-			panic(fr.plainError(instr, fmt.Sprintf("no code for method: %v.%v", rtype, resolver.name)))
+		var ext reflect.Value
+		var found bool
+		// find user type method *ssa.Function
+		if mset, ok := interp.msets[rtype]; ok {
+			if fn, ok := mset[mname]; ok {
+				interp.callFunctionByStack(fr, interp.funcs[fn], ir, ia)
+				return
+			}
+			ext, found = findUserMethod(rtype, mname)
+			if !found {
+				panic(fr.plainError(instr, fmt.Sprintf("no code for method: %v.%v", rtype, mname)))
+			}
+			interp.callExternalByStack(fr, ext, ir, ia)
+			return
 		}
+		ext, found = findExternMethod(rtype, mname)
+		if !found {
+			panic(fr.plainError(instr, fmt.Sprintf("no code for method: %v.%v", rtype, mname)))
+		}
+		if adapter, ok := resolveInvokeDirectCall(rtype, mname, ext); ok {
+			interp.invokeDirectCall(fr, adapter, ir, ia)
+			return
+		}
+		interp.callExternalByStack(fr, ext, ir, ia)
 	}
 }
 
@@ -1342,10 +1361,9 @@ retry:
 
 func makeDefer(interp *Interp, pfn *function, instr *ssa.Defer) func(fr *frame) {
 	iv, ia, ib := getCallIndex(pfn, &instr.Call)
-	resolver := newInvokeResolver(interp, &instr.Call)
 	if instr.DeferStack == nil {
 		return func(fr *frame) {
-			fn, args := interp.prepareCall(fr, instr, &instr.Call, iv, ia, ib, resolver)
+			fn, args := interp.prepareCall(fr, &instr.Call, iv, ia, ib)
 			fr._defer = &_defer{
 				fn:      fn,
 				args:    args,
@@ -1356,7 +1374,7 @@ func makeDefer(interp *Interp, pfn *function, instr *ssa.Defer) func(fr *frame) 
 	}
 	id := pfn.regIndex(instr.DeferStack)
 	return func(fr *frame) {
-		fn, args := interp.prepareCall(fr, instr, &instr.Call, iv, ia, ib, resolver)
+		fn, args := interp.prepareCall(fr, &instr.Call, iv, ia, ib)
 		defers := fr.reg(id).(**_defer)
 		*defers = &_defer{
 			fn:      fn,

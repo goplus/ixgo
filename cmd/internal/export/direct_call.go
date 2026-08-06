@@ -362,7 +362,7 @@ func (g *directCallGenerator) newBinding(selector string, fn *types.Func, receiv
 	for i := 0; i < sig.Params().Len(); i++ {
 		argumentTypes = append(argumentTypes, sig.Params().At(i).Type())
 	}
-	key := fn.FullName()
+	key := fn.Name()
 	if receiver != nil {
 		key = directCallMethodKey(receiver, fn.Name())
 	}
@@ -394,8 +394,11 @@ func (g *directCallGenerator) adapterName(selector string, receiver types.Type) 
 
 // directCallMethodKey must match the runtime key format in direct_call.go.
 func directCallMethodKey(receiver types.Type, method string) string {
-	qualified := types.TypeString(receiver, func(pkg *types.Package) string { return pkg.Path() })
-	return "(" + qualified + ")." + method
+	name := types.TypeString(receiver, func(*types.Package) string { return "" })
+	if _, pointer := types.Unalias(receiver).(*types.Pointer); pointer {
+		return "(" + name + ")." + method
+	}
+	return name + "." + method
 }
 
 func checkDirectCallType(typ types.Type) error {

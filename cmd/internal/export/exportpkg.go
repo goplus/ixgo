@@ -173,7 +173,7 @@ func exportPkg(pkg *Package, sname string, id string, tagList []string, fname st
 	entries, adapters := pkg.directCalls.render(sname, runtimeAlias, reflectAlias, imports)
 	var directCalls string
 	if len(entries) != 0 {
-		directCalls = fmt.Sprintf("\nDirectCalls: map[string]%s.DirectCallBinding{%s},", runtimeAlias, joinList(entries))
+		directCalls = fmt.Sprintf("\n\t%s.RegisterDirectCalls(%q, map[string]%s.DirectCallBinding{%s})", runtimeAlias, pkg.Path, runtimeAlias, joinList(entries))
 	}
 	directCallAdapters := strings.Join(adapters, "\n\n")
 	r := strings.NewReplacer("$PKGNAME", pkg.Name,
@@ -232,10 +232,10 @@ func init() {$INIT
 		NamedTypes: map[string]$REFLECT.Type{$NAMEDTYPES},
 		AliasTypes: map[string]$REFLECT.Type{$ALIASTYPES},
 		Vars: map[string]$REFLECT.Value{$VARS},
-		Funcs: map[string]$REFLECT.Value{$FUNCS},$DIRECTCALLS
+		Funcs: map[string]$REFLECT.Value{$FUNCS},
 		TypedConsts: map[string]$IXGO.TypedConst{$TYPEDCONSTS},
 		UntypedConsts: map[string]$IXGO.UntypedConst{$UNTYPEDCONSTS},$EXT
-	})
+	})$DIRECTCALLS
 }
 
 $DIRECTCALLADAPTERS
@@ -263,11 +263,11 @@ func init() {$INIT
 		NamedTypes: map[string]$REFLECT.Type{$NAMEDTYPES},
 		AliasTypes: map[string]$REFLECT.Type{$ALIASTYPES},
 		Vars: map[string]$REFLECT.Value{$VARS},
-		Funcs: map[string]$REFLECT.Value{$FUNCS},$DIRECTCALLS
+		Funcs: map[string]$REFLECT.Value{$FUNCS},
 		TypedConsts: map[string]$IXGO.TypedConst{$TYPEDCONSTS},
 		UntypedConsts: map[string]$IXGO.UntypedConst{$UNTYPEDCONSTS},
 		Import: $TYPESDATA.ImportFunc("$PKGPATH", $TYPESNAME),$EXT
-	})
+	})$DIRECTCALLS
 }
 
 $DIRECTCALLADAPTERS
@@ -288,7 +288,7 @@ func init() {$INIT
 		Name: "$PKGNAME",
 		Path: "$PKGPATH",
 		Deps: map[string]string{$DEPS},$EXT
-	})
+	})$DIRECTCALLS
 }
 
 $DIRECTCALLADAPTERS
@@ -313,11 +313,11 @@ func init() {$INIT
 		NamedTypes: map[string]$REFLECT.Type{$NAMEDTYPES},
 		AliasTypes: map[string]$REFLECT.Type{$ALIASTYPES},
 		Vars: map[string]$REFLECT.Value{$VARS},
-		Funcs: map[string]$REFLECT.Value{$FUNCS},$DIRECTCALLS
+		Funcs: map[string]$REFLECT.Value{$FUNCS},
 		TypedConsts: map[string]$IXGO.TypedConst{$TYPEDCONSTS},
 		UntypedConsts: map[string]$IXGO.UntypedConst{$UNTYPEDCONSTS},
 		Source: source,$EXT
-	})
+	})$DIRECTCALLS
 }
 $LINKS
 var source = $SOURCE
@@ -341,7 +341,7 @@ func init() {$INIT
 		Path: "$PKGPATH",
 		Deps: map[string]string{$DEPS},
 		Source: source,$EXT
-	})
+	})$DIRECTCALLS
 }
 $LINKS
 var source = $SOURCE
