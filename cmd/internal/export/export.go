@@ -43,6 +43,7 @@ var (
 	flagExportAlias    bool
 	flagExportLazy     bool
 	flagAliasTypes     string
+	flagDirectCalls    string
 )
 
 var (
@@ -62,6 +63,7 @@ func init() {
 	flag.BoolVar(&flagExportAlias, "alias", false, "export types alias data")
 	flag.BoolVar(&flagExportLazy, "lazy", false, "deferred initialization of registered packages to first use")
 	flag.StringVar(&flagAliasTypes, "alias_types", "", "set export types alias list, split by ;")
+	flag.StringVar(&flagDirectCalls, "directcalls", "", "generate direct adapters for Func, Type.Method, *, Type.*, *.*, or all selectors (separate selectors with , or ;)")
 }
 
 // Cmd - ixgo build
@@ -115,7 +117,9 @@ func exportCmd(cmd *base.Command, args []string) {
 	}
 
 	ctxList := parserContextList(flagBuildContext)
-	Export(args, ctxList)
+	if err := Export(args, ctxList); err != nil {
+		log.Panicln(err)
+	}
 }
 
 // pkg/...
@@ -183,22 +187,24 @@ func isSkipPkg(pkg string) bool {
 	return false
 }
 
-func Export(pkgs []string, ctxList []*build.Context) {
+func Export(pkgs []string, ctxList []*build.Context) error {
 	log.Println("process", pkgs)
 	if len(ctxList) == 0 {
-		ExportPkgs(pkgs, nil)
-	} else {
-		for _, ctx := range ctxList {
-			ExportPkgs(pkgs, ctx)
+		return ExportPkgs(pkgs, nil)
+	}
+	var errs []error
+	for _, ctx := range ctxList {
+		if err := ExportPkgs(pkgs, ctx); err != nil {
+			errs = append(errs, err)
 		}
 	}
+	return errors.Join(errs...)
 }
 
-func ExportPkgs(pkgs []string, ctx *build.Context) {
+func ExportPkgs(pkgs []string, ctx *build.Context) error {
 	prog := NewProgram(ctx)
-	err := prog.Load(pkgs)
-	if err != nil {
-		log.Panicln(err)
+	if err := prog.Load(pkgs); err != nil {
+		return err
 	}
 	if !flagExportAlias && len(filterAliasTypesMap) == 0 {
 		for pkg := range prog.prog.AllPackages {
@@ -208,6 +214,7 @@ func ExportPkgs(pkgs []string, ctx *build.Context) {
 			flagExportAlias = true
 		}
 	}
+	var errs []error
 	for _, pkg := range pkgs {
 		if pkg == "unsafe" {
 			continue
@@ -215,13 +222,21 @@ func ExportPkgs(pkgs []string, ctx *build.Context) {
 		fpath, err := ExportPkg(prog, pkg, ctx)
 		if err != nil {
 			log.Printf("export %v failed: %v\n", pkg, err)
+			errs = append(errs, fmt.Errorf("export %s: %w", pkg, err))
 		} else {
 			log.Printf("export %v: %v\n", pkg, fpath)
 		}
 	}
+	return errors.Join(errs...)
 }
 
 func ExportPkg(prog *Program, pkg string, ctx *build.Context) (string, error) {
+	if flagDirectCalls != "" && flagCustomPkg != "" {
+		return "", errors.New("-directcalls cannot be combined with -pkgpath")
+	}
+	if flagDirectCalls != "" && flagExportCode {
+		return "", errors.New("-directcalls cannot be combined with -code")
+	}
 	e, err := prog.ExportPkg(pkg, "q")
 	if err != nil {
 		return "", err

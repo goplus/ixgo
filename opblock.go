@@ -1142,6 +1142,9 @@ func makeCallInstr(pfn *function, interp *Interp, instr ssa.Value, call *ssa.Cal
 					interp.callExternalWithFrameByStack(fr, ext, ir, ia)
 				}
 			}
+			if run := makeStaticDirectCallInstr(interp, fn, ext, ir, ia); run != nil {
+				return run
+			}
 			return func(fr *frame) {
 				interp.callExternalByStack(fr, ext, ir, ia)
 			}
@@ -1250,11 +1253,19 @@ func makeCallMethodInstr(interp *Interp, instr ssa.Value, call *ssa.CallCommon, 
 				return
 			}
 			ext, found = findUserMethod(rtype, mname)
-		} else {
-			ext, found = findExternMethod(rtype, mname)
+			if !found {
+				panic(fr.plainError(instr, fmt.Sprintf("no code for method: %v.%v", rtype, mname)))
+			}
+			interp.callExternalByStack(fr, ext, ir, ia)
+			return
 		}
+		ext, found = findExternMethod(rtype, mname)
 		if !found {
 			panic(fr.plainError(instr, fmt.Sprintf("no code for method: %v.%v", rtype, mname)))
+		}
+		if adapter, ok := resolveInvokeDirectCall(rtype, mname, ext); ok {
+			interp.invokeDirectCall(fr, adapter, ir, ia)
+			return
 		}
 		interp.callExternalByStack(fr, ext, ir, ia)
 	}

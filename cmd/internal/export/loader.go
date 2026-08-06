@@ -181,6 +181,7 @@ type Package struct {
 	AliasTypes    []string
 	Vars          []string
 	Funcs         []string
+	directCalls   directCallOutput
 	Consts        []string
 	TypedConsts   []string
 	UntypedConsts []string
@@ -195,7 +196,7 @@ type Package struct {
 func (p *Package) IsEmpty() bool {
 	return len(p.NamedTypes) == 0 && len(p.Interfaces) == 0 &&
 		len(p.AliasTypes) == 0 && len(p.Vars) == 0 &&
-		len(p.Funcs) == 0 && len(p.Consts) == 0 &&
+		len(p.Funcs) == 0 && p.directCalls.isEmpty() && len(p.Consts) == 0 &&
 		len(p.TypedConsts) == 0 && len(p.UntypedConsts) == 0
 }
 
@@ -272,7 +273,7 @@ func (p *Program) constToLit(named string, c constant.Value) string {
 	case constant.Complex:
 		re := p.constToLit("", constant.Real(c))
 		im := p.constToLit("", constant.Imag(c))
-		return fmt.Sprintf("constant.BinaryOp(%v, token.ADD, constan.MakeImag(%v))", re, im)
+		return fmt.Sprintf("constant.BinaryOp(%v, token.ADD, constant.MakeImag(%v))", re, im)
 	default:
 		panic("unreachable")
 	}
@@ -486,6 +487,13 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 		}
 		sort.Strings(inits)
 		e.AliasInit = fmt.Sprintf("var (\n\t%v\n)", strings.Join(inits, "\n\t"))
+	}
+	if flagDirectCalls != "" {
+		directCalls, err := generateDirectCalls(pkg, flagDirectCalls)
+		if err != nil {
+			return nil, err
+		}
+		e.directCalls = directCalls
 	}
 
 	return e, nil
