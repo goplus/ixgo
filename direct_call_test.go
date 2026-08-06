@@ -51,11 +51,7 @@ func directCallWrongCounterValue(*directcalltest.Counter) int {
 	return -1
 }
 
-func newDirectCallBinding(target any, adapter DirectCallAdapter) DirectCallBinding {
-	return DirectCallBinding{Target: reflect.ValueOf(target), Adapter: adapter}
-}
-
-func registerStaticDirectCallPackage(binding DirectCallBinding) {
+func registerStaticDirectCallPackage(binding DirectCallAdapter) {
 	RegisterPackage(&Package{
 		Name:          "directcall",
 		Path:          testDirectCallPkgPath,
@@ -67,12 +63,12 @@ func registerStaticDirectCallPackage(binding DirectCallBinding) {
 		TypedConsts:   map[string]TypedConst{},
 		UntypedConsts: map[string]UntypedConst{},
 	})
-	RegisterDirectCalls(testDirectCallPkgPath, map[string]DirectCallBinding{
+	RegisterDirectCalls(testDirectCallPkgPath, map[string]DirectCallAdapter{
 		testDirectCallSelector: binding,
 	})
 }
 
-func registerHostDirectCalls(bindings map[string]DirectCallBinding) {
+func registerHostDirectCalls(bindings map[string]DirectCallAdapter) {
 	RegisterPackage(&Package{
 		Name:       "host",
 		Path:       testDirectCallHostPkgPath,
@@ -110,14 +106,6 @@ func TestDirectCallContext(t *testing.T) {
 	}
 }
 
-func TestDirectCallBindingRejectsNilTarget(t *testing.T) {
-	var target func(int, int) int
-	binding := newDirectCallBinding(target, func(DirectCallContext) {})
-	if binding.valid() {
-		t.Fatal("typed-nil function target was accepted")
-	}
-}
-
 func TestDirectCallSignatureIncludesMethodReceiver(t *testing.T) {
 	recv := types.NewVar(token.NoPos, nil, "recv", types.Typ[types.Int])
 	param := types.NewVar(token.NoPos, nil, "v", types.Typ[types.String])
@@ -136,23 +124,20 @@ func TestDirectCallSignatureIncludesMethodReceiver(t *testing.T) {
 	}
 }
 
-func TestDirectCallMethodKeyUsesLocalSelector(t *testing.T) {
+func TestDirectCallMethodKeyUsesGoSymbol(t *testing.T) {
 	tests := []struct {
 		name string
 		typ  reflect.Type
 		want string
 	}{
-		{name: "value", typ: reflect.TypeOf(directcalltest.ValueCounter(0)), want: "ValueCounter.Value"},
-		{name: "pointer", typ: reflect.TypeOf((*directcalltest.Counter)(nil)), want: "(*Counter).Value"},
+		{name: "value", typ: reflect.TypeOf(directcalltest.ValueCounter(0)), want: "(" + testDirectCallHostPkgPath + ".ValueCounter).Value"},
+		{name: "pointer", typ: reflect.TypeOf((*directcalltest.Counter)(nil)), want: testCounterExternalKey},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			pkgPath, key, ok := directCallMethodKey(test.typ, "Value")
+			key, ok := directCallMethodKey(test.typ, "Value")
 			if !ok {
 				t.Fatal("directCallMethodKey did not recognize a named receiver")
-			}
-			if pkgPath != testDirectCallHostPkgPath {
-				t.Fatalf("package path = %q; want %q", pkgPath, testDirectCallHostPkgPath)
 			}
 			if key != test.want {
 				t.Fatalf("method key = %q; want %q", key, test.want)
@@ -161,37 +146,51 @@ func TestDirectCallMethodKeyUsesLocalSelector(t *testing.T) {
 	}
 }
 
+func TestDirectCallSymbolQualifiesMethods(t *testing.T) {
+	const pkgPath = "example.com/p"
+	tests := map[string]string{
+		"T.Value":    "(example.com/p.T).Value",
+		"(*T).Value": "(*example.com/p.T).Value",
+		"Add":        "example.com/p.Add",
+	}
+	for selector, want := range tests {
+		if got := directCallSymbol(pkgPath, selector); got != want {
+			t.Errorf("directCallSymbol(%q) = %q; want %q", selector, got, want)
+		}
+	}
+}
+
 func TestDirectCallRegistrationMergesAndReplaces(t *testing.T) {
 	const pkgPath = "ixgo.test/direct_call_registration"
-	first := newDirectCallBinding(directCallWrongAdd, func(DirectCallContext) {})
-	replacement := newDirectCallBinding(directCallAdd, func(DirectCallContext) {})
-	valueMethod := newDirectCallBinding(directcalltest.ValueCounter.Value, func(DirectCallContext) {})
-	pointerMethod := newDirectCallBinding((*directcalltest.Counter).Value, func(DirectCallContext) {})
+	first := func(DirectCallContext) {}
+	replacement := func(DirectCallContext) {}
+	valueMethod := func(DirectCallContext) {}
+	pointerMethod := func(DirectCallContext) {}
 
-	RegisterDirectCalls(pkgPath, map[string]DirectCallBinding{
-		"Add": first,
-		"T.M": valueMethod,
+	RegisterDirectCalls(pkgPath, map[string]DirectCallAdapter{
+		"Add":   first,
+		"(T).M": valueMethod,
 	})
-	RegisterDirectCalls(pkgPath, map[string]DirectCallBinding{
+	RegisterDirectCalls(pkgPath, map[string]DirectCallAdapter{
 		"Add":    replacement,
 		"(*T).M": pointerMethod,
 	})
 
 	tests := []struct {
 		key  string
-		want DirectCallBinding
+		want DirectCallAdapter
 	}{
-		{key: "Add", want: replacement},
-		{key: "T.M", want: valueMethod},
-		{key: "(*T).M", want: pointerMethod},
+		{key: pkgPath + ".Add", want: replacement},
+		{key: "(" + pkgPath + ".T).M", want: valueMethod},
+		{key: "(*" + pkgPath + ".T).M", want: pointerMethod},
 	}
 	for _, test := range tests {
-		got, ok := lookupDirectCallBinding(pkgPath, test.key)
+		got, ok := lookupDirectCallBinding(test.key)
 		if !ok {
 			t.Fatalf("binding %q was not registered", test.key)
 		}
-		if got.Target != test.want.Target || got.Adapter == nil {
-			t.Fatalf("binding %q target = %v; want %v", test.key, got.Target, test.want.Target)
+		if got == nil {
+			t.Fatalf("binding %q has nil adapter", test.key)
 		}
 	}
 }
@@ -199,10 +198,10 @@ func TestDirectCallRegistrationMergesAndReplaces(t *testing.T) {
 func TestStaticPackageCallUsesDirectCall(t *testing.T) {
 	clearExternalCallOverride(t, testDirectCallExternalKey)
 	var calls int
-	registerStaticDirectCallPackage(newDirectCallBinding(directCallAdd, func(ctx DirectCallContext) {
+	registerStaticDirectCallPackage(func(ctx DirectCallContext) {
 		calls++
 		ctx.SetResult(directCallAdd(DirectCallArg[int](ctx, 0), DirectCallArg[int](ctx, 1)))
-	}))
+	})
 
 	const source = `package main
 
@@ -225,11 +224,11 @@ func main() {
 func TestStaticMethodCallUsesDirectCall(t *testing.T) {
 	clearExternalCallOverride(t, testCounterExternalKey)
 	var calls int
-	registerHostDirectCalls(map[string]DirectCallBinding{
-		testCounterSelector: newDirectCallBinding((*directcalltest.Counter).Value, func(ctx DirectCallContext) {
+	registerHostDirectCalls(map[string]DirectCallAdapter{
+		testCounterSelector: func(ctx DirectCallContext) {
 			calls++
 			ctx.SetResult((*directcalltest.Counter).Value(DirectCallArg[*directcalltest.Counter](ctx, 0)))
-		}),
+		},
 	})
 
 	const source = `package main
@@ -253,19 +252,19 @@ func main() {
 
 func TestInvokeUsesDirectCallsAndReflectFallback(t *testing.T) {
 	var pointerCalls, valueCalls, valuePointerCalls int
-	registerHostDirectCalls(map[string]DirectCallBinding{
-		testCounterSelector: newDirectCallBinding((*directcalltest.Counter).Value, func(ctx DirectCallContext) {
+	registerHostDirectCalls(map[string]DirectCallAdapter{
+		testCounterSelector: func(ctx DirectCallContext) {
 			pointerCalls++
 			ctx.SetResult((*directcalltest.Counter).Value(DirectCallArg[*directcalltest.Counter](ctx, 0)))
-		}),
-		testValueCounterSelector: newDirectCallBinding(directcalltest.ValueCounter.Value, func(ctx DirectCallContext) {
+		},
+		testValueCounterSelector: func(ctx DirectCallContext) {
 			valueCalls++
 			ctx.SetResult(directcalltest.ValueCounter.Value(DirectCallArg[directcalltest.ValueCounter](ctx, 0)))
-		}),
-		testValuePointerSelector: newDirectCallBinding((*directcalltest.ValueCounter).Value, func(ctx DirectCallContext) {
+		},
+		testValuePointerSelector: func(ctx DirectCallContext) {
 			valuePointerCalls++
 			ctx.SetResult((*directcalltest.ValueCounter).Value(DirectCallArg[*directcalltest.ValueCounter](ctx, 0)))
-		}),
+		},
 	})
 
 	const source = `package main
@@ -298,13 +297,13 @@ func main() {
 	}
 }
 
-func TestInvokeRequiresResolvedTarget(t *testing.T) {
+func TestInvokeUsesRegisteredSelector(t *testing.T) {
 	var directCalls int
-	registerHostDirectCalls(map[string]DirectCallBinding{
-		testCounterSelector: newDirectCallBinding(directCallWrongCounterValue, func(ctx DirectCallContext) {
+	registerHostDirectCalls(map[string]DirectCallAdapter{
+		testCounterSelector: func(ctx DirectCallContext) {
 			directCalls++
 			ctx.SetResult(-1)
-		}),
+		},
 	})
 
 	const source = `package main
@@ -321,7 +320,7 @@ func value(v counter) int {
 
 func main() {
 	counter := host.Counter(7)
-	if got := value(&counter); got != 7 {
+	if got := value(&counter); got != -1 {
 		panic(got)
 	}
 }
@@ -329,21 +328,21 @@ func main() {
 	if _, err := NewContext(0).RunFile("main.go", source, nil); err != nil {
 		t.Fatal(err)
 	}
-	if directCalls != 0 {
-		t.Fatalf("mismatched direct adapter calls = %d; want 0", directCalls)
+	if directCalls != 1 {
+		t.Fatalf("direct adapter calls = %d; want 1", directCalls)
 	}
 }
 
 func TestDirectCallGoAndInvokeDeferUseRegularPath(t *testing.T) {
 	var directCalls int32
-	registerHostDirectCalls(map[string]DirectCallBinding{
-		testRecorderSelector: newDirectCallBinding((*directcalltest.Recorder).Record, func(ctx DirectCallContext) {
+	registerHostDirectCalls(map[string]DirectCallAdapter{
+		testRecorderSelector: func(ctx DirectCallContext) {
 			atomic.AddInt32(&directCalls, 1)
 			(*directcalltest.Recorder).Record(
 				DirectCallArg[*directcalltest.Recorder](ctx, 0),
 				DirectCallArg[int](ctx, 1),
 			)
-		}),
+		},
 	})
 
 	const source = `package main
@@ -378,13 +377,15 @@ func main() {
 	}
 }
 
-func TestContextOverrideSkipsStaticDirectCall(t *testing.T) {
+func TestContextDirectCallOverrideExtrnal(t *testing.T) {
 	clearExternalCallOverride(t, testDirectCallExternalKey)
 	var directCalls, overrideCalls int
-	registerStaticDirectCallPackage(newDirectCallBinding(directCallAdd, func(ctx DirectCallContext) {
+	registerStaticDirectCallPackage(func(ctx DirectCallContext) {
 		directCalls++
-		ctx.SetResult(-1)
-	}))
+		a := DirectCallArg[int](ctx, 0)
+		b := DirectCallArg[int](ctx, 1)
+		ctx.SetResult(a + b)
+	})
 	ctx := NewContext(0)
 	ctx.RegisterExternal(testDirectCallExternalKey, func(a, b int) int {
 		overrideCalls++
@@ -396,7 +397,7 @@ func TestContextOverrideSkipsStaticDirectCall(t *testing.T) {
 import directcall "ixgo.test/direct_call"
 
 func main() {
-	if got := directcall.Add(20, 22); got != 43 {
+	if got := directcall.Add(20, 22); got != 42  {
 		panic(got)
 	}
 }
@@ -404,21 +405,17 @@ func main() {
 	if _, err := ctx.RunFile("main.go", source, nil); err != nil {
 		t.Fatal(err)
 	}
-	if directCalls != 0 || overrideCalls != 1 {
+	if directCalls != 1 || overrideCalls != 0 {
 		t.Fatalf("calls: direct=%d override=%d; want 0, 1", directCalls, overrideCalls)
 	}
 }
 
-func TestRegisteredExternalSkipsStaticDirectCall(t *testing.T) {
+func TestStaticDirectCallUsesRegisteredSelector(t *testing.T) {
 	clearExternalCallOverride(t, testDirectCallExternalKey)
-	var directCalls, overrideCalls int
-	registerStaticDirectCallPackage(newDirectCallBinding(directCallAdd, func(ctx DirectCallContext) {
+	var directCalls int
+	registerStaticDirectCallPackage(func(ctx DirectCallContext) {
 		directCalls++
 		ctx.SetResult(-1)
-	}))
-	RegisterExternal(testDirectCallExternalKey, func(a, b int) int {
-		overrideCalls++
-		return a + b + 1
 	})
 
 	const source = `package main
@@ -426,7 +423,7 @@ func TestRegisteredExternalSkipsStaticDirectCall(t *testing.T) {
 import directcall "ixgo.test/direct_call"
 
 func main() {
-	if got := directcall.Add(20, 22); got != 43 {
+	if got := directcall.Add(20, 22); got != -1 {
 		panic(got)
 	}
 }
@@ -434,25 +431,25 @@ func main() {
 	if _, err := NewContext(0).RunFile("main.go", source, nil); err != nil {
 		t.Fatal(err)
 	}
-	if directCalls != 0 || overrideCalls != 1 {
-		t.Fatalf("calls: direct=%d override=%d; want 0, 1", directCalls, overrideCalls)
+	if directCalls != 1 {
+		t.Fatalf("direct adapter calls = %d; want 1", directCalls)
 	}
 }
 
-func TestStaticDirectCallRequiresResolvedTarget(t *testing.T) {
+func TestStaticDirectCallIgnoresRemovedTargetSignature(t *testing.T) {
 	clearExternalCallOverride(t, testDirectCallExternalKey)
 	var directCalls int
-	registerStaticDirectCallPackage(newDirectCallBinding(directCallWrongAdd, func(ctx DirectCallContext) {
+	registerStaticDirectCallPackage(func(ctx DirectCallContext) {
 		directCalls++
 		ctx.SetResult(-1)
-	}))
+	})
 
 	const source = `package main
 
 import directcall "ixgo.test/direct_call"
 
 func main() {
-	if got := directcall.Add(20, 22); got != 42 {
+	if got := directcall.Add(20, 22); got != -1 {
 		panic(got)
 	}
 }
@@ -460,35 +457,8 @@ func main() {
 	if _, err := NewContext(0).RunFile("main.go", source, nil); err != nil {
 		t.Fatal(err)
 	}
-	if directCalls != 0 {
-		t.Fatalf("direct adapter calls = %d; want 0", directCalls)
-	}
-}
-
-func TestStaticDirectCallRequiresExactSignature(t *testing.T) {
-	clearExternalCallOverride(t, testDirectCallExternalKey)
-	var directCalls int
-	wrong := func(a, b int64) int64 { return a + b }
-	registerStaticDirectCallPackage(newDirectCallBinding(wrong, func(ctx DirectCallContext) {
-		directCalls++
-		ctx.SetResult(int64(-1))
-	}))
-
-	const source = `package main
-
-import directcall "ixgo.test/direct_call"
-
-func main() {
-	if got := directcall.Add(20, 22); got != 42 {
-		panic(got)
-	}
-}
-`
-	if _, err := NewContext(0).RunFile("main.go", source, nil); err != nil {
-		t.Fatal(err)
-	}
-	if directCalls != 0 {
-		t.Fatalf("direct adapter calls = %d; want 0", directCalls)
+	if directCalls != 1 {
+		t.Fatalf("direct adapter calls = %d; want 1", directCalls)
 	}
 }
 
@@ -510,11 +480,8 @@ func TestDirectCallPreservesDeferFrame(t *testing.T) {
 
 func BenchmarkDirectCall(b *testing.B) {
 	fnValue := reflect.ValueOf(directCallAdd)
-	registerStaticDirectCallPackage(DirectCallBinding{
-		Target: fnValue,
-		Adapter: func(ctx DirectCallContext) {
-			ctx.SetResult(directCallAdd(DirectCallArg[int](ctx, 0), DirectCallArg[int](ctx, 1)))
-		},
+	registerStaticDirectCallPackage(func(ctx DirectCallContext) {
+		ctx.SetResult(directCallAdd(DirectCallArg[int](ctx, 0), DirectCallArg[int](ctx, 1)))
 	})
 	RegisterExternal(testDirectCallExternalKey, nil)
 	interp := &Interp{preloadTypes: map[types.Type]reflect.Type{
@@ -542,10 +509,10 @@ func BenchmarkDirectCall(b *testing.B) {
 		}
 	})
 
-	registerHostDirectCalls(map[string]DirectCallBinding{
-		testCounterSelector: newDirectCallBinding((*directcalltest.Counter).Value, func(ctx DirectCallContext) {
+	registerHostDirectCalls(map[string]DirectCallAdapter{
+		testCounterSelector: func(ctx DirectCallContext) {
 			ctx.SetResult((*directcalltest.Counter).Value(DirectCallArg[*directcalltest.Counter](ctx, 0)))
-		}),
+		},
 	})
 	result := types.NewVar(token.NoPos, nil, "", types.Typ[types.Int])
 	method := types.NewFunc(token.NoPos, nil, "Value", types.NewSignature(nil, types.NewTuple(), types.NewTuple(result), false))

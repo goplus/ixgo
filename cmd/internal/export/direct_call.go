@@ -67,7 +67,7 @@ func (r *directCallRenderer) targetExpr(binding directCallBinding) string {
 }
 
 func (r *directCallRenderer) registryEntry(binding directCallBinding) string {
-	return fmt.Sprintf("%q: {Target: reflect.ValueOf(%s), Adapter: %s}", binding.key, r.targetExpr(binding), binding.adapterName)
+	return fmt.Sprintf("%q: %s", binding.key, binding.adapterName)
 }
 
 func (r *directCallRenderer) adapterDeclaration(binding directCallBinding) string {
@@ -392,7 +392,7 @@ func directCallMethodKey(receiver types.Type, method string) string {
 	if _, pointer := types.Unalias(receiver).(*types.Pointer); pointer {
 		return "(" + name + ")." + method
 	}
-	return name + "." + method
+	return "(" + name + ")." + method
 }
 
 func checkDirectCallType(typ types.Type) error {
