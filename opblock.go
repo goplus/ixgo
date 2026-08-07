@@ -1275,7 +1275,7 @@ func makeCallMethodInstr(interp *Interp, instr ssa.Value, call *ssa.CallCommon, 
 		if !found {
 			panic(fr.plainError(instr, fmt.Sprintf("no code for method: %v.%v", rtype, mname)))
 		}
-		if adapter, ok := resolveInvokeDirectCall(interp, rtype, mname); ok {
+		if adapter, ok := resolveInvokeDirectCall(rtype, mname); ok {
 			interp.invokeDirectCall(fr, adapter, ir, ia)
 			return
 		}

@@ -132,23 +132,25 @@ func TestDirectCallSignatureIncludesMethodReceiver(t *testing.T) {
 	}
 }
 
-func TestDirectCallMethodKeyUsesGoSymbol(t *testing.T) {
+func TestRegisteredDirectCallMethod(t *testing.T) {
+	registerHostDirectCalls(nil)
 	tests := []struct {
-		name string
-		typ  reflect.Type
-		want string
+		name     string
+		selector string
+		wantType reflect.Type
+		wantName string
 	}{
-		{name: "value", typ: reflect.TypeOf(directcalltest.ValueCounter(0)), want: "(" + testDirectCallHostPkgPath + ".ValueCounter).Value"},
-		{name: "pointer", typ: reflect.TypeOf((*directcalltest.Counter)(nil)), want: testCounterExternalKey},
+		{name: "value", selector: testValueCounterSelector, wantType: reflect.TypeOf(directcalltest.ValueCounter(0)), wantName: "Value"},
+		{name: "pointer", selector: testCounterSelector, wantType: reflect.TypeOf((*directcalltest.Counter)(nil)), wantName: "Value"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			key, ok := directCallMethodKey(test.typ, "Value")
+			gotType, gotName, ok := registeredDirectCallMethod(testDirectCallHostPkgPath, test.selector)
 			if !ok {
-				t.Fatal("directCallMethodKey did not recognize a named receiver")
+				t.Fatal("registeredDirectCallMethod did not recognize a named receiver")
 			}
-			if key != test.want {
-				t.Fatalf("method key = %q; want %q", key, test.want)
+			if gotType != test.wantType || gotName != test.wantName {
+				t.Fatalf("method = (%v, %q); want (%v, %q)", gotType, gotName, test.wantType, test.wantName)
 			}
 		})
 	}
@@ -521,7 +523,7 @@ func BenchmarkDirectCall(b *testing.B) {
 		ctx.SetResult(directCallAdd(DirectCallArg[int](ctx, 0), DirectCallArg[int](ctx, 1)))
 	})
 	RegisterExternal(testDirectCallExternalKey, nil)
-	interp := &Interp{preloadTypes: map[types.Type]reflect.Type{
+	interp := &Interp{ctx: &Context{}, preloadTypes: map[types.Type]reflect.Type{
 		types.Typ[types.Int]: reflect.TypeOf(int(0)),
 	}}
 	fr := &frame{stack: []value{20, 22, nil}}

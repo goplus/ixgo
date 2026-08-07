@@ -53,13 +53,60 @@ type DirectCallAdapter func(DirectCallContext)
 
 var directCallBindings sync.Map // map[string]DirectCallAdapter
 
+var directCallMethods sync.Map // map[reflect.Type]*sync.Map(method -> DirectCallAdapter)
+
 // RegisterDirectCalls registers generated direct-call bindings for pkgPath.
 // Registration must finish before constructing an interpreter that uses the
 // package. Later registrations replace bindings with the same selector.
 func RegisterDirectCalls(pkgPath string, bindings map[string]DirectCallAdapter) {
 	for selector, adapter := range bindings {
-		directCallBindings.Store(directCallSymbol(pkgPath, selector), adapter)
+		externalKey := directCallSymbol(pkgPath, selector)
+		directCallBindings.Store(externalKey, adapter)
+		if receiver, method, ok := registeredDirectCallMethod(pkgPath, selector); ok {
+			value, _ := directCallMethods.LoadOrStore(receiver, new(sync.Map))
+			value.(*sync.Map).Store(method, adapter)
+		}
 	}
+}
+
+func registeredDirectCallMethod(pkgPath, selector string) (reflect.Type, string, bool) {
+	var receiverName, method string
+	var pointer bool
+	switch {
+	case strings.HasPrefix(selector, "(*"):
+		end := strings.Index(selector, ").")
+		if end < 3 {
+			return nil, "", false
+		}
+		receiverName, method, pointer = selector[2:end], selector[end+2:], true
+	case strings.HasPrefix(selector, "("):
+		end := strings.Index(selector, ").")
+		if end < 2 {
+			return nil, "", false
+		}
+		receiverName, method = selector[1:end], selector[end+2:]
+	default:
+		var ok bool
+		receiverName, method, ok = strings.Cut(selector, ".")
+		if !ok {
+			return nil, "", false
+		}
+	}
+	if receiverName == "" || method == "" {
+		return nil, "", false
+	}
+	pkg, ok := LookupPackage(pkgPath)
+	if !ok {
+		return nil, "", false
+	}
+	receiver, ok := pkg.NamedTypes[receiverName]
+	if !ok {
+		return nil, "", false
+	}
+	if pointer {
+		receiver = reflect.PtrTo(receiver)
+	}
+	return receiver, method, true
 }
 
 func directCallSymbol(pkgPath, selector string) string {
@@ -75,21 +122,6 @@ func directCallSymbol(pkgPath, selector string) string {
 		return "(" + pkgPath + "." + receiver + ")." + method
 	}
 	return pkgPath + "." + selector
-}
-
-// directCallMethodKey must match cmd/internal/export/direct_call.go.
-func directCallMethodKey(typ reflect.Type, method string) (key string, ok bool) {
-	ptr := typ.Kind() == reflect.Ptr
-	if ptr {
-		typ = typ.Elem()
-	}
-	if typ.Name() == "" || typ.PkgPath() == "" {
-		return "", false
-	}
-	if ptr {
-		return "(*" + typ.PkgPath() + "." + typ.Name() + ")." + method, true
-	}
-	return "(" + typ.PkgPath() + "." + typ.Name() + ")." + method, true
 }
 
 func lookupDirectCallBinding(interp *Interp, key string) (DirectCallAdapter, bool) {
@@ -115,12 +147,17 @@ func resolveStaticDirectCall(interp *Interp, fn *ssa.Function) (DirectCallAdapte
 	return lookupDirectCallBinding(interp, externalKey)
 }
 
-func resolveInvokeDirectCall(interp *Interp, receiver reflect.Type, method string) (DirectCallAdapter, bool) {
-	key, ok := directCallMethodKey(receiver, method)
+func resolveInvokeDirectCall(receiver reflect.Type, method string) (DirectCallAdapter, bool) {
+	value, ok := directCallMethods.Load(receiver)
 	if !ok {
 		return nil, false
 	}
-	return lookupDirectCallBinding(interp, key)
+	value, ok = value.(*sync.Map).Load(method)
+	if !ok {
+		return nil, false
+	}
+	adapter := value.(DirectCallAdapter)
+	return adapter, adapter != nil
 }
 
 func makeStaticDirectCallInstr(interp *Interp, fn *ssa.Function, result register, args []register) func(*frame) {

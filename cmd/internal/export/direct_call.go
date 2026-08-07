@@ -386,7 +386,7 @@ func (g *directCallGenerator) adapterName(selector string, receiver types.Type) 
 	return name
 }
 
-// directCallMethodKey must match the runtime key format in direct_call.go.
+// directCallMethodKey returns the method selector format accepted by RegisterDirectCalls.
 func directCallMethodKey(receiver types.Type, method string) string {
 	name := types.TypeString(receiver, func(*types.Package) string { return "" })
 	if _, pointer := types.Unalias(receiver).(*types.Pointer); pointer {
