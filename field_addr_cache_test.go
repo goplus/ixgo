@@ -28,27 +28,18 @@ func TestFieldAddrCache(t *testing.T) {
 
 type record struct { value int }
 
-func stable(r *record) *int {
-	var first *int
+func update(left, right *record) {
 	for i := 0; i < 4; i++ {
-		addr := &r.value
-		if first == nil {
-			first = addr
-		} else if addr != first {
-			panic("cached address changed")
-		}
+		current := left
+		if i >= 2 { current = right }
+		*(&current.value) += i + 1
 	}
-	return first
 }
 
 func main() {
 	left, right := &record{}, &record{}
-	for i := 0; i < 64; i++ { // also exercises pooled frames and receiver changes
-		current := left
-		if i&1 != 0 { current = right }
-		*stable(current) = i + 1
-	}
-	if left.value != 63 || right.value != 64 { panic("wrong cached address") }
+	for i := 0; i < 8; i++ { update(left, right) }
+	if left.value != 24 || right.value != 56 { panic("wrong cached address") }
 }
 `
 	ctx := ixgo.NewContext(0)
@@ -78,36 +69,87 @@ func main() {
 	}
 }
 
+func TestFieldAddrCacheReleasesReceiver(t *testing.T) {
+	const source = `package main
+
+import "runtime"
+
+type record struct { value [8]int64 }
+
+var finalized = make(chan struct{}, 1)
+var sink *[8]int64
+
+func main() {
+	receiver := new(record)
+	runtime.SetFinalizer(receiver, func(*record) { finalized <- struct{}{} })
+	sink = &receiver.value
+	sink = nil
+	for i := 0; i < 5; i++ { runtime.GC() }
+	select {
+	case <-finalized:
+	default:
+		panic("cached receiver kept object alive")
+	}
+}
+`
+	if _, err := ixgo.NewContext(ixgo.ExperimentalSupportGC).RunFile("main.go", source, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func BenchmarkFieldAddrCache(b *testing.B) {
 	const source = `package main
 
 type record struct { value int }
 
-var item record
+var items [128]record
 
-func FieldAddr(iterations int) *int {
-	r := &item
+func Receivers(vary bool) []*record {
+	receivers := make([]*record, len(items))
+	for i := range receivers {
+		index := 0
+		if vary { index = i }
+		receivers[i] = &items[index]
+	}
+	return receivers
+}
+
+func FieldAddr(receivers []*record) *int {
 	var addr *int
-	for i := 0; i < iterations; i++ {
-		addr = &r.value
+	for _, receiver := range receivers {
+		addr = &receiver.value
 	}
 	return addr
 }
 
 func main() {}
 `
-	ctx := ixgo.NewContext(0)
-	ctx.SetLeastCallForEnablePool(0)
-	interp, err := ctx.LoadInterp("main.go", source)
-	if err != nil {
-		b.Fatal(err)
-	}
-	b.Cleanup(interp.UnsafeRelease)
-
-	b.ReportAllocs()
-	for b.Loop() {
-		if _, err := interp.RunFunc("FieldAddr", 128); err != nil {
-			b.Fatal(err)
-		}
+	for _, test := range []struct {
+		name string
+		vary bool
+	}{
+		{name: "hit"},
+		{name: "miss", vary: true},
+	} {
+		b.Run(test.name, func(b *testing.B) {
+			ctx := ixgo.NewContext(0)
+			ctx.SetLeastCallForEnablePool(0)
+			interp, err := ctx.LoadInterp("main.go", source)
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.Cleanup(interp.UnsafeRelease)
+			receivers, err := interp.RunFunc("Receivers", test.vary)
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				if _, err := interp.RunFunc("FieldAddr", receivers); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }

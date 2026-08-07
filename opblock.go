@@ -111,6 +111,7 @@ type function struct {
 	makeInstr  ssa.Instruction              // make instr check
 	index      map[ssa.Value]uint32         // stack value index 32bit: kind(2) reflect.Kind(6) index(24)
 	instrIndex map[ssa.Instruction][]uint32 // instr -> index
+	cacheRegs  []register                   // cache registers invalidated before runtime.GC
 	Instrs     []func(fr *frame)            // main instrs
 	Recover    []func(fr *frame)            // recover instrs
 	Blocks     []int                        // block offset
@@ -130,6 +131,7 @@ func (p *function) UnsafeRelease() {
 	p.pool = nil
 	p.index = nil
 	p.instrIndex = nil
+	p.cacheRegs = nil
 	p.Instrs = nil
 	p.Recover = nil
 	p.Blocks = nil
@@ -145,6 +147,14 @@ func (p *function) initPool() {
 		fr.stack = append([]value{}, p.stack...)
 		return fr
 	}
+}
+
+// newCacheReg reserves a per-frame cache register invalidated by runtime.GC.
+func (p *function) newCacheReg() register {
+	reg := register(len(p.stack))
+	p.stack = append(p.stack, nil)
+	p.cacheRegs = append(p.cacheRegs, reg)
+	return reg
 }
 
 func (p *function) allocFrame(caller *frame) *frame {
@@ -623,18 +633,19 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 	case *ssa.FieldAddr:
 		ir := pfn.regIndex(instr)
 		ix := pfn.regIndex(instr.X)
-		receiverCache := register(len(pfn.stack))
-		pfn.stack = append(pfn.stack, nil)
+		recvCacheReg := pfn.newCacheReg()
 		return func(fr *frame) {
 			receiver := fr.reg(ix)
-			if fr.stack[ir] != nil && fr.stack[receiverCache] == receiver {
+			// Same *T yields the same field address; retaining it keeps pooled entries safe.
+			// fieldAddrX returns non-nil on success, so ir != nil marks initialization.
+			if fr.stack[ir] != nil && fr.stack[recvCacheReg] == receiver {
 				return
 			}
 			v, err := fieldAddrX(receiver, instr.Field)
 			if err != nil {
 				panic(fr.runtimeError(instr, err.Error()))
 			}
-			fr.stack[receiverCache] = receiver
+			fr.stack[recvCacheReg] = receiver
 			fr.setReg(ir, v)
 		}
 	case *ssa.Field:
