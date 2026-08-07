@@ -623,11 +623,18 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 	case *ssa.FieldAddr:
 		ir := pfn.regIndex(instr)
 		ix := pfn.regIndex(instr.X)
+		receiverCache := register(len(pfn.stack))
+		pfn.stack = append(pfn.stack, nil)
 		return func(fr *frame) {
-			v, err := fieldAddrX(fr.reg(ix), instr.Field)
+			receiver := fr.reg(ix)
+			if fr.stack[ir] != nil && fr.stack[receiverCache] == receiver {
+				return
+			}
+			v, err := fieldAddrX(receiver, instr.Field)
 			if err != nil {
 				panic(fr.runtimeError(instr, err.Error()))
 			}
+			fr.stack[receiverCache] = receiver
 			fr.setReg(ir, v)
 		}
 	case *ssa.Field:
