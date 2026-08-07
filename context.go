@@ -883,7 +883,14 @@ func (ctx *Context) RunTest(dir string, args []string) error {
 		return err
 	}
 	if filepath.IsAbs(dir) {
-		os.Chdir(dir)
+		wd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		if err := os.Chdir(dir); err != nil {
+			return err
+		}
+		defer os.Chdir(wd)
 	}
 	return ctx.TestPkg(pkg, dir, args)
 }
