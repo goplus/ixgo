@@ -211,8 +211,8 @@ func (visit *visitor) function(fn *ssa.Function) {
 	}
 	visit.seen[fn] = true
 	fnPath := fn.String()
-	if f, ok := visit.intp.ctx.override[fnPath]; ok &&
-		visit.intp.preToType(fn.Type()) == f.Type() {
+	if value, ok := visit.intp.ctx.override.Load(fnPath); ok &&
+		visit.intp.preToType(fn.Type()) == value.(reflect.Value).Type() {
 		fn.Blocks = nil
 		return
 	}
@@ -226,7 +226,7 @@ func (visit *visitor) function(fn *ssa.Function) {
 						if typ != ftyp {
 							ext = xtype.ConvertFuncValue(xtype.TypeOfType(typ), ext)
 						}
-						visit.intp.ctx.override[fnPath] = ext
+						visit.intp.ctx.override.Store(fnPath, ext)
 						return
 					}
 				}
@@ -234,17 +234,17 @@ func (visit *visitor) function(fn *ssa.Function) {
 					typ := visit.intp.preToType(fn.Type())
 					numOut := typ.NumOut()
 					if numOut == 0 {
-						visit.intp.ctx.override[fnPath] = reflect.MakeFunc(typ, func(args []reflect.Value) (results []reflect.Value) {
+						visit.intp.ctx.override.Store(fnPath, reflect.MakeFunc(typ, func(args []reflect.Value) (results []reflect.Value) {
 							return
-						})
+						}))
 					} else {
-						visit.intp.ctx.override[fnPath] = reflect.MakeFunc(typ, func(args []reflect.Value) (results []reflect.Value) {
+						visit.intp.ctx.override.Store(fnPath, reflect.MakeFunc(typ, func(args []reflect.Value) (results []reflect.Value) {
 							results = make([]reflect.Value, numOut)
 							for i := 0; i < numOut; i++ {
 								results[i] = reflect.New(typ.Out(i)).Elem()
 							}
 							return
-						})
+						}))
 					}
 					println(fmt.Sprintf("ixgo warning: %v: %v missing function body", visit.intp.ctx.FileSet.Position(fn.Pos()), fnPath))
 					return

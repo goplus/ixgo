@@ -167,7 +167,8 @@ func (i *Interp) FindMethod(mtyp reflect.Type, fn *types.Func) func([]reflect.Va
 		}
 	}
 	name := fn.FullName()
-	if v, ok := externValues[name]; ok && v.Kind() == reflect.Func {
+	if value, ok := externValues.Load(name); ok && value.(reflect.Value).Kind() == reflect.Func {
+		v := value.(reflect.Value)
 		if v.Type().IsVariadic() {
 			return func(args []reflect.Value) []reflect.Value {
 				return v.CallSlice(args)

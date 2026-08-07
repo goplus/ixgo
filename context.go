@@ -95,7 +95,7 @@ type Context struct {
 	debugFunc     func(*DebugInfo)                                         // debug func
 	panicFunc     func(*PanicInfo)                                         // panic func
 	pkgs          map[string]*SourcePackage                                // imports
-	override      map[string]reflect.Value                                 // override function
+	override      sync.Map                                                 // map[string]reflect.Value, override function
 	evalInit      map[string]bool                                          // eval init check
 	nestedMap     map[*types.Named]int                                     // nested named index
 	rootp         atomic.Pointer[string]                                   // project root
@@ -199,7 +199,6 @@ func NewContext(mode Mode) *Context {
 		BuilderMode:  0, //ssa.SanityCheckFunctions,
 		BuildContext: build.Default,
 		pkgs:         make(map[string]*SourcePackage),
-		override:     make(map[string]reflect.Value),
 		nestedMap:    make(map[*types.Named]int),
 		callForPool:  64,
 	}
@@ -237,7 +236,7 @@ func NewContext(mode Mode) *Context {
 // func (ctx *Context) UnsafeRelease() {
 // 	ctx.pkgs = nil
 // 	ctx.Loader = nil
-// 	ctx.override = nil
+// 	ctx.override.Clear()
 // }
 
 func (ctx *Context) IsEvalMode() bool {
@@ -298,13 +297,13 @@ func (ctx *Context) handlePanic(fr *frame, fn funcInstr, err error) error {
 // RegisterExternal register external value must variable address or func.
 func (ctx *Context) RegisterExternal(key string, i interface{}) {
 	if i == nil {
-		delete(ctx.override, key)
+		ctx.override.Delete(key)
 		return
 	}
 	v := reflect.ValueOf(i)
 	switch v.Kind() {
 	case reflect.Func, reflect.Ptr:
-		ctx.override[key] = v
+		ctx.override.Store(key, v)
 	default:
 		log.Printf("register external must variable address or func. not %v\n", v.Kind())
 	}

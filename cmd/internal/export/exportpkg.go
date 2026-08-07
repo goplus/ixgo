@@ -141,7 +141,7 @@ func exportPkg(pkg *Package, sname string, id string, tagList []string, fname st
 	})
 	var directCalls string
 	if len(entries) != 0 {
-		directCalls = fmt.Sprintf("\n\tixgo.RegisterDirectCalls(%q, map[string]ixgo.DirectCallBinding{%s})", pkg.Path, joinList(entries))
+		directCalls = fmt.Sprintf("\n\tixgo.RegisterDirectCalls(%q, map[string]ixgo.DirectCallAdapter{%s})", pkg.Path, joinList(entries))
 	}
 	directCallAdapters := strings.Join(adapters, "\n\n")
 	r := strings.NewReplacer("$PKGNAME", pkg.Name,

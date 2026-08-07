@@ -150,19 +150,19 @@ func (p *Package) merge(same *Package) {
 }
 
 var (
-	externValues = make(map[string]reflect.Value)
+	externValues sync.Map // map[string]reflect.Value
 )
 
 // RegisterExternal is register external variable address or func
 func RegisterExternal(key string, i interface{}) {
 	if i == nil {
-		delete(externValues, key)
+		externValues.Delete(key)
 		return
 	}
 	v := reflect.ValueOf(i)
 	switch v.Kind() {
 	case reflect.Func, reflect.Ptr:
-		externValues[key] = v
+		externValues.Store(key, v)
 	default:
 		log.Printf("register external must variable address or func. not %v\n", v.Kind())
 	}
