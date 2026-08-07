@@ -12,6 +12,11 @@ import (
 	"unsafe"
 )
 
+const (
+	Compiler = "llgo"
+	IsLLGo   = true
+)
+
 func init() {
 	RegisterExternal("(reflect.Value).Pointer", func(fr *frame, v reflect.Value) uintptr {
 		if v.Kind() == reflect.Func {

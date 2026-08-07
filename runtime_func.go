@@ -12,6 +12,11 @@ import (
 	"github.com/visualfc/funcval"
 )
 
+const (
+	Compiler = runtime.Compiler
+	IsLLGo   = false
+)
+
 func init() {
 	if funcval.IsSupport {
 		RegisterExternal("(reflect.Value).Pointer", func(fr *frame, v reflect.Value) uintptr {
