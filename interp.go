@@ -262,6 +262,10 @@ func checkRuns(block *ssa.BasicBlock, jumps map[*ssa.BasicBlock]bool, succs map[
 }
 
 func (fr *frame) gc() {
+	// Invalidate hidden caches before the liveness scan.
+	for _, reg := range fr.pfn.cacheRegs {
+		fr.stack[reg] = nil
+	}
 	alloc := make(map[int]bool)
 	checkAlloc := func(instr ssa.Instruction) {
 		for _, v := range fr.pfn.instrIndex[instr] {
