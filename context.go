@@ -49,23 +49,23 @@ import (
 type Mode uint
 
 const (
-	DisableRecover                 Mode                   = 1 << iota // Disable recover() in target programs; show interpreter crash instead.
-	DisableCustomBuiltin                                              // Disable load custom builtin func
-	EnableDumpImports                                                 // print import packages
-	EnableDumpInstr                                                   // Print packages & SSA instruction code
-	EnableTracing                                                     // Print a trace of all instructions as they are interpreted.
-	EnablePrintAny                                                    // Enable builtin print for any type ( struct/array )
-	EnableNoStrict                                                    // Enable no strict mode
-	ExperimentalSupportGC                                             // experimental support runtime.GC
-	SupportMultipleInterp                                             // Support multiple interp, must manual release interp reflectx icall.
-	CheckGopOverloadFunc                                              // Check and skip gop overload func
-	DisableAutoLoadPatchs                                             // Disable automatic loading of package patches.
-	DisableDynamicFuncCallAnalysis                                    // Disable dynamic func call analysis and optimization.
-	OptionLoadRutimeImethod                                           // Option load runtime imethod for less imethod and memory space.
-	OptionLoadAllImethod                                              // Option load all imethod.
-	EnableCachedReg                                                   // Enable per-frame cache registers.
-	OptionLoadDefaultImethod       = 0                                // Option load default imethod.
-	LastMode                       = EnableCachedReg                  // Last Mode
+	DisableRecover                 Mode              = 1 << iota // Disable recover() in target programs; show interpreter crash instead.
+	DisableCustomBuiltin                                         // Disable load custom builtin func
+	EnableDumpImports                                            // print import packages
+	EnableDumpInstr                                              // Print packages & SSA instruction code
+	EnableTracing                                                // Print a trace of all instructions as they are interpreted.
+	EnablePrintAny                                               // Enable builtin print for any type ( struct/array )
+	EnableNoStrict                                               // Enable no strict mode
+	ExperimentalSupportGC                                        // experimental support runtime.GC
+	SupportMultipleInterp                                        // Support multiple interp, must manual release interp reflectx icall.
+	CheckGopOverloadFunc                                         // Check and skip gop overload func
+	DisableAutoLoadPatchs                                        // Disable automatic loading of package patches.
+	DisableDynamicFuncCallAnalysis                               // Disable dynamic func call analysis and optimization.
+	OptionLoadRutimeImethod                                      // Option load runtime imethod for less imethod and memory space.
+	OptionLoadAllImethod                                         // Option load all imethod.
+	EnableCachedReg                                              // Enable per-frame cache registers.
+	OptionLoadDefaultImethod       = 0                           // Option load default imethod.
+	LastMode                       = EnableCachedReg             // Last Mode
 )
 
 // Loader types loader interface
@@ -760,12 +760,22 @@ var (
 func (ctx *Context) runInterp(interp *Interp, input string, args []string) (exitCode int, err error) {
 	// reset os args and flag
 	commandMu.Lock()
+	oldArgs := os.Args
+	oldFlagCommandLine := flag.CommandLine
 	os.Args = []string{input}
 	if args != nil {
 		os.Args = append(os.Args, args...)
 	}
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	if !flag.Parsed() {
+		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	}
 	commandMu.Unlock()
+	defer func() {
+		commandMu.Lock()
+		os.Args = oldArgs
+		flag.CommandLine = oldFlagCommandLine
+		commandMu.Unlock()
+	}()
 	if err = interp.RunInit(); err != nil {
 		return 2, err
 	}
@@ -800,13 +810,23 @@ func (ctx *Context) TestPkg(pkg *ssa.Package, input string, args []string) error
 		}
 	}()
 	commandMu.Lock()
+	oldArgs := os.Args
+	oldFlagCommandLine := flag.CommandLine
 	os.Args = []string{input}
 	if args != nil && !testInit {
 		os.Args = append(os.Args, args...)
 	}
 	testInit = true
-	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	if !flag.Parsed() {
+		flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	}
 	commandMu.Unlock()
+	defer func() {
+		commandMu.Lock()
+		os.Args = oldArgs
+		flag.CommandLine = oldFlagCommandLine
+		commandMu.Unlock()
+	}()
 	interp, err := NewInterp(ctx, pkg)
 	if err != nil {
 		failed = true
@@ -863,7 +883,14 @@ func (ctx *Context) RunTest(dir string, args []string) error {
 		return err
 	}
 	if filepath.IsAbs(dir) {
-		os.Chdir(dir)
+		wd, err := os.Getwd()
+		if err != nil {
+			return err
+		}
+		if err := os.Chdir(dir); err != nil {
+			return err
+		}
+		defer os.Chdir(wd)
 	}
 	return ctx.TestPkg(pkg, dir, args)
 }

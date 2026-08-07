@@ -86,6 +86,9 @@ func main() {
 }
 
 func TestFieldAddrCacheReleasesReceiver(t *testing.T) {
+	if ixgo.IsLLGo {
+		t.Skip("skip llgo")
+	}
 	const source = `package main
 
 import "runtime"
