@@ -559,31 +559,49 @@ func BenchmarkDirectCall(b *testing.B) {
 	var counter directcalltest.Counter
 	methodFrame := &frame{stack: []value{&counter, nil}}
 	methodArgs := []register{0}
+	uncachedMethodCall := func(fr *frame) {
+		rtype := reflect.TypeOf(fr.reg(0))
+		ext, ok := findExternMethod(rtype, "Value")
+		if !ok {
+			panic("method not found")
+		}
+		if adapter, ok := resolveInvokeDirectCall(rtype, "Value"); ok {
+			interp.invokeDirectCall(fr, adapter, 1, methodArgs)
+			return
+		}
+		interp.callExternalByStack(fr, ext, 1, methodArgs)
+	}
 
 	b.Run("dynamic_direct", func(b *testing.B) {
-		call := makeCallMethodInstr(interp, nil, methodCall, 1, 0, nil)
-		b.ReportAllocs()
-		for b.Loop() {
-			call(methodFrame)
-		}
+		b.Run("cached", func(b *testing.B) {
+			call := makeCallMethodInstr(interp, nil, methodCall, 1, 0, nil)
+			b.ReportAllocs()
+			for b.Loop() {
+				call(methodFrame)
+			}
+		})
+		b.Run("uncached", func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				uncachedMethodCall(methodFrame)
+			}
+		})
 	})
 	var fallback directcalltest.FallbackCounter
 	fallbackFrame := &frame{stack: []value{&fallback, nil}}
 	b.Run("dynamic_fallback", func(b *testing.B) {
-		call := makeCallMethodInstr(interp, nil, methodCall, 1, 0, nil)
-		b.ReportAllocs()
-		for b.Loop() {
-			call(fallbackFrame)
-		}
-	})
-	b.Run("dynamic_reflect", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			fn, ok := findExternMethod(reflect.TypeOf(methodFrame.reg(0)), "Value")
-			if !ok {
-				b.Fatal("method not found")
+		b.Run("cached", func(b *testing.B) {
+			call := makeCallMethodInstr(interp, nil, methodCall, 1, 0, nil)
+			b.ReportAllocs()
+			for b.Loop() {
+				call(fallbackFrame)
 			}
-			interp.callExternalByStack(methodFrame, fn, 1, methodArgs)
-		}
+		})
+		b.Run("uncached", func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				uncachedMethodCall(fallbackFrame)
+			}
+		})
 	})
 }

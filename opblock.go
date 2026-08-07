@@ -1250,36 +1250,52 @@ func (i *Interp) findMethod(typ reflect.Type, mname string) (fn *ssa.Function, o
 func makeCallMethodInstr(interp *Interp, instr ssa.Value, call *ssa.CallCommon, ir register, iv register, ia []register) func(fr *frame) {
 	mname := call.Method.Name()
 	ia = append([]register{iv}, ia...)
+	var methods sync.Map // map[reflect.Type]func(*frame)
 	return func(fr *frame) {
 		v := fr.reg(iv)
 		if v == nil {
 			panic(fr.runtimeError(instr, "runtime error: invalid memory address or nil pointer dereference"))
 		}
 		rtype := reflect.TypeOf(v)
-		var ext reflect.Value
-		var found bool
+		if method, ok := methods.Load(rtype); ok {
+			method.(func(*frame))(fr)
+			return
+		}
+
+		var method func(*frame)
 		// find user type method *ssa.Function
 		if mset, ok := interp.msets[rtype]; ok {
 			if fn, ok := mset[mname]; ok {
-				interp.callFunctionByStack(fr, interp.funcs[fn], ir, ia)
-				return
+				ifn := interp.funcs[fn]
+				method = func(fr *frame) {
+					interp.callFunctionByStack(fr, ifn, ir, ia)
+				}
+			} else {
+				ext, found := findUserMethod(rtype, mname)
+				if !found {
+					panic(fr.plainError(instr, fmt.Sprintf("no code for method: %v.%v", rtype, mname)))
+				}
+				method = func(fr *frame) {
+					interp.callExternalByStack(fr, ext, ir, ia)
+				}
 			}
-			ext, found = findUserMethod(rtype, mname)
+		} else {
+			ext, found := findExternMethod(rtype, mname)
 			if !found {
 				panic(fr.plainError(instr, fmt.Sprintf("no code for method: %v.%v", rtype, mname)))
 			}
-			interp.callExternalByStack(fr, ext, ir, ia)
-			return
+			if adapter, ok := resolveInvokeDirectCall(rtype, mname); ok {
+				method = func(fr *frame) {
+					interp.invokeDirectCall(fr, adapter, ir, ia)
+				}
+			} else {
+				method = func(fr *frame) {
+					interp.callExternalByStack(fr, ext, ir, ia)
+				}
+			}
 		}
-		ext, found = findExternMethod(rtype, mname)
-		if !found {
-			panic(fr.plainError(instr, fmt.Sprintf("no code for method: %v.%v", rtype, mname)))
-		}
-		if adapter, ok := resolveInvokeDirectCall(rtype, mname); ok {
-			interp.invokeDirectCall(fr, adapter, ir, ia)
-			return
-		}
-		interp.callExternalByStack(fr, ext, ir, ia)
+		actual, _ := methods.LoadOrStore(rtype, method)
+		actual.(func(*frame))(fr)
 	}
 }
 
