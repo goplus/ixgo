@@ -19,6 +19,7 @@ package ixgo
 import (
 	"reflect"
 	"strings"
+	"sync"
 
 	"golang.org/x/tools/go/ssa"
 )
@@ -50,14 +51,14 @@ func (ctx DirectCallContext) SetResult(result any) {
 // DirectCallAdapter is a qexp-generated, reflection-free call adapter.
 type DirectCallAdapter func(DirectCallContext)
 
-var directCallBindings = make(map[string]DirectCallAdapter)
+var directCallBindings sync.Map // map[string]DirectCallAdapter
 
 // RegisterDirectCalls registers generated direct-call bindings for pkgPath.
 // Registration must finish before constructing an interpreter that uses the
 // package. Later registrations replace bindings with the same selector.
 func RegisterDirectCalls(pkgPath string, bindings map[string]DirectCallAdapter) {
 	for selector, adapter := range bindings {
-		directCallBindings[directCallSymbol(pkgPath, selector)] = adapter
+		directCallBindings.Store(directCallSymbol(pkgPath, selector), adapter)
 	}
 }
 
@@ -92,14 +93,18 @@ func directCallMethodKey(typ reflect.Type, method string) (key string, ok bool) 
 }
 
 func lookupDirectCallBinding(interp *Interp, key string) (DirectCallAdapter, bool) {
-	if _, overridden := interp.ctx.override[key]; overridden {
+	if _, overridden := interp.ctx.override.Load(key); overridden {
 		return nil, false
 	}
-	if _, overridden := externValues[key]; overridden {
+	if _, overridden := externValues.Load(key); overridden {
 		return nil, false
 	}
-	binding, ok := directCallBindings[key]
-	if !ok || binding == nil {
+	value, ok := directCallBindings.Load(key)
+	if !ok {
+		return nil, false
+	}
+	binding := value.(DirectCallAdapter)
+	if binding == nil {
 		return nil, false
 	}
 	return binding, true

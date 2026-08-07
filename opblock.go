@@ -254,10 +254,14 @@ func (p *function) regInstr(v ssa.Value) uint32 {
 
 func findExternValue(interp *Interp, name string) (ext reflect.Value, ok bool) {
 	// check override value
-	ext, ok = interp.ctx.override[name]
+	if v, found := interp.ctx.override.Load(name); found {
+		ext, ok = v.(reflect.Value)
+	}
 	if !ok {
 		// check extern value
-		ext, ok = externValues[name]
+		if v, found := externValues.Load(name); found {
+			ext, ok = v.(reflect.Value)
+		}
 	}
 	return
 }
@@ -265,12 +269,16 @@ func findExternValue(interp *Interp, name string) (ext reflect.Value, ok bool) {
 func findExternLinkFunc(interp *Interp, link *load.Linkname) (ext reflect.Value, ok bool) {
 	fullName := link.PkgPath + "." + link.Name
 	// check override value
-	ext, ok = interp.ctx.override[fullName]
+	if v, found := interp.ctx.override.Load(fullName); found {
+		ext, ok = v.(reflect.Value)
+	}
 	if ok {
 		return
 	}
 	// check extern value
-	ext, ok = externValues[fullName]
+	if v, found := externValues.Load(fullName); found {
+		ext, ok = v.(reflect.Value)
+	}
 	if ok {
 		return
 	}
@@ -300,12 +308,16 @@ func findExternLinkFunc(interp *Interp, link *load.Linkname) (ext reflect.Value,
 func findExternVar(interp *Interp, pkgPath string, name string) (ext reflect.Value, ok bool) {
 	fullName := pkgPath + "." + name
 	// check override value
-	ext, ok = interp.ctx.override[fullName]
+	if v, found := interp.ctx.override.Load(fullName); found {
+		ext, ok = v.(reflect.Value)
+	}
 	if ok {
 		return
 	}
 	// check extern value
-	ext, ok = externValues[fullName]
+	if v, found := externValues.Load(fullName); found {
+		ext, ok = v.(reflect.Value)
+	}
 	if ok {
 		return
 	}
