@@ -23,6 +23,14 @@ import (
 	"github.com/goplus/ixgo"
 )
 
+var fieldAddrModes = [...]struct {
+	name string
+	mode ixgo.Mode
+}{
+	{name: "uncached"},
+	{name: "cached", mode: ixgo.EnableCachedReg},
+}
+
 func TestFieldAddrCache(t *testing.T) {
 	const source = `package main
 
@@ -42,10 +50,14 @@ func main() {
 	if left.value != 24 || right.value != 56 { panic("wrong cached address") }
 }
 `
-	ctx := ixgo.NewContext(0)
-	ctx.SetLeastCallForEnablePool(0)
-	if _, err := ctx.RunFile("main.go", source, nil); err != nil {
-		t.Fatal(err)
+	for _, mode := range fieldAddrModes {
+		t.Run(mode.name, func(t *testing.T) {
+			ctx := ixgo.NewContext(mode.mode)
+			ctx.SetLeastCallForEnablePool(0)
+			if _, err := ctx.RunFile("main.go", source, nil); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 
@@ -63,9 +75,13 @@ func main() {
 	}
 }
 `
-	_, err := ixgo.NewContext(0).RunFile("main.go", source, nil)
-	if err == nil || !strings.Contains(err.Error(), "invalid memory address or nil pointer dereference") {
-		t.Fatalf("got error %v, want nil pointer dereference", err)
+	for _, mode := range fieldAddrModes {
+		t.Run(mode.name, func(t *testing.T) {
+			_, err := ixgo.NewContext(mode.mode).RunFile("main.go", source, nil)
+			if err == nil || !strings.Contains(err.Error(), "invalid memory address or nil pointer dereference") {
+				t.Fatalf("got error %v, want nil pointer dereference", err)
+			}
+		})
 	}
 }
 
@@ -92,7 +108,8 @@ func main() {
 	}
 }
 `
-	if _, err := ixgo.NewContext(ixgo.ExperimentalSupportGC).RunFile("main.go", source, nil); err != nil {
+	mode := ixgo.ExperimentalSupportGC | ixgo.EnableCachedReg
+	if _, err := ixgo.NewContext(mode).RunFile("main.go", source, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -124,32 +141,34 @@ func FieldAddr(receivers []*record) *int {
 
 func main() {}
 `
-	for _, test := range []struct {
-		name string
-		vary bool
-	}{
-		{name: "hit"},
-		{name: "miss", vary: true},
-	} {
-		b.Run(test.name, func(b *testing.B) {
-			ctx := ixgo.NewContext(0)
-			ctx.SetLeastCallForEnablePool(0)
-			interp, err := ctx.LoadInterp("main.go", source)
-			if err != nil {
-				b.Fatal(err)
-			}
-			b.Cleanup(interp.UnsafeRelease)
-			receivers, err := interp.RunFunc("Receivers", test.vary)
-			if err != nil {
-				b.Fatal(err)
-			}
-			b.ReportAllocs()
-			b.ResetTimer()
-			for b.Loop() {
-				if _, err := interp.RunFunc("FieldAddr", receivers); err != nil {
+	for _, mode := range fieldAddrModes {
+		for _, test := range []struct {
+			name string
+			vary bool
+		}{
+			{name: "hit"},
+			{name: "miss", vary: true},
+		} {
+			b.Run(mode.name+"/"+test.name, func(b *testing.B) {
+				ctx := ixgo.NewContext(mode.mode)
+				ctx.SetLeastCallForEnablePool(0)
+				interp, err := ctx.LoadInterp("main.go", source)
+				if err != nil {
 					b.Fatal(err)
 				}
-			}
-		})
+				b.Cleanup(interp.UnsafeRelease)
+				receivers, err := interp.RunFunc("Receivers", test.vary)
+				if err != nil {
+					b.Fatal(err)
+				}
+				b.ReportAllocs()
+				b.ResetTimer()
+				for b.Loop() {
+					if _, err := interp.RunFunc("FieldAddr", receivers); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		}
 	}
 }

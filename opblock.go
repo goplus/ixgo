@@ -377,6 +377,38 @@ func findExternFunc(interp *Interp, fn *ssa.Function) (ext reflect.Value, ok boo
 	return
 }
 
+func makeFieldAddrInstr(pfn *function, instr *ssa.FieldAddr) func(fr *frame) {
+	ir := pfn.regIndex(instr)
+	ix := pfn.regIndex(instr.X)
+	return func(fr *frame) {
+		v, err := fieldAddrX(fr.reg(ix), instr.Field)
+		if err != nil {
+			panic(fr.runtimeError(instr, err.Error()))
+		}
+		fr.setReg(ir, v)
+	}
+}
+
+func makeCachedFieldAddrInstr(pfn *function, instr *ssa.FieldAddr) func(fr *frame) {
+	ir := pfn.regIndex(instr)
+	ix := pfn.regIndex(instr.X)
+	recvCacheReg := pfn.newCacheReg()
+	return func(fr *frame) {
+		receiver := fr.reg(ix)
+		// Same *T yields the same field address; retaining it keeps pooled entries safe.
+		// fieldAddrX returns non-nil on success, so ir != nil marks initialization.
+		if fr.stack[ir] != nil && fr.stack[recvCacheReg] == receiver {
+			return
+		}
+		v, err := fieldAddrX(receiver, instr.Field)
+		if err != nil {
+			panic(fr.runtimeError(instr, err.Error()))
+		}
+		fr.stack[recvCacheReg] = receiver
+		fr.setReg(ir, v)
+	}
+}
+
 func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *frame) {
 	switch instr := instr.(type) {
 	case *ssa.Alloc:
@@ -631,23 +663,10 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 			fr.setReg(ir, slice(fr, instr, makesliceCheck, ix, ih, il, im).Interface())
 		}
 	case *ssa.FieldAddr:
-		ir := pfn.regIndex(instr)
-		ix := pfn.regIndex(instr.X)
-		recvCacheReg := pfn.newCacheReg()
-		return func(fr *frame) {
-			receiver := fr.reg(ix)
-			// Same *T yields the same field address; retaining it keeps pooled entries safe.
-			// fieldAddrX returns non-nil on success, so ir != nil marks initialization.
-			if fr.stack[ir] != nil && fr.stack[recvCacheReg] == receiver {
-				return
-			}
-			v, err := fieldAddrX(receiver, instr.Field)
-			if err != nil {
-				panic(fr.runtimeError(instr, err.Error()))
-			}
-			fr.stack[recvCacheReg] = receiver
-			fr.setReg(ir, v)
+		if interp.ctx.Mode&EnableCachedReg != 0 {
+			return makeCachedFieldAddrInstr(pfn, instr)
 		}
+		return makeFieldAddrInstr(pfn, instr)
 	case *ssa.Field:
 		ir := pfn.regIndex(instr)
 		ix := pfn.regIndex(instr.X)

@@ -63,8 +63,9 @@ const (
 	DisableDynamicFuncCallAnalysis                                    // Disable dynamic func call analysis and optimization.
 	OptionLoadRutimeImethod                                           // Option load runtime imethod for less imethod and memory space.
 	OptionLoadAllImethod                                              // Option load all imethod.
+	EnableCachedReg                                                   // Enable per-frame cache registers.
 	OptionLoadDefaultImethod       = 0                                // Option load default imethod.
-	LastMode                       = OptionLoadAllImethod             // Last Mode
+	LastMode                       = EnableCachedReg                  // Last Mode
 )
 
 // Loader types loader interface
