@@ -197,6 +197,7 @@ type frame struct {
 	_panic  *_panic
 	block   *ssa.BasicBlock
 	stack   []value // result args env datas
+	phiVals []value // temporary values for parallel phi assignments
 	ipc     int
 	pred    int
 	deferid uint64
@@ -265,6 +266,9 @@ func (fr *frame) gc() {
 	// Invalidate hidden caches before the liveness scan.
 	for _, reg := range fr.pfn.cacheRegs {
 		fr.stack[reg] = nil
+	}
+	for i := range fr.phiVals {
+		fr.phiVals[i] = nil
 	}
 	alloc := make(map[int]bool)
 	checkAlloc := func(instr ssa.Instruction) {
