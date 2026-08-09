@@ -2422,7 +2422,7 @@ func TestLoadImport(t *testing.T) {
 		}
 	}
 	src := `package main
-import "github.com/goplus/ixgo/testdata/pkg"
+import "github.com/goplus/ixgo/testdata/loadimport"
 
 func main() {
 	if pkg.Add(100, 200) != 300 {
