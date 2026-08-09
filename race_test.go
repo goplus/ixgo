@@ -31,7 +31,9 @@ type T struct {
 
 func main() {
 	t := &T{ bytes.NewBufferString("Hello World") }
-	fmt.Println(t)
+	if got := fmt.Sprint(t); got != "Hello World" {
+		panic(got)
+	}
 }
 `
 	var wg sync.WaitGroup
@@ -65,7 +67,9 @@ type T struct {
 
 func main() {
 	t := &T{ bytes.NewBufferString("Hello World") }
-	fmt.Println(t)
+	if got := fmt.Sprint(t); got != "Hello World" {
+		panic(got)
+	}
 }
 `
 
@@ -110,7 +114,9 @@ type T struct {
 
 func main() {
 	t := &T{ bytes.NewBufferString("Hello World") }
-	fmt.Println(t)
+	if got := fmt.Sprint(t); got != "Hello World" {
+		panic(got)
+	}
 }
 `
 
@@ -147,7 +153,9 @@ type T struct {
 
 func main() {
 	t := &T{ bytes.NewBufferString("Hello World") }
-	fmt.Println(t)
+	if got := fmt.Sprint(t); got != "Hello World" {
+		panic(got)
+	}
 }
 `
 	ctx := ixgo.NewContext(ixgo.SupportMultipleInterp)
