@@ -56,19 +56,20 @@ var (
 	projects = make(map[string]*modfile.Project)
 )
 
-func RegisterClassFileType(ext string, class string, works []*modfile.Class, pkgPaths ...string) {
-	cls := &modfile.Project{
+func RegisterClassFileType(ext string, class string, works []*modfile.Class, pkgPaths ...string) *modfile.Project {
+	proj := &modfile.Project{
 		Ext:      ext,
 		Class:    class,
 		Works:    works,
 		PkgPaths: pkgPaths,
 	}
 	if ext != "" {
-		projects[ext] = cls
+		projects[ext] = proj
 	}
 	for _, w := range works {
-		projects[w.Ext] = cls
+		projects[w.Ext] = proj
 	}
+	return proj
 }
 
 func RegisterProject(proj *modfile.Project) {
@@ -190,24 +191,16 @@ type Context struct {
 	resetPkgs []func()
 }
 
-func ClassKind(fname string) (isProj, ok bool) {
+func ClassInfo(fname string) (autoLambdas map[string]int, isProj, ok bool) {
 	ext := modfile.ClassExt(fname)
-	switch ext {
-	case ".gsh":
-		return true, true
-	default:
-		if c, ok := projects[ext]; ok {
-			for _, w := range c.Works {
-				if w.Ext == ext {
-					if ext != c.Ext || fname != "main"+ext {
-						return false, true
-					}
-					break
-				}
-			}
-			return true, true
-		}
+	if c, ok := projects[ext]; ok {
+		return c.AutoLambdas, c.IsProj(ext, fname), true
 	}
+	return
+}
+
+func ClassKind(fname string) (isProj, ok bool) {
+	_, isProj, ok = ClassInfo(fname)
 	return
 }
 
@@ -349,7 +342,7 @@ func (c *Context) Import(path string) (*types.Package, error) {
 
 func (c *Context) ParseDir(dir string) (*Package, error) {
 	pkgs, err := parser.ParseDirEx(c.FileSet, dir, parser.Config{
-		ClassKind: ClassKind,
+		ClassInfo: ClassInfo,
 	})
 	if err != nil {
 		return nil, err
@@ -359,7 +352,7 @@ func (c *Context) ParseDir(dir string) (*Package, error) {
 
 func (c *Context) ParseFSDir(fs parser.FileSystem, dir string) (*Package, error) {
 	pkgs, err := parser.ParseFSDir(c.FileSet, fs, dir, parser.Config{
-		ClassKind: ClassKind,
+		ClassInfo: ClassInfo,
 	})
 	if err != nil {
 		return nil, err
@@ -369,7 +362,7 @@ func (c *Context) ParseFSDir(fs parser.FileSystem, dir string) (*Package, error)
 
 func (c *Context) ParseFile(fname string, src interface{}) (*Package, error) {
 	f, err := parser.ParseEntry(c.FileSet, fname, src, parser.Config{
-		ClassKind: ClassKind,
+		ClassInfo: ClassInfo,
 	})
 	if err != nil {
 		return nil, err
@@ -388,7 +381,7 @@ func (c *Context) ParseFile(fname string, src interface{}) (*Package, error) {
 
 func (c *Context) ParseFiles(files []string) (*Package, error) {
 	pkgs, err := parser.ParseEntries(c.FileSet, files, parser.Config{
-		ClassKind: ClassKind,
+		ClassInfo: ClassInfo,
 	})
 	if err != nil {
 		return nil, err
