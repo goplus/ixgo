@@ -65,10 +65,6 @@ func exportPkg(pkg *Package, sname string, id string, tagList []string, fname st
 	} else if !flagExportCode {
 		imports = append(imports, fmt.Sprintf("_ %q", pkg.Path))
 	}
-	if !pkg.IsEmpty() {
-		imports = append(imports, `"reflect"`)
-		importAliases["reflect"] = "reflect"
-	}
 	if len(pkg.UntypedConsts) > 0 || len(pkg.TypedConsts) > 0 {
 		imports = append(imports, `"go/constant"`)
 		importAliases["go/constant"] = "constant"
@@ -91,6 +87,10 @@ func exportPkg(pkg *Package, sname string, id string, tagList []string, fname st
 			imports = append(imports, `"go/token"`)
 			importAliases["go/token"] = "token"
 		}
+	}
+	if !pkg.IsEmpty() {
+		imports = append(imports, `"reflect"`)
+		importAliases["reflect"] = "reflect"
 	}
 	tmpl := template_pkg
 	if pkg.IsEmpty() {
@@ -125,7 +125,7 @@ func exportPkg(pkg *Package, sname string, id string, tagList []string, fname st
 		importAliases["github.com/goplus/ixgo/alias"] = "alias"
 		ext = "\nAlias: map[string]alias.Type{" + joinList(pkg.Alias) + "},"
 	}
-	imports = append(imports, `"github.com/goplus/ixgo"`)
+	imports = append(imports, "", `"github.com/goplus/ixgo"`)
 	importAliases["github.com/goplus/ixgo"] = "ixgo"
 	if pkg.TypesData != nil {
 		imports = append(imports, `"github.com/goplus/ixgo/xgobuild/typesdata"`, `_ "embed"`)
