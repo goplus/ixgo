@@ -437,7 +437,7 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 	case *ssa.Phi:
 		block := instr.Block()
 		if block.Instrs[0] != instr {
-			return func(fr *frame) {}
+			return nil
 		}
 		var phis []*ssa.Phi
 		for _, blockInstr := range block.Instrs {
