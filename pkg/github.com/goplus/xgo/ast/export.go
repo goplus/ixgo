@@ -37,6 +37,7 @@ func init() {
 			NamedTypes: map[string]reflect.Type{
 				"AnySelectorExpr":   reflect.TypeOf((*q.AnySelectorExpr)(nil)).Elem(),
 				"ArrayType":         reflect.TypeOf((*q.ArrayType)(nil)).Elem(),
+				"ArrowExpr":         reflect.TypeOf((*q.ArrowExpr)(nil)).Elem(),
 				"AssignStmt":        reflect.TypeOf((*q.AssignStmt)(nil)).Elem(),
 				"BadDecl":           reflect.TypeOf((*q.BadDecl)(nil)).Elem(),
 				"BadExpr":           reflect.TypeOf((*q.BadExpr)(nil)).Elem(),
@@ -90,7 +91,6 @@ func init() {
 				"KwargExpr":         reflect.TypeOf((*q.KwargExpr)(nil)).Elem(),
 				"LabeledStmt":       reflect.TypeOf((*q.LabeledStmt)(nil)).Elem(),
 				"LambdaExpr":        reflect.TypeOf((*q.LambdaExpr)(nil)).Elem(),
-				"LambdaExpr2":       reflect.TypeOf((*q.LambdaExpr2)(nil)).Elem(),
 				"MapType":           reflect.TypeOf((*q.MapType)(nil)).Elem(),
 				"MatrixLit":         reflect.TypeOf((*q.MatrixLit)(nil)).Elem(),
 				"MergeMode":         reflect.TypeOf((*q.MergeMode)(nil)).Elem(),
