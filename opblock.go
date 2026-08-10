@@ -469,7 +469,10 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 			}
 			// Phi nodes are parallel assignments: read every input before
 			// overwriting any register that another phi may use.
-			values := make([]value, len(phis))
+			if cap(fr.phiVals) < len(phis) {
+				fr.phiVals = make([]value, len(phis))
+			}
+			values := fr.phiVals[:len(phis)]
 			for i := range phis {
 				values[i] = fr.reg(ie[i][predIndex])
 			}
