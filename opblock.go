@@ -380,8 +380,12 @@ func findExternFunc(interp *Interp, fn *ssa.Function) (ext reflect.Value, ok boo
 func makeFieldAddrInstr(pfn *function, instr *ssa.FieldAddr) func(fr *frame) {
 	ir := pfn.regIndex(instr)
 	ix := pfn.regIndex(instr.X)
+	structTyp := pfn.Interp.preToType(instr.X.Type().Underlying().(*types.Pointer).Elem())
+	field := structTyp.Field(instr.Field)
+	fieldTyp := field.Type
+	offset := field.Offset
 	return func(fr *frame) {
-		v, err := fieldAddrX(fr.reg(ix), instr.Field)
+		v, err := fieldAddrAt(fr.reg(ix), offset, fieldTyp)
 		if err != nil {
 			panic(fr.runtimeError(instr, err.Error()))
 		}
@@ -393,6 +397,10 @@ func makeCachedFieldAddrInstr(pfn *function, instr *ssa.FieldAddr) func(fr *fram
 	ir := pfn.regIndex(instr)
 	ix := pfn.regIndex(instr.X)
 	recvCacheReg := pfn.newCacheReg()
+	structTyp := pfn.Interp.preToType(instr.X.Type().Underlying().(*types.Pointer).Elem())
+	field := structTyp.Field(instr.Field)
+	fieldTyp := field.Type
+	offset := field.Offset
 	return func(fr *frame) {
 		receiver := fr.reg(ix)
 		// Same *T yields the same field address; retaining it keeps pooled entries safe.
@@ -400,7 +408,7 @@ func makeCachedFieldAddrInstr(pfn *function, instr *ssa.FieldAddr) func(fr *fram
 		if fr.stack[ir] != nil && fr.stack[recvCacheReg] == receiver {
 			return
 		}
-		v, err := fieldAddrX(receiver, instr.Field)
+		v, err := fieldAddrAt(receiver, offset, fieldTyp)
 		if err != nil {
 			panic(fr.runtimeError(instr, err.Error()))
 		}
