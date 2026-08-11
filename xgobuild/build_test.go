@@ -63,6 +63,115 @@ func main() {
 `)
 }
 
+func TestCustomAutoLambdas(t *testing.T) {
+	const pkgPath = "example.com/tspx"
+	ctx := ixgo.NewContext(StaticLoad)
+	err := ctx.AddImportFile(pkgPath, "tspx.go", `package tspx
+
+type MyGame struct{}
+
+func (*MyGame) Main() {}
+
+func (*MyGame) Step(n int) {}
+
+func OnStart(body func()) {
+	body()
+}
+
+func RepeatUntil(__xgo_autoclosure_cond func() bool, body func()) {
+	for !__xgo_autoclosure_cond() {
+		body()
+	}
+}
+
+func When(__xgo_autoclosure_cond func() bool, body func()) {
+	if __xgo_autoclosure_cond() {
+		body()
+	}
+}
+
+func ForEver(body func()) {
+	for {
+		body()
+	}
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	proj := RegisterClassFileType(".tspx", "MyGame", nil, pkgPath)
+	proj.AutoLambdas = map[string]int{
+		"forEver":     0,
+		"onStart":     0,
+		"repeatUntil": 1,
+		"when":        1,
+	}
+
+	gopClTestWith(t, ctx, "main.tspx", `
+onStart {
+	x := 1
+	repeatUntil x > 10 {
+		echo "Hi"
+		x++
+	}
+	when x == 11 {
+		echo "x = 11"
+	}
+	forEver {
+		step 1
+	}
+}
+`, `package main
+
+import (
+	"example.com/tspx"
+	"fmt"
+)
+
+type MyGame struct {
+	tspx.MyGame
+}
+//line main.tspx:2
+func (this *MyGame) MainEntry() {
+//line main.tspx:2:1
+	tspx.OnStart(func() {
+//line main.tspx:3:1
+		x := 1
+//line main.tspx:4:1
+		tspx.RepeatUntil(func() bool {
+//line main.tspx:4:1
+			return x > 10
+		}, func() {
+//line main.tspx:5:1
+			fmt.Println("Hi")
+//line main.tspx:6:1
+			x++
+		})
+//line main.tspx:8:1
+		tspx.When(func() bool {
+//line main.tspx:8:1
+			return x == 11
+		}, func() {
+//line main.tspx:9:1
+			fmt.Println("x = 11")
+		})
+//line main.tspx:11:1
+		tspx.ForEver(func() {
+//line main.tspx:12:1
+			this.Step(1)
+		})
+	})
+}
+func (this *MyGame) Main() {
+	(*tspx.MyGame).Main(&this.MyGame)
+}
+func main() {
+	new(MyGame).Main()
+}
+`)
+}
+
 func TestXGoInit(t *testing.T) {
 	gopClTestEx(t, `Rect.gox`, `
 var (
