@@ -136,6 +136,11 @@ func (visit *visitor) program() {
 	for _, T := range visit.prog.RuntimeTypes() {
 		methodsOf(T)
 	}
+	if visit.intp.gcEnabled {
+		for _, pfn := range visit.intp.funcs {
+			pfn.initGCLiveness()
+		}
+	}
 }
 
 func (visit *visitor) findLinkSym(fn *ssa.Function) (*load.LinkSym, bool) {
@@ -217,8 +222,11 @@ func (visit *visitor) function(fn *ssa.Function) {
 		return
 	}
 	if fn.Blocks == nil {
+		if visit.intp.ctx.Mode&ExperimentalSupportGC != 0 && !visit.intp.gcEnabled && isRuntimeGCFunction(fn) {
+			visit.intp.gcEnabled = true
+		}
 		if _, ok := visit.pkgs[fn.Pkg]; ok {
-			if _, ok = findExternFunc(visit.intp, fn); !ok {
+			if _, ok := findExternFunc(visit.intp, fn); !ok {
 				if sym, ok := visit.findLinkSym(fn); ok {
 					if ext, ok := visit.findLinkFunc(sym); ok {
 						typ := visit.intp.preToType(fn.Type())
@@ -419,9 +427,6 @@ func (visit *visitor) function(fn *ssa.Function) {
 	pfn.makeInstr = nil
 	pfn.base = visit.base
 	visit.base += len(pfn.ssaInstrs) + 2
-	if visit.intp.ctx.Mode&ExperimentalSupportGC != 0 {
-		pfn.initGCLiveness()
-	}
 	pfn.initPool()
 }
 

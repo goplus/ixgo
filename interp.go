@@ -100,7 +100,12 @@ type Interp struct {
 	deferCount   int32                                       // fast has defer check
 	goexited     int32                                       // is call runtime.Goexit
 	exited       int32                                       // is call os.Exit
+	gcEnabled    bool                                        // program can invoke runtime.GC
 	interpExt
+}
+
+func isRuntimeGCFunction(fn *ssa.Function) bool {
+	return fn != nil && fn.Name() == "GC" && fn.Pkg != nil && fn.Pkg.Pkg.Path() == "runtime"
 }
 
 func (i *Interp) MainPkg() *ssa.Package {
@@ -274,18 +279,50 @@ func (fr *frame) gc() {
 	if pc < 0 || pc >= len(fr.pfn.gcRegs) {
 		return
 	}
-	for _, reg := range fr.pfn.gcRegs[pc] {
+	for _, reg := range fr.pfn.gcRegsForPC(pc) {
 		fr.stack[reg] = nil
 	}
 }
+
+const maxEagerGCLivenessPCs = 1024
 
 // initGCLiveness moves the original runtime liveness walk to function load
 // time. Each entry contains registers that are dead after the instruction at
 // that PC and can therefore be released before invoking the host GC.
 func (pfn *function) initGCLiveness() {
+	if !pfn.hasGCRegs {
+		return
+	}
 	pfn.gcRegs = make([][]register, len(pfn.ssaInstrs))
+	pfn.gcReady = make([]atomic.Bool, len(pfn.ssaInstrs))
+	if len(pfn.ssaInstrs) > maxEagerGCLivenessPCs {
+		return
+	}
 	for pc := range pfn.ssaInstrs {
 		pfn.gcRegs[pc] = pfn.gcRegsAt(pc)
+		pfn.gcReady[pc].Store(true)
+	}
+}
+
+func (pfn *function) gcRegsForPC(pc int) []register {
+	if pfn.gcReady == nil || pfn.gcReady[pc].Load() {
+		return pfn.gcRegs[pc]
+	}
+	pfn.gcMu.Lock()
+	defer pfn.gcMu.Unlock()
+	if !pfn.gcReady[pc].Load() {
+		pfn.gcRegs[pc] = pfn.gcRegsAt(pc)
+		pfn.gcReady[pc].Store(true)
+	}
+	return pfn.gcRegs[pc]
+}
+
+func isGCRegisterKind(kind reflect.Kind) bool {
+	switch kind {
+	case reflect.String, reflect.Func, reflect.Ptr, reflect.Array, reflect.Slice, reflect.Map, reflect.Struct, reflect.Interface:
+		return true
+	default:
+		return false
 	}
 }
 
