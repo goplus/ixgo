@@ -263,16 +263,41 @@ func checkRuns(block *ssa.BasicBlock, jumps map[*ssa.BasicBlock]bool, succs map[
 }
 
 func (fr *frame) gc() {
-	// Invalidate hidden caches before the liveness scan.
+	// Hidden caches are not part of SSA liveness.
 	for _, reg := range fr.pfn.cacheRegs {
 		fr.stack[reg] = nil
 	}
 	for i := range fr.phiVals {
 		fr.phiVals[i] = nil
 	}
-	alloc := make(map[int]bool)
+	pc := fr.ipc - 1
+	if pc < 0 || pc >= len(fr.pfn.gcRegs) {
+		return
+	}
+	for _, reg := range fr.pfn.gcRegs[pc] {
+		fr.stack[reg] = nil
+	}
+}
+
+// initGCLiveness moves the original runtime liveness walk to function load
+// time. Each entry contains registers that are dead after the instruction at
+// that PC and can therefore be released before invoking the host GC.
+func (pfn *function) initGCLiveness() {
+	pfn.gcRegs = make([][]register, len(pfn.ssaInstrs))
+	for pc := range pfn.ssaInstrs {
+		pfn.gcRegs[pc] = pfn.gcRegsAt(pc)
+	}
+}
+
+func (pfn *function) gcRegsAt(pc int) []register {
+	cur := pfn.ssaInstrs[pc]
+	block := cur.Block()
+	if block == nil {
+		return nil
+	}
+	dead := make(map[int]bool)
 	checkAlloc := func(instr ssa.Instruction) {
-		for _, v := range fr.pfn.instrIndex[instr] {
+		for _, v := range pfn.instrIndex[instr] {
 			vk := kind(v >> 30)
 			if vk.isStatic() {
 				continue
@@ -283,15 +308,12 @@ func (fr *frame) gc() {
 			default:
 				continue
 			}
-			alloc[int(v&0xffffff)] = true
+			dead[int(v&0xffffff)] = true
 		}
 	}
-	// check params and freevar
 	checkAlloc(nil)
-	// check alloc
-	cur := fr.pfn.ssaInstrs[fr.ipc-1]
 	var remain int
-	for i, instr := range fr.block.Instrs {
+	for i, instr := range block.Instrs {
 		checkAlloc(instr)
 		if cur == instr {
 			remain = i
@@ -299,7 +321,6 @@ func (fr *frame) gc() {
 		}
 	}
 
-	// check
 	seen := make(map[*ssa.BasicBlock]bool)
 	var checkChild func(block *ssa.BasicBlock)
 	checkChild = func(block *ssa.BasicBlock) {
@@ -311,13 +332,10 @@ func (fr *frame) gc() {
 			checkChild(child)
 		}
 	}
-	// check block child
-	checkChild(fr.block)
+	checkChild(block)
 
-	block := fr.block
-	// check seen
-	for block != nil {
-		idom := block.Idom()
+	for parent := block; parent != nil; {
+		idom := parent.Idom()
 		if idom == nil {
 			break
 		}
@@ -335,49 +353,48 @@ func (fr *frame) gc() {
 				seen[v] = true
 				checkChild(v)
 			}
-			if block == v {
+			if parent == v {
 				find = true
 			}
 		}
 		for _, instr := range idom.Instrs {
 			checkAlloc(instr)
 		}
-		block = idom
+		parent = idom
 	}
-	if fr.block.Comment == "for.done" {
-		delete(seen, fr.block)
+	if block.Comment == "for.done" {
+		delete(seen, block)
 	}
-	// check used in block
 	var ops []*ssa.Value
-	for _, instr := range fr.block.Instrs[remain+1:] {
+	for _, instr := range block.Instrs[remain+1:] {
 		for _, op := range instr.Operands(ops[:0]) {
 			if *op == nil {
 				continue
 			}
-			reg := fr.pfn.regIndex(*op)
-			alloc[int(reg)] = false
+			reg := pfn.regIndex(*op)
+			dead[int(reg)] = false
 		}
 	}
-	// check unused in seen
-	for block := range seen {
+	for liveBlock := range seen {
 		var ops []*ssa.Value
-		for _, instr := range block.Instrs {
+		for _, instr := range liveBlock.Instrs {
 			for _, op := range instr.Operands(ops[:0]) {
 				if *op == nil {
 					continue
 				}
-				reg := fr.pfn.regIndex(*op)
-				alloc[int(reg)] = false
+				reg := pfn.regIndex(*op)
+				dead[int(reg)] = false
 			}
 		}
 	}
-	// remove unused
-	for i, b := range alloc {
-		if !b {
+	regs := make([]register, 0, len(dead))
+	for i, isDead := range dead {
+		if !isDead {
 			continue
 		}
-		fr.stack[i] = nil
+		regs = append(regs, register(i))
 	}
+	return regs
 }
 
 func (fr *frame) valid() bool {

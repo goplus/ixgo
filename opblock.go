@@ -112,6 +112,7 @@ type function struct {
 	index      map[ssa.Value]uint32         // stack value index 32bit: kind(2) reflect.Kind(6) index(24)
 	instrIndex map[ssa.Instruction][]uint32 // instr -> index
 	cacheRegs  []register                   // cache registers invalidated before runtime.GC
+	gcRegs     [][]register                 // registers cleared at each runtime.GC call site
 	Instrs     []func(fr *frame)            // main instrs
 	Recover    []func(fr *frame)            // recover instrs
 	Blocks     []int                        // block offset
@@ -132,6 +133,7 @@ func (p *function) UnsafeRelease() {
 	p.index = nil
 	p.instrIndex = nil
 	p.cacheRegs = nil
+	p.gcRegs = nil
 	p.Instrs = nil
 	p.Recover = nil
 	p.Blocks = nil

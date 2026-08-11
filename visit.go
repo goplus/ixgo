@@ -419,6 +419,9 @@ func (visit *visitor) function(fn *ssa.Function) {
 	pfn.makeInstr = nil
 	pfn.base = visit.base
 	visit.base += len(pfn.ssaInstrs) + 2
+	if visit.intp.ctx.Mode&ExperimentalSupportGC != 0 {
+		pfn.initGCLiveness()
+	}
 	pfn.initPool()
 }
 
