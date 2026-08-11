@@ -19,6 +19,7 @@ package ixgo
 import (
 	"errors"
 	"reflect"
+	"unsafe"
 
 	"github.com/goplus/reflectx"
 )
@@ -29,6 +30,14 @@ func fieldAddrX(v interface{}, index int) (interface{}, error) {
 		return nil, errors.New("invalid memory address or nil pointer dereference")
 	}
 	return reflectx.FieldX(x, index).Addr().Interface(), nil
+}
+
+func fieldAddrAt(v interface{}, offset uintptr, typ reflect.Type) (interface{}, error) {
+	rv := reflect.ValueOf(v)
+	if !rv.IsValid() || rv.IsNil() {
+		return nil, errors.New("invalid memory address or nil pointer dereference")
+	}
+	return reflect.NewAt(typ, unsafe.Add(unsafe.Pointer(rv.Pointer()), offset)).Interface(), nil
 }
 
 func fieldX(v interface{}, index int) (interface{}, error) {
