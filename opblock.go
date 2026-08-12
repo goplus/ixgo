@@ -112,6 +112,10 @@ type function struct {
 	index      map[ssa.Value]uint32         // stack value index 32bit: kind(2) reflect.Kind(6) index(24)
 	instrIndex map[ssa.Instruction][]uint32 // instr -> index
 	cacheRegs  []register                   // cache registers invalidated before runtime.GC
+	gcRegs     [][]register                 // registers cleared at each runtime.GC call site
+	gcReady    []atomic.Bool                // gcRegs entries already computed
+	gcMu       sync.Mutex                   // protects lazy liveness computation
+	hasGCRegs  bool                         // function has dynamic GC-relevant registers
 	Instrs     []func(fr *frame)            // main instrs
 	Recover    []func(fr *frame)            // recover instrs
 	Blocks     []int                        // block offset
@@ -132,6 +136,8 @@ func (p *function) UnsafeRelease() {
 	p.index = nil
 	p.instrIndex = nil
 	p.cacheRegs = nil
+	p.gcRegs = nil
+	p.gcReady = nil
 	p.Instrs = nil
 	p.Recover = nil
 	p.Blocks = nil
@@ -254,6 +260,10 @@ func (p *function) regInstr(v ssa.Value) uint32 {
 	var kind reflect.Kind
 	if v != nil {
 		kind = toKind(v.Type())
+	}
+	if p.Interp.ctx.Mode&ExperimentalSupportGC != 0 &&
+		!p.hasGCRegs && !vk.isStatic() && isGCRegisterKind(kind) {
+		p.hasGCRegs = true
 	}
 	i := uint32(len(p.stack) | int(vk<<30) | int(kind<<24))
 	p.stack = append(p.stack, vs)

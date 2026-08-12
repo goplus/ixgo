@@ -100,7 +100,12 @@ type Interp struct {
 	deferCount   int32                                       // fast has defer check
 	goexited     int32                                       // is call runtime.Goexit
 	exited       int32                                       // is call os.Exit
+	gcEnabled    bool                                        // program can invoke runtime.GC
 	interpExt
+}
+
+func isRuntimeGCFunction(fn *ssa.Function) bool {
+	return fn != nil && fn.Name() == "GC" && fn.Pkg != nil && fn.Pkg.Pkg.Path() == "runtime"
 }
 
 func (i *Interp) MainPkg() *ssa.Package {
@@ -263,16 +268,73 @@ func checkRuns(block *ssa.BasicBlock, jumps map[*ssa.BasicBlock]bool, succs map[
 }
 
 func (fr *frame) gc() {
-	// Invalidate hidden caches before the liveness scan.
+	// Hidden caches are not part of SSA liveness.
 	for _, reg := range fr.pfn.cacheRegs {
 		fr.stack[reg] = nil
 	}
 	for i := range fr.phiVals {
 		fr.phiVals[i] = nil
 	}
-	alloc := make(map[int]bool)
+	pc := fr.ipc - 1
+	if pc < 0 || pc >= len(fr.pfn.gcRegs) {
+		return
+	}
+	for _, reg := range fr.pfn.gcRegsForPC(pc) {
+		fr.stack[reg] = nil
+	}
+}
+
+const maxEagerGCLivenessPCs = 1024
+
+// initGCLiveness moves the original runtime liveness walk to function load
+// time. Each entry contains registers that are dead after the instruction at
+// that PC and can therefore be released before invoking the host GC.
+func (pfn *function) initGCLiveness() {
+	if !pfn.hasGCRegs {
+		return
+	}
+	pfn.gcRegs = make([][]register, len(pfn.ssaInstrs))
+	pfn.gcReady = make([]atomic.Bool, len(pfn.ssaInstrs))
+	if len(pfn.ssaInstrs) > maxEagerGCLivenessPCs {
+		return
+	}
+	for pc := range pfn.ssaInstrs {
+		pfn.gcRegs[pc] = pfn.gcRegsAt(pc)
+		pfn.gcReady[pc].Store(true)
+	}
+}
+
+func (pfn *function) gcRegsForPC(pc int) []register {
+	if pfn.gcReady == nil || pfn.gcReady[pc].Load() {
+		return pfn.gcRegs[pc]
+	}
+	pfn.gcMu.Lock()
+	defer pfn.gcMu.Unlock()
+	if !pfn.gcReady[pc].Load() {
+		pfn.gcRegs[pc] = pfn.gcRegsAt(pc)
+		pfn.gcReady[pc].Store(true)
+	}
+	return pfn.gcRegs[pc]
+}
+
+func isGCRegisterKind(kind reflect.Kind) bool {
+	switch kind {
+	case reflect.String, reflect.Func, reflect.Ptr, reflect.Array, reflect.Slice, reflect.Map, reflect.Struct, reflect.Interface:
+		return true
+	default:
+		return false
+	}
+}
+
+func (pfn *function) gcRegsAt(pc int) []register {
+	cur := pfn.ssaInstrs[pc]
+	block := cur.Block()
+	if block == nil {
+		return nil
+	}
+	dead := make(map[int]bool)
 	checkAlloc := func(instr ssa.Instruction) {
-		for _, v := range fr.pfn.instrIndex[instr] {
+		for _, v := range pfn.instrIndex[instr] {
 			vk := kind(v >> 30)
 			if vk.isStatic() {
 				continue
@@ -283,15 +345,12 @@ func (fr *frame) gc() {
 			default:
 				continue
 			}
-			alloc[int(v&0xffffff)] = true
+			dead[int(v&0xffffff)] = true
 		}
 	}
-	// check params and freevar
 	checkAlloc(nil)
-	// check alloc
-	cur := fr.pfn.ssaInstrs[fr.ipc-1]
 	var remain int
-	for i, instr := range fr.block.Instrs {
+	for i, instr := range block.Instrs {
 		checkAlloc(instr)
 		if cur == instr {
 			remain = i
@@ -299,7 +358,6 @@ func (fr *frame) gc() {
 		}
 	}
 
-	// check
 	seen := make(map[*ssa.BasicBlock]bool)
 	var checkChild func(block *ssa.BasicBlock)
 	checkChild = func(block *ssa.BasicBlock) {
@@ -311,13 +369,10 @@ func (fr *frame) gc() {
 			checkChild(child)
 		}
 	}
-	// check block child
-	checkChild(fr.block)
+	checkChild(block)
 
-	block := fr.block
-	// check seen
-	for block != nil {
-		idom := block.Idom()
+	for parent := block; parent != nil; {
+		idom := parent.Idom()
 		if idom == nil {
 			break
 		}
@@ -335,49 +390,48 @@ func (fr *frame) gc() {
 				seen[v] = true
 				checkChild(v)
 			}
-			if block == v {
+			if parent == v {
 				find = true
 			}
 		}
 		for _, instr := range idom.Instrs {
 			checkAlloc(instr)
 		}
-		block = idom
+		parent = idom
 	}
-	if fr.block.Comment == "for.done" {
-		delete(seen, fr.block)
+	if block.Comment == "for.done" {
+		delete(seen, block)
 	}
-	// check used in block
 	var ops []*ssa.Value
-	for _, instr := range fr.block.Instrs[remain+1:] {
+	for _, instr := range block.Instrs[remain+1:] {
 		for _, op := range instr.Operands(ops[:0]) {
 			if *op == nil {
 				continue
 			}
-			reg := fr.pfn.regIndex(*op)
-			alloc[int(reg)] = false
+			reg := pfn.regIndex(*op)
+			dead[int(reg)] = false
 		}
 	}
-	// check unused in seen
-	for block := range seen {
+	for liveBlock := range seen {
 		var ops []*ssa.Value
-		for _, instr := range block.Instrs {
+		for _, instr := range liveBlock.Instrs {
 			for _, op := range instr.Operands(ops[:0]) {
 				if *op == nil {
 					continue
 				}
-				reg := fr.pfn.regIndex(*op)
-				alloc[int(reg)] = false
+				reg := pfn.regIndex(*op)
+				dead[int(reg)] = false
 			}
 		}
 	}
-	// remove unused
-	for i, b := range alloc {
-		if !b {
+	regs := make([]register, 0, len(dead))
+	for i, isDead := range dead {
+		if !isDead {
 			continue
 		}
-		fr.stack[i] = nil
+		regs = append(regs, register(i))
 	}
+	return regs
 }
 
 func (fr *frame) valid() bool {
