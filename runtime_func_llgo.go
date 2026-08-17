@@ -53,7 +53,7 @@ func isInlineFunc(f *runtime.Func) bool {
 	return true
 }
 
-//go:linkname runtimePanic github.com/goplus/llgo/runtime/internal/runtime.Panic
+//go:linkname runtimePanic github.com/xgo-dev/llgo/runtime/internal/runtime.Panic
 func runtimePanic(e interface{})
 
 func runtimeFuncFileLine(fr *frame, f *runtime.Func, pc uintptr) (file string, line int) {

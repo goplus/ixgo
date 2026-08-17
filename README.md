@@ -12,7 +12,7 @@ A fast and fully compatible Go language interpreter.
 ### Compilers
 
 - Go (gc)
-- [LLGo](https://github.com/goplus/llgo)
+- [LLGo](https://github.com/xgo-dev/llgo)
 
 ### Platforms
 
