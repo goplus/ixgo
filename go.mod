@@ -10,7 +10,7 @@ require (
 	github.com/peterh/liner v1.2.2
 	github.com/qiniu/x v1.18.0
 	github.com/visualfc/funcval v0.1.5
-	github.com/visualfc/gid v0.3.3
+	github.com/visualfc/gid v0.3.4
 	github.com/visualfc/goembed v0.3.4
 	github.com/visualfc/xtype v0.3.3
 	golang.org/x/mod v0.32.0
