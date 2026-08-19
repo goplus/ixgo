@@ -13,6 +13,7 @@ import (
 	_ "github.com/goplus/ixgo/pkg/github.com/qiniu/x/stringutil"
 	_ "github.com/goplus/ixgo/pkg/github.com/qiniu/x/xgo"
 	_ "github.com/goplus/ixgo/pkg/github.com/qiniu/x/xgo/ng"
+	_ "github.com/goplus/ixgo/pkg/github.com/qiniu/x/xgo/retval"
 
 	_ "github.com/goplus/ixgo/pkg/errors"
 	_ "github.com/goplus/ixgo/pkg/fmt"

@@ -7,7 +7,7 @@ A fast and fully compatible Go language interpreter.
 
 ### Go Version
 
-- Go 1.24 ~ 1.26
+- Go 1.25 ~ 1.26
 
 ### Compilers
 
