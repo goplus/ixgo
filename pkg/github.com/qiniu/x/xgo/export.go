@@ -27,7 +27,13 @@ func init() {
 		},
 		TypedConsts: map[string]ixgo.TypedConst{},
 		UntypedConsts: map[string]ixgo.UntypedConst{
-			"XGoPackage": {Typ: "untyped bool", Value: constant.MakeBool(bool(q.XGoPackage))},
+			"Break":         {Typ: "untyped int", Value: constant.MakeInt64(int64(q.Break))},
+			"BreakLabel":    {Typ: "untyped int", Value: constant.MakeInt64(int64(q.BreakLabel))},
+			"Continue":      {Typ: "untyped int", Value: constant.MakeInt64(int64(q.Continue))},
+			"ContinueLabel": {Typ: "untyped int", Value: constant.MakeInt64(int64(q.ContinueLabel))},
+			"Return":        {Typ: "untyped int", Value: constant.MakeInt64(int64(q.Return))},
+			"ReturnVals":    {Typ: "untyped int", Value: constant.MakeInt64(int64(q.ReturnVals))},
+			"XGoPackage":    {Typ: "untyped bool", Value: constant.MakeBool(bool(q.XGoPackage))},
 		},
 	})
 }
