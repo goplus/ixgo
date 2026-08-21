@@ -343,7 +343,7 @@ func (t *Type) Uncommon() *UncommonType {
 		return &(*u)(unsafe.Pointer(t)).u
 	case Map:
 		type u struct {
-			mapType
+			MapType
 			u UncommonType
 		}
 		return &(*u)(unsafe.Pointer(t)).u
@@ -372,7 +372,7 @@ func (t *Type) Elem() *Type {
 		tt := (*ChanType)(unsafe.Pointer(t))
 		return tt.Elem
 	case Map:
-		tt := (*mapType)(unsafe.Pointer(t))
+		tt := (*MapType)(unsafe.Pointer(t))
 		return tt.Elem
 	case Pointer:
 		tt := (*PtrType)(unsafe.Pointer(t))
@@ -392,12 +392,11 @@ func (t *Type) StructType() *StructType {
 	return (*StructType)(unsafe.Pointer(t))
 }
 
-// MapType returns t cast to a *OldMapType or *SwissMapType, or nil if its tag does not match.
-func (t *Type) MapType() *mapType {
+func (t *Type) MapType() *MapType {
 	if t.Kind() != Map {
 		return nil
 	}
-	return (*mapType)(unsafe.Pointer(t))
+	return (*MapType)(unsafe.Pointer(t))
 }
 
 // ArrayType returns t cast to a *ArrayType, or nil if its tag does not match.
@@ -459,7 +458,7 @@ func (t *InterfaceType) NumMethod() int { return len(t.Methods) }
 
 func (t *Type) Key() *Type {
 	if t.Kind() == Map {
-		return (*mapType)(unsafe.Pointer(t)).Key
+		return (*MapType)(unsafe.Pointer(t)).Key
 	}
 	return nil
 }
