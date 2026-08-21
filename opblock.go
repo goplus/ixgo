@@ -1065,8 +1065,8 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 	case *ssa.Store:
 		// skip struct field _
 		if addr, ok := instr.Addr.(*ssa.FieldAddr); ok {
-			if s, ok := addr.X.Type().(*types.Pointer).Elem().(*types.Struct); ok {
-				if s.Field(addr.Field).Name() == "_" {
+			if p, ok := addr.X.Type().Underlying().(*types.Pointer); ok {
+				if s, ok := p.Elem().Underlying().(*types.Struct); ok && s.Field(addr.Field).Name() == "_" {
 					return nil
 				}
 			}
