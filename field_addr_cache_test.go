@@ -85,6 +85,31 @@ func main() {
 	}
 }
 
+func TestNamedPointerFieldAddr(t *testing.T) {
+	const source = `package main
+
+type B *struct{ A }
+type A interface{ m(B) }
+
+type s struct{}
+
+func (s) m(B) {}
+
+func main() {
+	var b B = new(struct{ A })
+	b.A = s{}
+	(*b).m(b)
+}
+`
+	for _, mode := range fieldAddrModes {
+		t.Run(mode.name, func(t *testing.T) {
+			if _, err := ixgo.NewContext(mode.mode).RunFile("main.go", source, nil); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestFieldAddrCacheReleasesReceiver(t *testing.T) {
 	if ixgo.IsLLGo {
 		t.Skip("skip llgo")
