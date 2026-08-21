@@ -22,27 +22,21 @@ jobs:
         go-version: ${{ matrix.go-version }}
 
     - name: Test ixgo
-      if: matrix.go-version != '1.27.x'
       run: go test -race -v .
 
     - name: Test xgobuild
-      if: matrix.go-version != '1.27.x'
       run: go test -race -v ./xgobuild
 
     - name: Test transform
-      if: matrix.go-version != '1.27.x'
       run: go test -race -v ./transform/...
 
     - name: Install ixgo
-      if: matrix.go-version != '1.27.x'
       run: go install -v ./cmd/ixgo
 
     - name: Test $GOROOT/test
-      if: matrix.go-version != '1.27.x'
       run: go run ./cmd/ixgotest
 
     - name: Test iter
-      if: matrix.go-version != '1.27.x'
       run: ixgo test -v ./cmd/ixgotest/_data/iter
 
     - name: Test ixgo linkname
