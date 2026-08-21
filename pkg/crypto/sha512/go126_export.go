@@ -1,7 +1,7 @@
 // export by github.com/goplus/ixgo/cmd/qexp
 
-//go:build go1.26
-// +build go1.26
+//go:build go1.26 && !go1.27
+// +build go1.26,!go1.27
 
 package sha512
 

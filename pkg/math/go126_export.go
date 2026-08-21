@@ -1,7 +1,7 @@
 // export by github.com/goplus/ixgo/cmd/qexp
 
-//go:build go1.26
-// +build go1.26
+//go:build go1.26 && !go1.27
+// +build go1.26,!go1.27
 
 package math
 
@@ -20,9 +20,8 @@ func init() {
 		Name: "math",
 		Path: "math",
 		Deps: map[string]string{
-			"internal/cpu": "cpu",
-			"math/bits":    "bits",
-			"unsafe":       "unsafe",
+			"math/bits": "bits",
+			"unsafe":    "unsafe",
 		},
 		Interfaces: map[string]reflect.Type{},
 		NamedTypes: map[string]reflect.Type{},

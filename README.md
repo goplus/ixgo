@@ -8,6 +8,7 @@ A fast and fully compatible Go language interpreter.
 ### Go Version
 
 - Go 1.25 ~ 1.26
+- Go 1.27 ([linkname mode](#build-linkname-mode))
 
 ### Compilers
 
@@ -155,7 +156,7 @@ func main() {
 }
 ```
 
-#### install ixgo command line linkname mode
+#### build linkname mode
 
 ```shell
 go install -tags linknamefix -ldflags="-checklinkname=0" github.com/goplus/ixgo/cmd/ixgo@latest

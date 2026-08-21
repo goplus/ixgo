@@ -1,0 +1,41 @@
+// export by github.com/goplus/ixgo/cmd/qexp
+
+//go:build go1.27
+// +build go1.27
+
+package adler32
+
+import (
+	q "hash/adler32"
+
+	"go/constant"
+	"reflect"
+
+	"github.com/goplus/ixgo"
+)
+
+func init() {
+	ixgo.RegisterPackageLazy("hash/adler32", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "adler32",
+			Path: "hash/adler32",
+			Deps: map[string]string{
+				"errors":             "errors",
+				"hash":               "hash",
+				"internal/byteorder": "byteorder",
+			},
+			Interfaces: map[string]reflect.Type{},
+			NamedTypes: map[string]reflect.Type{},
+			AliasTypes: map[string]reflect.Type{},
+			Vars:       map[string]reflect.Value{},
+			Funcs: map[string]reflect.Value{
+				"Checksum": reflect.ValueOf(q.Checksum),
+				"New":      reflect.ValueOf(q.New),
+			},
+			TypedConsts: map[string]ixgo.TypedConst{},
+			UntypedConsts: map[string]ixgo.UntypedConst{
+				"Size": {Typ: "untyped int", Value: constant.MakeInt64(int64(q.Size))},
+			},
+		}
+	})
+}

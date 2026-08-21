@@ -1,0 +1,23 @@
+// export by github.com/goplus/ixgo/cmd/qexp
+
+//go:build go1.27
+// +build go1.27
+
+package internal
+
+import (
+	"github.com/goplus/ixgo"
+)
+
+func init() {
+	ixgo.RegisterPackageLazy("log/slog/internal", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name:   "internal",
+			Path:   "log/slog/internal",
+			Deps:   map[string]string{},
+			Source: source,
+		}
+	})
+}
+
+var source = "package internal\n\nvar IgnorePC = false\n"

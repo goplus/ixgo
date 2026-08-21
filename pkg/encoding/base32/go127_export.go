@@ -1,0 +1,49 @@
+// export by github.com/goplus/ixgo/cmd/qexp
+
+//go:build go1.27
+// +build go1.27
+
+package base32
+
+import (
+	q "encoding/base32"
+
+	"go/constant"
+	"reflect"
+
+	"github.com/goplus/ixgo"
+)
+
+func init() {
+	ixgo.RegisterPackageLazy("encoding/base32", func() *ixgo.Package {
+		return &ixgo.Package{
+			Name: "base32",
+			Path: "encoding/base32",
+			Deps: map[string]string{
+				"io":      "io",
+				"slices":  "slices",
+				"strconv": "strconv",
+			},
+			Interfaces: map[string]reflect.Type{},
+			NamedTypes: map[string]reflect.Type{
+				"CorruptInputError": reflect.TypeOf((*q.CorruptInputError)(nil)).Elem(),
+				"Encoding":          reflect.TypeOf((*q.Encoding)(nil)).Elem(),
+			},
+			AliasTypes: map[string]reflect.Type{},
+			Vars: map[string]reflect.Value{
+				"HexEncoding": reflect.ValueOf(&q.HexEncoding),
+				"StdEncoding": reflect.ValueOf(&q.StdEncoding),
+			},
+			Funcs: map[string]reflect.Value{
+				"NewDecoder":  reflect.ValueOf(q.NewDecoder),
+				"NewEncoder":  reflect.ValueOf(q.NewEncoder),
+				"NewEncoding": reflect.ValueOf(q.NewEncoding),
+			},
+			TypedConsts: map[string]ixgo.TypedConst{
+				"NoPadding":  {Typ: reflect.TypeOf(q.NoPadding), Value: constant.MakeInt64(int64(q.NoPadding))},
+				"StdPadding": {Typ: reflect.TypeOf(q.StdPadding), Value: constant.MakeInt64(int64(q.StdPadding))},
+			},
+			UntypedConsts: map[string]ixgo.UntypedConst{},
+		}
+	})
+}

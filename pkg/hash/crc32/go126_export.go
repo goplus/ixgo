@@ -1,7 +1,7 @@
 // export by github.com/goplus/ixgo/cmd/qexp
 
-//go:build go1.26
-// +build go1.26
+//go:build go1.26 && !go1.27
+// +build go1.26,!go1.27
 
 package crc32
 
@@ -26,7 +26,6 @@ func init() {
 				"internal/cpu":       "cpu",
 				"sync":               "sync",
 				"sync/atomic":        "atomic",
-				"unsafe":             "unsafe",
 			},
 			Interfaces: map[string]reflect.Type{},
 			NamedTypes: map[string]reflect.Type{
