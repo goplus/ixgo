@@ -28,6 +28,7 @@ import (
 	"sync/atomic"
 	"unsafe"
 
+	"github.com/goplus/ixgo/internal/typesutil"
 	"github.com/goplus/reflectx"
 	"golang.org/x/tools/go/ssa"
 	"golang.org/x/tools/go/types/typeutil"
@@ -403,26 +404,68 @@ func (r *TypesRecord) extractMethodSet(T types.Type) (methods []*types.Selection
 	}
 	mset := r.prog.MethodSets.MethodSet(T)
 	mcount = mset.Len()
-	methods = make([]*types.Selection, pcount)
-	if mcount == 0 {
-		for i := 0; i < pcount; i++ {
-			methods[i] = pmset.At(i)
+	if !typesutil.SupportConcreteMethod {
+		methods = make([]*types.Selection, pcount)
+		if mcount == 0 {
+			for i := 0; i < pcount; i++ {
+				methods[i] = pmset.At(i)
+			}
+		} else {
+			mcache := make(map[string]*types.Selection)
+			for i := 0; i < mcount; i++ {
+				meth := mset.At(i)
+				mcache[meth.Obj().Name()] = meth
+			}
+			for i := 0; i < pcount; i++ {
+				meth := pmset.At(i)
+				// Prefer the value-receiver selection (m) only when its embedding depth
+				// is no greater than the pointer-receiver entry (meth). A deeper m would
+				// mean meth is the more direct promotion and should not be replaced.
+				if m, ok := mcache[meth.Obj().Name()]; ok && len(meth.Index()) >= len(m.Index()) {
+					meth = m
+				}
+				methods[i] = meth
+			}
 		}
 	} else {
-		mcache := make(map[string]*types.Selection)
-		for i := 0; i < mcount; i++ {
-			meth := mset.At(i)
-			mcache[meth.Obj().Name()] = meth
-		}
-		for i := 0; i < pcount; i++ {
-			meth := pmset.At(i)
-			// Prefer the value-receiver selection (m) only when its embedding depth
-			// is no greater than the pointer-receiver entry (meth). A deeper m would
-			// mean meth is the more direct promotion and should not be replaced.
-			if m, ok := mcache[meth.Obj().Name()]; ok && len(meth.Index()) >= len(m.Index()) {
-				meth = m
+		methods = make([]*types.Selection, pcount)
+		if mcount == 0 {
+			for i, index, n := 0, 0, pcount; i < n; i++ {
+				meth := pmset.At(i)
+				if methodHasTypeParam(meth) {
+					pcount--
+					continue
+				}
+				methods[index] = meth
+				index++
 			}
-			methods[i] = meth
+			methods = methods[:pcount]
+		} else {
+			mcache := make(map[string]*types.Selection)
+			for i, n := 0, mcount; i < n; i++ {
+				meth := mset.At(i)
+				if methodHasTypeParam(meth) {
+					mcount--
+					continue
+				}
+				mcache[meth.Obj().Name()] = meth
+			}
+			for i, index, n := 0, 0, pcount; i < n; i++ {
+				meth := pmset.At(i)
+				if methodHasTypeParam(meth) {
+					pcount--
+					continue
+				}
+				// Prefer the value-receiver selection (m) only when its embedding depth
+				// is no greater than the pointer-receiver entry (meth). A deeper m would
+				// mean meth is the more direct promotion and should not be replaced.
+				if m, ok := mcache[meth.Obj().Name()]; ok && len(meth.Index()) >= len(m.Index()) {
+					meth = m
+				}
+				methods[index] = meth
+				index++
+			}
+			methods = methods[:pcount]
 		}
 	}
 	return
