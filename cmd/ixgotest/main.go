@@ -115,9 +115,7 @@ func init() {
 			gorootTestSkips["rangegen.go"] = "BUG, range"
 		}
 		if ver >= 27 {
-			gorootTestSkips["genmeth.go"] = "TODO, fix"
-			gorootTestSkips["genmeth1.go"] = "TODO, fix"
-			gorootTestSkips["genmeth2.go"] = "TODO, fix"
+			gorootTestSkips["genmeth1.go"] = "buld ssa package error: assertion failed"
 		}
 	case ver == 16:
 		gorootTestSkips["fixedbugs/issue7740.go"] = "BUG, const float"

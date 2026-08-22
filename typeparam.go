@@ -41,6 +41,10 @@ func hasTypeParam(typ types.Type) bool {
 	return false
 }
 
+func methodHasTypeParam(sel *types.Selection) bool {
+	return sel.Type().(*types.Signature).TypeParams() != nil
+}
+
 type nestedStack struct {
 	targs []string
 	cache []*typeutil.Map
