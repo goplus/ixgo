@@ -2,4 +2,4 @@
 
 package typesutil
 
-const SupportConcreteMethod = true
+const SupportsGenericMethods = true
