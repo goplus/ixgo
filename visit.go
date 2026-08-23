@@ -96,7 +96,7 @@ func (visit *visitor) program() {
 		checkXGo := visit.intp.ctx.Mode&CheckGopOverloadFunc != 0
 		for i, n := 0, mset.Len(); i < n; i++ {
 			sel := mset.At(i)
-			if methodHasTypeParam(sel) {
+			if isGenericMethod(sel) {
 				continue
 			}
 			obj := sel.Obj()

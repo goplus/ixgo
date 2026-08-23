@@ -404,7 +404,7 @@ func (r *TypesRecord) extractMethodSet(T types.Type) (methods []*types.Selection
 	}
 	mset := r.prog.MethodSets.MethodSet(T)
 	mcount = mset.Len()
-	if !typesutil.SupportConcreteMethod {
+	if !typesutil.SupportsGenericMethods {
 		methods = make([]*types.Selection, pcount)
 		if mcount == 0 {
 			for i := 0; i < pcount; i++ {
@@ -432,7 +432,7 @@ func (r *TypesRecord) extractMethodSet(T types.Type) (methods []*types.Selection
 		if mcount == 0 {
 			for i, index, n := 0, 0, pcount; i < n; i++ {
 				meth := pmset.At(i)
-				if methodHasTypeParam(meth) {
+				if isGenericMethod(meth) {
 					pcount--
 					continue
 				}
@@ -444,7 +444,7 @@ func (r *TypesRecord) extractMethodSet(T types.Type) (methods []*types.Selection
 			mcache := make(map[string]*types.Selection)
 			for i, n := 0, mcount; i < n; i++ {
 				meth := mset.At(i)
-				if methodHasTypeParam(meth) {
+				if isGenericMethod(meth) {
 					mcount--
 					continue
 				}
@@ -452,7 +452,7 @@ func (r *TypesRecord) extractMethodSet(T types.Type) (methods []*types.Selection
 			}
 			for i, index, n := 0, 0, pcount; i < n; i++ {
 				meth := pmset.At(i)
-				if methodHasTypeParam(meth) {
+				if isGenericMethod(meth) {
 					pcount--
 					continue
 				}
