@@ -44,11 +44,35 @@ var (
 	flagExportLazy     bool
 	flagAliasTypes     string
 	flagDirectCalls    string
+	flagSkip           string
 )
 
 var (
 	filterAliasTypesMap map[string]struct{}
+	skipSymbolsMap      map[string]struct{}
 )
+
+func setSkipSymbols(spec string) {
+	skipSymbolsMap = nil
+	for _, name := range strings.FieldsFunc(spec, func(r rune) bool { return r == ',' || r == ';' }) {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if skipSymbolsMap == nil {
+			skipSymbolsMap = make(map[string]struct{})
+		}
+		skipSymbolsMap[name] = struct{}{}
+	}
+}
+
+func skipSymbol(pkgPath, name string) bool {
+	if _, ok := skipSymbolsMap[pkgPath+"."+name]; ok {
+		return true
+	}
+	_, ok := skipSymbolsMap[name]
+	return ok
+}
 
 func init() {
 	flag.StringVar(&flagExportDir, "outdir", "", "set export out dir")
@@ -64,6 +88,7 @@ func init() {
 	flag.BoolVar(&flagExportLazy, "lazy", false, "deferred initialization of registered packages to first use")
 	flag.StringVar(&flagAliasTypes, "alias_types", "", "set export types alias list, split by ;")
 	flag.StringVar(&flagDirectCalls, "directcalls", "", "generate direct adapters for Func, Type.Method, *, Type.*, *.*, or all selectors (separate selectors with , or ;)")
+	flag.StringVar(&flagSkip, "skip", "", "skip exported package symbols (separate pkg.Symbol or Symbol selectors with ',' or ';' bare Symbol matches all packages)")
 }
 
 // Cmd - ixgo build
@@ -115,6 +140,7 @@ func exportCmd(cmd *base.Command, args []string) {
 			filterAliasTypesMap[typ] = struct{}{}
 		}
 	}
+	setSkipSymbols(flagSkip)
 
 	ctxList := parserContextList(flagBuildContext)
 	if err := Export(args, ctxList); err != nil {
