@@ -1,5 +1,5 @@
-//go:build !linknamefix
-// +build !linknamefix
+//go:build go1.23 && !linknamefix
+// +build go1.23,!linknamefix
 
 package iter
 

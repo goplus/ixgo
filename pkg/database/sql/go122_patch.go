@@ -10,6 +10,7 @@ import (
 	_ "unsafe"
 
 	"github.com/goplus/ixgo"
+	_ "github.com/goplus/ixgo/pkg/database/sql/driver"
 )
 
 //go:linkname convertAssign database/sql.convertAssign
