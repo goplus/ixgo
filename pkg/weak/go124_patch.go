@@ -5,11 +5,11 @@ package weak
 
 import (
 	_ "embed"
-	_ "weak"
 
 	"unsafe"
 
 	"github.com/goplus/ixgo"
+	_ "github.com/goplus/ixgo/pkg/runtime"
 )
 
 //go:embed _patch/weak.go

@@ -50,3 +50,6 @@ jobs:
 
     - name: Test iter
       run: ixgo test -v ./cmd/ixgotest/_data/iter
+
+    - name: Test pkg patch
+      run: go test -v ./test/patch/...

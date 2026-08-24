@@ -5,13 +5,16 @@ package unique
 
 import (
 	_ "embed"
-	_ "unique"
 	_ "unsafe"
 
 	_ "github.com/goplus/ixgo/pkg/github.com/goplus/ixgo/x/abi"
 	_ "github.com/goplus/ixgo/pkg/github.com/goplus/ixgo/x/goarch"
 	_ "github.com/goplus/ixgo/pkg/github.com/goplus/ixgo/x/isync"
 	_ "github.com/goplus/ixgo/pkg/github.com/goplus/ixgo/x/stringslite"
+	_ "github.com/goplus/ixgo/pkg/runtime"
+	_ "github.com/goplus/ixgo/pkg/sync"
+	_ "github.com/goplus/ixgo/pkg/sync/atomic"
+	_ "github.com/goplus/ixgo/pkg/weak"
 
 	"github.com/goplus/ixgo"
 )

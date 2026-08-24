@@ -2,6 +2,7 @@ package delay
 
 import (
 	"github.com/goplus/ixgo"
+	_ "github.com/goplus/ixgo/pkg/github.com/goplus/xgo/tpl/variant"
 )
 
 var delay_patch = `package delay

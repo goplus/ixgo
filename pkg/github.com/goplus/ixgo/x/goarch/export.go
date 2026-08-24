@@ -23,6 +23,7 @@ func init() {
 		Funcs:       map[string]reflect.Value{},
 		TypedConsts: map[string]ixgo.TypedConst{},
 		UntypedConsts: map[string]ixgo.UntypedConst{
+			"IsWasm":  {Typ: "untyped int", Value: constant.MakeInt64(int64(q.IsWasm))},
 			"PtrSize": {Typ: "untyped int", Value: constant.MakeInt64(int64(q.PtrSize))},
 		},
 	})
