@@ -31,7 +31,6 @@ import (
 	"strings"
 
 	"golang.org/x/tools/go/gcexportdata"
-
 	"golang.org/x/tools/go/loader"
 )
 
@@ -399,6 +398,10 @@ func (p *Program) ExportPkg(path string, sname string) (*Package, error) {
 		if !token.IsExported(name) {
 			continue
 		}
+		if skipSymbol(pkgPath, name) {
+			log.Println("skip symbol", pkgPath+"."+name)
+			continue
+		}
 		obj := pkg.Scope().Lookup(name)
 		switch t := obj.(type) {
 		case *types.Const:
@@ -566,6 +569,12 @@ func (p *Alias) aliasNamed(t *types.Named, pkg *types.Package) (string, bool) {
 	for i := 0; i < t.NumMethods(); i++ {
 		fn := t.Method(i)
 		if !ast.IsExported(fn.Name()) {
+			continue
+		}
+		if sig, ok := fn.Type().(*types.Signature); ok && (hasTypeParam(sig) || sig.RecvTypeParams() != nil) {
+			if !flagExportSource && !flagExportCode {
+				log.Println("skip typeparam method", fn)
+			}
 			continue
 		}
 		if s, ok := p.aliasType(fn.Type(), pkg); ok {

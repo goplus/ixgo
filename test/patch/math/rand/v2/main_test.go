@@ -1,4 +1,4 @@
-//go:build go1.22
+//go:build go1.27
 
 package main
 

@@ -92,6 +92,12 @@ func isLazyPkg(pkg string) bool {
 	return false
 }
 
+func addSkipSymbols(cmd *exec.Cmd) {
+	if minorVer >= 27 {
+		cmd.Args = append(cmd.Args, "-skip", "math/rand/v2.Rand;math/rand/v2.New")
+	}
+}
+
 func main() {
 	var tags string
 	var name string
@@ -174,6 +180,7 @@ func main() {
 
 	// pkgs
 	cmd := exec.Command("qexp", "-outdir", ".", "-addtags", tags, "-filename", name)
+	addSkipSymbols(cmd)
 	cmd.Args = append(cmd.Args, cpkgs...)
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stdout
@@ -184,6 +191,7 @@ func main() {
 
 	// lazy pkgs
 	cmd = exec.Command("qexp", "-outdir", ".", "-addtags", tags, "-filename", name)
+	addSkipSymbols(cmd)
 	cmd.Args = append(cmd.Args, "-lazy")
 	cmd.Args = append(cmd.Args, lazyPkgs...)
 	cmd.Stderr = os.Stderr
@@ -195,6 +203,7 @@ func main() {
 
 	// lazy log
 	cmd = exec.Command("qexp", "-outdir", ".", "-addtags", tags, "-filename", name, "-code")
+	addSkipSymbols(cmd)
 	cmd.Args = append(cmd.Args, "-lazy")
 	cmd.Args = append(cmd.Args, "log")
 	if minorVer >= 21 {
@@ -211,6 +220,7 @@ func main() {
 	gpkgs := genericPkgs(pkgs)
 	if len(gpkgs) > 0 {
 		cmd = exec.Command("qexp", "-outdir", ".", "-addtags", tags, "-filename", name, "-src")
+		addSkipSymbols(cmd)
 		cmd.Args = append(cmd.Args, gpkgs...)
 		cmd.Stderr = os.Stderr
 		cmd.Stdout = os.Stdout
@@ -228,6 +238,7 @@ func main() {
 			continue
 		}
 		cmd := exec.Command("qexp", "-outdir", ".", "-addtags", tags, "-filename", name, "-contexts", osarch)
+		addSkipSymbols(cmd)
 		cmd.Args = append(cmd.Args, "syscall")
 		cmd.Stderr = os.Stderr
 		cmd.Stdout = os.Stdout

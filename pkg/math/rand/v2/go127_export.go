@@ -31,7 +31,6 @@ func init() {
 		NamedTypes: map[string]reflect.Type{
 			"ChaCha8": reflect.TypeOf((*q.ChaCha8)(nil)).Elem(),
 			"PCG":     reflect.TypeOf((*q.PCG)(nil)).Elem(),
-			"Rand":    reflect.TypeOf((*q.Rand)(nil)).Elem(),
 			"Zipf":    reflect.TypeOf((*q.Zipf)(nil)).Elem(),
 		},
 		AliasTypes: map[string]reflect.Type{},
@@ -46,7 +45,6 @@ func init() {
 			"Int64":       reflect.ValueOf(q.Int64),
 			"Int64N":      reflect.ValueOf(q.Int64N),
 			"IntN":        reflect.ValueOf(q.IntN),
-			"New":         reflect.ValueOf(q.New),
 			"NewChaCha8":  reflect.ValueOf(q.NewChaCha8),
 			"NewPCG":      reflect.ValueOf(q.NewPCG),
 			"NewZipf":     reflect.ValueOf(q.NewZipf),
