@@ -3,10 +3,11 @@
 package main
 
 import (
-	"github.com/goplus/ixgo"
-	_ "github.com/goplus/ixgo/pkg/iter"
 	"os"
 	"testing"
+
+	"github.com/goplus/ixgo"
+	_ "github.com/goplus/ixgo/pkg/iter"
 )
 
 func TestPatch(t *testing.T) {
