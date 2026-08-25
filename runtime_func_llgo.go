@@ -104,20 +104,31 @@ type interpExt struct {
 	makeFuncs sync.Map
 }
 
+// llgoClosure is the FFI-backed data block used by LLGo's reflect.MakeFunc.
+type llgoClosure struct {
+	fn  unsafe.Pointer
+	env unsafe.Pointer
+}
+
 func (i *interpExt) getMakeFuncValue(v reflect.Value) *makeFuncVal {
 	pv := (*reflectValue)(unsafe.Pointer(&v))
-	if r, ok := i.makeFuncs.Load(pv.ptr); ok {
-		return r.(*makeFuncVal)
-	}
-	return nil
+	return i.loadMakeFunc(pv.ptr)
 }
 
 func (i *interpExt) getMakeFuncVal(v interface{}) *makeFuncVal {
 	e := (*emptyInterface)(unsafe.Pointer(&v))
-	if r, ok := i.makeFuncs.Load(e.word); ok {
-		return r.(*makeFuncVal)
+	return i.loadMakeFunc(e.word)
+}
+
+func (i *interpExt) loadMakeFunc(ptr unsafe.Pointer) *makeFuncVal {
+	if ptr == nil {
+		return nil
 	}
-	return nil
+	r, ok := i.makeFuncs.Load((*llgoClosure)(ptr).fn)
+	if !ok {
+		return nil
+	}
+	return r.(*makeFuncVal)
 }
 
 func (pfn *function) makeFunction(typ reflect.Type, env []value) reflect.Value {
@@ -126,20 +137,16 @@ func (pfn *function) makeFunction(typ reflect.Type, env []value) reflect.Value {
 		return interp.callFunctionByReflect(interp.tryDeferFrame(), pfn, typ, args, env)
 	})
 	fn := (*reflectValue)(unsafe.Pointer(&v)).ptr
-	interp.makeFuncs.Store(fn, &makeFuncVal{
-		Fn:     uintptr(fn),
+	interp.makeFuncs.Store((*llgoClosure)(fn).fn, &makeFuncVal{
 		interp: interp,
 		pfn:    pfn,
-		typ:    typ,
 		env:    env,
 	})
 	return v
 }
 
 type makeFuncVal struct {
-	Fn     uintptr
 	interp *Interp
 	pfn    *function
-	typ    reflect.Type
 	env    []interface{}
 }
