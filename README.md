@@ -3,7 +3,7 @@
 [![Build Status](https://github.com/goplus/ixgo/workflows/Go/badge.svg)](https://github.com/goplus/ixgo/actions/workflows/go.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/goplus/ixgo.svg)](https://pkg.go.dev/github.com/goplus/ixgo)
 
-A fast and fully compatible Go language interpreter.
+A fast Go interpreter that supports all Go language features, including generics and generic methods.
 
 ### Go Version
 
@@ -31,8 +31,9 @@ A fast and fully compatible Go language interpreter.
 
 ### Generics
 
-- support typeparams
-- support alias typeparams
+- Supports type parameters (generics)
+- Supports generic type aliases
+- Supports generic methods (Go 1.27)
 
 ### install ixgo command line
 
@@ -52,7 +53,7 @@ ixgo             # ixgo repl mode
 ixgo run         # run a Go/XGo package
 ixgo build       # compile a Go/XGo package
 ixgo test        # test a package
-ixgo verson      # print version
+ixgo version     # print version
 ixgo export      # export Go package to ixgo builtin package
 ```
 
@@ -81,7 +82,7 @@ ixgo repl                  # run repl mode, support Go/XGo
 ixgo repl -go              # run repl mode, disable XGo syntax
 ```
 
-### ixgo test unsupport features
+### ixgo test unsupported features
 
 - test -fuzz
 - test -cover
@@ -138,13 +139,14 @@ import (
 )
 
 var source = `
-fields := [
-	"engineering",
-	"STEM education", 
-	"and data science",
+languages := [
+	"C",
+	"Go",
+	"Python",
+	"JavaScript",
 ]
 
-echo "The XGo language for", fields.join(", ")
+echo "XGo :=", languages.join(" * "), "+ Scratch"
 `
 
 func main() {
