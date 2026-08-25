@@ -20,6 +20,7 @@ package version
 import (
 	"fmt"
 	"runtime"
+	"runtime/debug"
 
 	"github.com/goplus/ixgo/cmd/internal/base"
 )
@@ -40,10 +41,18 @@ func init() {
 	Cmd.Run = versionCmd
 }
 
+// ProductVersion returns the iXGo module version embedded in the binary.
+func ProductVersion() string {
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
+	}
+	return "devel"
+}
+
 func versionCmd(cmd *base.Command, args []string) {
 	var ext string
 	if base.LLGo {
 		ext = "llgo "
 	}
-	fmt.Printf("ixgo build %v%v %v/%v\n", ext, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+	fmt.Printf("ixgo %v (build %v%v %v/%v)\n", ProductVersion(), ext, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 }
