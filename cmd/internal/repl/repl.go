@@ -25,6 +25,7 @@ import (
 
 	"github.com/goplus/ixgo"
 	"github.com/goplus/ixgo/cmd/internal/base"
+	ixgoversion "github.com/goplus/ixgo/cmd/internal/version"
 	"github.com/goplus/ixgo/repl"
 	"github.com/peterh/liner"
 )
@@ -89,7 +90,7 @@ func welcomeGo() string {
 	if base.LLGo {
 		ext = "llgo "
 	}
-	return fmt.Sprintf("iXGo v1.0.0 (build %v%v %v/%v)", ext, runtime.Version(), runtime.GOOS, runtime.GOARCH)
+	return fmt.Sprintf("iXGo %v (build %v%v %v/%v)", ixgoversion.ProductVersion(), ext, runtime.Version(), runtime.GOOS, runtime.GOARCH)
 }
 
 func runCmd(cmd *base.Command, args []string) {
