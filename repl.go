@@ -20,11 +20,14 @@ import (
 	"fmt"
 	"go/ast"
 	"go/constant"
+	"go/parser"
 	"go/scanner"
 	"go/token"
 	"go/types"
+	pathpkg "path"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 
 	xconst "github.com/goplus/ixgo/internal/constant"
@@ -42,19 +45,20 @@ func main(){}
 */
 
 type Repl struct {
-	ctx       *Context               // interp context
-	pkg       *ssa.Package           // main package
-	builtin   *ast.File              // builtin func
-	interp    *Interp                // last interp
-	fsInit    *fnState               // func init
-	fsMain    *fnState               // func main
-	globalMap map[string]interface{} // keep repl global map
-	fileName  string                 // file.go or file.gop
-	source    string                 // all source
-	imports   []string               // import lines
-	globals   []string               // global var/func/type
-	infuncs   []string               // in main func
-	lastEval  []*Eval                // last __ixgo_repl_eval__
+	ctx        *Context                  // interp context
+	pkg        *ssa.Package              // main package
+	builtin    *ast.File                 // builtin func
+	interp     *Interp                   // last interp
+	fsInit     *fnState                  // func init
+	fsMain     *fnState                  // func main
+	globalMap  map[string]interface{}    // keep repl global map
+	importPkgs map[string]*types.Package // checked imports
+	fileName   string                    // file.go or file.gop
+	source     string                    // all source
+	imports    []string                  // import lines
+	globals    []string                  // global var/func/type
+	infuncs    []string                  // in main func
+	lastEval   []*Eval                   // last __ixgo_repl_eval__
 }
 
 type Eval struct {
@@ -91,8 +95,9 @@ func toResultEval(interp *Interp, vs []interface{}, rs *types.Tuple) (eval []*Ev
 
 func NewRepl(ctx *Context) *Repl {
 	r := &Repl{
-		ctx:       ctx,
-		globalMap: make(map[string]interface{}),
+		ctx:        ctx,
+		globalMap:  make(map[string]interface{}),
+		importPkgs: make(map[string]*types.Package),
 	}
 	ctx.SetEvalMode(true)
 	RegisterCustomBuiltin("__ixgo_repl_used__", func(v interface{}) {})
@@ -164,22 +169,45 @@ func (r *Repl) eval(tok token.Token, expr string) (err error) {
 	var src string
 	var inMain bool
 	var evalConst bool
+	var evalImport bool
 	var lastErrors []error
 	switch tok {
 	case token.PACKAGE:
 		// skip package
 		return nil
 	case token.IMPORT:
-		src = r.buildSource(expr, tok)
-		errors, err := r.check(r.fileName, src)
+		pkgs, err := parseImport(expr)
 		if err != nil {
 			return err
 		}
-		if errors != nil {
-			return errors[0]
+		seen := make(map[string]bool, len(r.imports))
+		for _, imp := range r.imports {
+			seen[imp] = true
 		}
-		r.imports = append(r.imports, expr)
-		return nil
+		newImports := make([]string, 0, len(pkgs))
+		for _, pkg := range pkgs {
+			var imp string
+			if pkg.name == "" || pkg.name == pkg.pkg {
+				imp = `import "` + pkg.pkg + `"`
+			} else {
+				imp = `import ` + pkg.name + ` "` + pkg.pkg + `"`
+			}
+			if !seen[imp] {
+				seen[imp] = true
+				newImports = append(newImports, imp)
+			}
+			blank := `import _ "` + pkg.pkg + `"`
+			if !seen[blank] {
+				seen[blank] = true
+				newImports = append(newImports, blank)
+			}
+		}
+		if len(newImports) == 0 {
+			return nil
+		}
+		evalImport = true
+		src = r.buildSource(strings.Join(newImports, "\n"), tok)
+		r.imports = append(r.imports, newImports...)
 	case token.FUNC:
 		src = r.buildSource(expr, tok)
 		errors, err := r.check(r.fileName, src)
@@ -277,6 +305,16 @@ func (r *Repl) eval(tok token.Token, expr string) (err error) {
 	if err != nil {
 		return err
 	}
+	if evalImport {
+		for _, im := range r.pkg.Pkg.Imports() {
+			if _, ok := r.importPkgs[im.Path()]; !ok {
+				r.importPkgs[im.Path()] = im
+				if sp := r.pkg.Prog.ImportedPackage(im.Path()); sp != nil {
+					r.runFuncEx(i, sp, "init", nil)
+				}
+			}
+		}
+	}
 	if evalConst {
 		m := i.mainpkg.Members["__ixgo_repl_const__"]
 		c, _ := m.(*ssa.NamedConst)
@@ -289,6 +327,9 @@ func (r *Repl) eval(tok token.Token, expr string) (err error) {
 	for k, v := range i.globals {
 		r.globalMap[k] = v
 	}
+	if evalImport {
+		return nil
+	}
 	if inMain {
 		r.infuncs = append(r.infuncs, expr)
 	} else {
@@ -296,6 +337,38 @@ func (r *Repl) eval(tok token.Token, expr string) (err error) {
 	}
 	r.source = src
 	return nil
+}
+
+// parseImport returns imports not yet loaded by their package name.
+func parseImport(expr string) ([]struct{ name, pkg string }, error) {
+	file, err := parser.ParseFile(token.NewFileSet(), "import.go", "package main\n"+expr, parser.AllErrors)
+	if err != nil {
+		return nil, err
+	}
+	if len(file.Decls) != 1 {
+		return nil, fmt.Errorf("invalid import declaration")
+	}
+	decl, ok := file.Decls[0].(*ast.GenDecl)
+	if !ok || decl.Tok != token.IMPORT {
+		return nil, fmt.Errorf("invalid import declaration")
+	}
+	imports := make([]struct{ name, pkg string }, 0, len(decl.Specs))
+	for _, raw := range decl.Specs {
+		spec, ok := raw.(*ast.ImportSpec)
+		if !ok || spec.Path == nil {
+			return nil, fmt.Errorf("invalid import declaration")
+		}
+		path, err := strconv.Unquote(spec.Path.Value)
+		if err != nil {
+			return nil, err
+		}
+		name := pathpkg.Base(path)
+		if spec.Name != nil {
+			name = spec.Name.Name
+		}
+		imports = append(imports, struct{ name, pkg string }{name, path})
+	}
+	return imports, nil
 }
 
 const (
@@ -325,7 +398,7 @@ func (r *Repl) check(filename string, src interface{}) (errors []error, err erro
 		files = []*ast.File{file}
 	}
 	types.NewChecker(tc, r.ctx.FileSet, pkg, &types.Info{}).Files(files)
-	return
+	return errors, nil
 }
 
 func (r *Repl) firstToken(src string) token.Token {
@@ -342,6 +415,10 @@ type fnState struct {
 }
 
 func (r *Repl) runFunc(i *Interp, fnname string, fs *fnState) (rfs *fnState, err error) {
+	return r.runFuncEx(i, r.pkg, fnname, fs)
+}
+
+func (r *Repl) runFuncEx(i *Interp, pkg *ssa.Package, fnname string, fs *fnState) (rfs *fnState, err error) {
 	defer func() {
 		switch p := recover().(type) {
 		case nil:
@@ -351,7 +428,7 @@ func (r *Repl) runFunc(i *Interp, fnname string, fs *fnState) (rfs *fnState, err
 			err = fmt.Errorf("%v", p)
 		}
 	}()
-	fn := r.pkg.Func(fnname)
+	fn := pkg.Func(fnname)
 	if fn == nil {
 		return nil, fmt.Errorf("no function %v", fnname)
 	}

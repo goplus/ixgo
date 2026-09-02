@@ -23,6 +23,8 @@ import (
 
 	"github.com/goplus/ixgo"
 	_ "github.com/goplus/ixgo/pkg/fmt"
+	_ "github.com/goplus/ixgo/pkg/log"
+	_ "github.com/goplus/ixgo/pkg/runtime"
 )
 
 func TestReplExpr(t *testing.T) {
@@ -49,13 +51,64 @@ func TestReplExpr(t *testing.T) {
 	}
 }
 
+func TestReplRuntimeVersionThenLogPrintln(t *testing.T) {
+	r := ixgo.NewRepl(ixgo.NewContext(0))
+	for _, expr := range []string{
+		`a := 100`,
+		`import "runtime"`,
+		`import ("fmt";"runtime")`,
+		`fmt.Println(runtime.Version())`,
+		`import "log"`,
+		`log.Println("hello")`,
+		`import stdlog "log"`,
+		`stdlog.Println("world")`,
+	} {
+		if _, _, err := r.Eval(expr); err != nil {
+			t.Fatalf("Eval(%q): %v", expr, err)
+		}
+	}
+}
+
+func TestReplImportPreservesMainGlobals(t *testing.T) {
+	repl := ixgo.NewRepl(ixgo.NewContext(0))
+	list := []string{
+		`var a = 1`,
+		`import "runtime"`,
+		`var b = 2`,
+		`import "log"`,
+		`var c = 3`,
+		`a`,
+		`b`,
+		`c`,
+	}
+	result := []string{
+		`[]`,
+		`[]`,
+		`[]`,
+		`[]`,
+		`[]`,
+		`[1 int]`,
+		`[2 int]`,
+		`[3 int]`,
+	}
+	for i, expr := range list {
+		_, got, err := repl.Eval(expr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if fmt.Sprint(got) != result[i] {
+			t.Fatalf("expr:%v dump:%v src:%v", expr, got, repl.Source())
+		}
+	}
+}
+
 func TestReplImports(t *testing.T) {
 	ctx := ixgo.NewContext(0)
 	repl := ixgo.NewRepl(ctx)
 	list := []string{
 		`a := 1`,
 		`b := 2`,
-		`import "fmt"`,
+		`import ("fmt"; "runtime")`,
 		`c := fmt.Sprintf("%v-%v",a,b)`,
 		`c`,
 	}
@@ -73,6 +126,53 @@ func TestReplImports(t *testing.T) {
 		}
 		if fmt.Sprint(v) != result[i] {
 			t.Fatalf("expr:%v dump:%v src:%v", expr, v, repl.Source())
+		}
+	}
+}
+
+func TestReplBlankImportThenNamedImport(t *testing.T) {
+	repl := ixgo.NewRepl(ixgo.NewContext(0))
+	list := []string{
+		`import _ "fmt"`,
+		`import fmt "fmt"`,
+		`fmt.Sprintf("%v", 100)`,
+	}
+	result := []string{
+		`[]`,
+		`[]`,
+		`[100 string]`,
+	}
+	for i, expr := range list {
+		_, got, err := repl.Eval(expr)
+		if err != nil {
+			t.Fatalf("Eval(%q): %v", expr, err)
+		}
+		if fmt.Sprint(got) != result[i] {
+			t.Fatalf("expr:%v dump:%v src:%v", expr, got, repl.Source())
+		}
+	}
+}
+
+func TestReplImportRunsPackageInit(t *testing.T) {
+	ixgo.RegisterPackage(&ixgo.Package{
+		Name:   "replinit",
+		Path:   "test/replinit",
+		Source: "package replinit\nvar Value = 0\nfunc init() { Value = 42 }\n",
+	})
+	repl := ixgo.NewRepl(ixgo.NewContext(0))
+	for _, expr := range []string{
+		`import "test/replinit"`,
+		`replinit.Value`,
+	} {
+		_, got, err := repl.Eval(expr)
+		if err != nil {
+			t.Fatalf("Eval(%q): %v", expr, err)
+		}
+		if expr != `replinit.Value` && fmt.Sprint(got) != `[]` {
+			t.Fatalf("expr:%v dump:%v", expr, got)
+		}
+		if expr == `replinit.Value` && fmt.Sprint(got) != `[42 int]` {
+			t.Fatalf("expr:%v dump:%v", expr, got)
 		}
 	}
 }
