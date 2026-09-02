@@ -309,10 +309,18 @@ func (r *Repl) eval(tok token.Token, expr string) (err error) {
 	if evalImport {
 		for _, im := range r.pkg.Pkg.Imports() {
 			if _, ok := r.importPkgs[im.Path()]; !ok {
-				r.importPkgs[im.Path()] = im
-				if sp := r.pkg.Prog.ImportedPackage(im.Path()); sp != nil {
-					r.runFuncEx(i, sp, "init", nil)
+				// Only source packages have an init body that can be run by the
+				// interpreter. Standard packages are backed by registered APIs.
+				if r.ctx.SourcePackage(im.Path()) == nil {
+					r.importPkgs[im.Path()] = im
+					continue
 				}
+				if sp := r.pkg.Prog.ImportedPackage(im.Path()); sp != nil {
+					if _, err := r.runFuncEx(i, sp, "init", nil); err != nil {
+						return err
+					}
+				}
+				r.importPkgs[im.Path()] = im
 			}
 		}
 	}
