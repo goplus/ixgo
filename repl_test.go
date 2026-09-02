@@ -177,6 +177,23 @@ func TestReplImportRunsPackageInit(t *testing.T) {
 	}
 }
 
+func TestReplInvalidImportDoesNotPoisonState(t *testing.T) {
+	repl := ixgo.NewRepl(ixgo.NewContext(0))
+	if _, _, err := repl.Eval(`import "test/repl-import-does-not-exist"`); err == nil {
+		t.Fatal("expected invalid import to fail")
+	}
+	if _, _, err := repl.Eval(`value := 42`); err != nil {
+		t.Fatalf("Eval after invalid import: %v", err)
+	}
+	_, got, err := repl.Eval(`value`)
+	if err != nil {
+		t.Fatalf("Eval value after invalid import: %v", err)
+	}
+	if fmt.Sprint(got) != `[42 int]` {
+		t.Fatalf("value after invalid import: got %v", got)
+	}
+}
+
 func TestReplClosure(t *testing.T) {
 	ctx := ixgo.NewContext(0)
 	repl := ixgo.NewRepl(ctx)

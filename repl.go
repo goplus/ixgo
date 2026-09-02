@@ -46,7 +46,6 @@ func main(){}
 
 type Repl struct {
 	ctx        *Context                  // interp context
-	pkg        *ssa.Package              // main package
 	builtin    *ast.File                 // builtin func
 	interp     *Interp                   // last interp
 	fsInit     *fnState                  // func init
@@ -170,6 +169,7 @@ func (r *Repl) eval(tok token.Token, expr string) (err error) {
 	var inMain bool
 	var evalConst bool
 	var evalImport bool
+	var newImports []string
 	var lastErrors []error
 	switch tok {
 	case token.PACKAGE:
@@ -184,7 +184,7 @@ func (r *Repl) eval(tok token.Token, expr string) (err error) {
 		for _, imp := range r.imports {
 			seen[imp] = true
 		}
-		newImports := make([]string, 0, len(pkgs))
+		newImports = make([]string, 0, len(pkgs))
 		for _, pkg := range pkgs {
 			var imp string
 			if pkg.name == "" || pkg.name == pkg.pkg {
@@ -207,7 +207,6 @@ func (r *Repl) eval(tok token.Token, expr string) (err error) {
 		}
 		evalImport = true
 		src = r.buildSource(strings.Join(newImports, "\n"), tok)
-		r.imports = append(r.imports, newImports...)
 	case token.FUNC:
 		src = r.buildSource(expr, tok)
 		errors, err := r.check(r.fileName, src)
@@ -286,32 +285,40 @@ func (r *Repl) eval(tok token.Token, expr string) (err error) {
 		}
 		src = r.buildSource(expr, tok)
 	}
-	r.pkg, err = r.ctx.LoadFile(r.fileName, src)
+	pkg, err := r.ctx.LoadFile(r.fileName, src)
 	if err != nil {
 		if lastErrors != nil {
 			return lastErrors[0]
 		}
 		return err
 	}
-	i, err := newInterp(r.ctx, r.pkg, r.globalMap)
+	i, err := newInterp(r.ctx, pkg, r.globalMap)
 	if err != nil {
 		return err
 	}
-	rinit, err := r.runFunc(i, "init", r.fsInit)
+	rinit, err := r.runFuncEx(i, pkg, "init", r.fsInit)
 	if err == nil {
 		rinit.pc--
 	}
-	rmain, err := r.runFunc(i, "main", r.fsMain)
+	rmain, err := r.runFuncEx(i, pkg, "main", r.fsMain)
 	if err != nil {
 		return err
 	}
 	if evalImport {
-		for _, im := range r.pkg.Pkg.Imports() {
+		for _, im := range pkg.Pkg.Imports() {
 			if _, ok := r.importPkgs[im.Path()]; !ok {
-				r.importPkgs[im.Path()] = im
-				if sp := r.pkg.Prog.ImportedPackage(im.Path()); sp != nil {
-					r.runFuncEx(i, sp, "init", nil)
+				// Only source packages have an init body that can be run by the
+				// interpreter. Standard packages are backed by registered APIs.
+				if r.ctx.SourcePackage(im.Path()) == nil {
+					r.importPkgs[im.Path()] = im
+					continue
 				}
+				if sp := pkg.Prog.ImportedPackage(im.Path()); sp != nil {
+					if _, err := r.runFuncEx(i, sp, "init", nil); err != nil {
+						return err
+					}
+				}
+				r.importPkgs[im.Path()] = im
 			}
 		}
 	}
@@ -328,6 +335,7 @@ func (r *Repl) eval(tok token.Token, expr string) (err error) {
 		r.globalMap[k] = v
 	}
 	if evalImport {
+		r.imports = append(r.imports, newImports...)
 		return nil
 	}
 	if inMain {
@@ -412,10 +420,6 @@ func (r *Repl) firstToken(src string) token.Token {
 type fnState struct {
 	fr *frame
 	pc int
-}
-
-func (r *Repl) runFunc(i *Interp, fnname string, fs *fnState) (rfs *fnState, err error) {
-	return r.runFuncEx(i, r.pkg, fnname, fs)
 }
 
 func (r *Repl) runFuncEx(i *Interp, pkg *ssa.Package, fnname string, fs *fnState) (rfs *fnState, err error) {
