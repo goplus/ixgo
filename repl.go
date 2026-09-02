@@ -170,6 +170,7 @@ func (r *Repl) eval(tok token.Token, expr string) (err error) {
 	var inMain bool
 	var evalConst bool
 	var evalImport bool
+	var newImports []string
 	var lastErrors []error
 	switch tok {
 	case token.PACKAGE:
@@ -184,7 +185,7 @@ func (r *Repl) eval(tok token.Token, expr string) (err error) {
 		for _, imp := range r.imports {
 			seen[imp] = true
 		}
-		newImports := make([]string, 0, len(pkgs))
+		newImports = make([]string, 0, len(pkgs))
 		for _, pkg := range pkgs {
 			var imp string
 			if pkg.name == "" || pkg.name == pkg.pkg {
@@ -207,7 +208,6 @@ func (r *Repl) eval(tok token.Token, expr string) (err error) {
 		}
 		evalImport = true
 		src = r.buildSource(strings.Join(newImports, "\n"), tok)
-		r.imports = append(r.imports, newImports...)
 	case token.FUNC:
 		src = r.buildSource(expr, tok)
 		errors, err := r.check(r.fileName, src)
@@ -286,13 +286,14 @@ func (r *Repl) eval(tok token.Token, expr string) (err error) {
 		}
 		src = r.buildSource(expr, tok)
 	}
-	r.pkg, err = r.ctx.LoadFile(r.fileName, src)
+	pkg, err := r.ctx.LoadFile(r.fileName, src)
 	if err != nil {
 		if lastErrors != nil {
 			return lastErrors[0]
 		}
 		return err
 	}
+	r.pkg = pkg
 	i, err := newInterp(r.ctx, r.pkg, r.globalMap)
 	if err != nil {
 		return err
@@ -328,6 +329,7 @@ func (r *Repl) eval(tok token.Token, expr string) (err error) {
 		r.globalMap[k] = v
 	}
 	if evalImport {
+		r.imports = append(r.imports, newImports...)
 		return nil
 	}
 	if inMain {
