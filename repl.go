@@ -46,7 +46,6 @@ func main(){}
 
 type Repl struct {
 	ctx        *Context                  // interp context
-	pkg        *ssa.Package              // main package
 	builtin    *ast.File                 // builtin func
 	interp     *Interp                   // last interp
 	fsInit     *fnState                  // func init
@@ -293,21 +292,20 @@ func (r *Repl) eval(tok token.Token, expr string) (err error) {
 		}
 		return err
 	}
-	r.pkg = pkg
-	i, err := newInterp(r.ctx, r.pkg, r.globalMap)
+	i, err := newInterp(r.ctx, pkg, r.globalMap)
 	if err != nil {
 		return err
 	}
-	rinit, err := r.runFunc(i, "init", r.fsInit)
+	rinit, err := r.runFuncEx(i, pkg, "init", r.fsInit)
 	if err == nil {
 		rinit.pc--
 	}
-	rmain, err := r.runFunc(i, "main", r.fsMain)
+	rmain, err := r.runFuncEx(i, pkg, "main", r.fsMain)
 	if err != nil {
 		return err
 	}
 	if evalImport {
-		for _, im := range r.pkg.Pkg.Imports() {
+		for _, im := range pkg.Pkg.Imports() {
 			if _, ok := r.importPkgs[im.Path()]; !ok {
 				// Only source packages have an init body that can be run by the
 				// interpreter. Standard packages are backed by registered APIs.
@@ -315,7 +313,7 @@ func (r *Repl) eval(tok token.Token, expr string) (err error) {
 					r.importPkgs[im.Path()] = im
 					continue
 				}
-				if sp := r.pkg.Prog.ImportedPackage(im.Path()); sp != nil {
+				if sp := pkg.Prog.ImportedPackage(im.Path()); sp != nil {
 					if _, err := r.runFuncEx(i, sp, "init", nil); err != nil {
 						return err
 					}
@@ -422,10 +420,6 @@ func (r *Repl) firstToken(src string) token.Token {
 type fnState struct {
 	fr *frame
 	pc int
-}
-
-func (r *Repl) runFunc(i *Interp, fnname string, fs *fnState) (rfs *fnState, err error) {
-	return r.runFuncEx(i, r.pkg, fnname, fs)
 }
 
 func (r *Repl) runFuncEx(i *Interp, pkg *ssa.Package, fnname string, fs *fnState) (rfs *fnState, err error) {
