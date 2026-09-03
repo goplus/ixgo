@@ -1198,6 +1198,9 @@ func makeCallInstr(pfn *function, interp *Interp, instr ssa.Value, call *ssa.Cal
 		}
 	case *ssa.Function:
 		// "static func/method call"
+		if run := makeStaticDirectCallInstr(interp, fn, ir, ia); run != nil {
+			return run
+		}
 		if fn.Blocks == nil {
 			ext, ok := findExternFunc(interp, fn)
 			if !ok {
@@ -1211,9 +1214,6 @@ func makeCallInstr(pfn *function, interp *Interp, instr ssa.Value, call *ssa.Cal
 				return func(fr *frame) {
 					interp.callExternalWithFrameByStack(fr, ext, ir, ia)
 				}
-			}
-			if run := makeStaticDirectCallInstr(interp, fn, ir, ia); run != nil {
-				return run
 			}
 			return func(fr *frame) {
 				interp.callExternalByStack(fr, ext, ir, ia)
