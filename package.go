@@ -67,7 +67,9 @@ type lazyLoad struct {
 }
 
 func (p *lazyLoad) Package() *Package {
-	return p.load()
+	pkg := p.load()
+	registerDirectCallMethods(pkg.Path, pkg)
+	return pkg
 }
 
 // RegisterPackage register a pkg.
@@ -77,6 +79,7 @@ func RegisterPackage(pkg *Package) {
 		return
 	}
 	registerPkgs[pkg.Path] = &baseLoad{pkg: pkg}
+	registerDirectCallMethods(pkg.Path, pkg)
 }
 
 // RegisterPackageLazy registers a pkg with lazy initialization.

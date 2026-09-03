@@ -58,14 +58,20 @@ var (
 func exportPkg(pkg *Package, sname string, id string, tagList []string, fname string) ([]byte, error) {
 	var imports []string
 	importAliases := make(map[string]string)
-	if pkg.usedPkg || !pkg.directCalls.isEmpty() {
+	if flagDirectCallsOnly {
+		if !pkg.directCalls.isEmpty() {
+			imports = append(imports, fmt.Sprintf("%s %q", sname, pkg.Path))
+			importAliases[pkg.Path] = sname
+		}
+		imports = append(imports, "")
+	} else if pkg.usedPkg || !pkg.directCalls.isEmpty() {
 		imports = append(imports, fmt.Sprintf("%s %q", sname, pkg.Path))
 		importAliases[pkg.Path] = sname
 		imports = append(imports, "")
 	} else if !flagExportCode {
 		imports = append(imports, fmt.Sprintf("_ %q", pkg.Path))
 	}
-	if len(pkg.UntypedConsts) > 0 || len(pkg.TypedConsts) > 0 {
+	if !flagDirectCallsOnly && (len(pkg.UntypedConsts) > 0 || len(pkg.TypedConsts) > 0) {
 		imports = append(imports, `"go/constant"`)
 		importAliases["go/constant"] = "constant"
 		var hasToken bool
@@ -88,7 +94,7 @@ func exportPkg(pkg *Package, sname string, id string, tagList []string, fname st
 			importAliases["go/token"] = "token"
 		}
 	}
-	if !pkg.IsEmpty() {
+	if !pkg.IsEmpty() && !flagDirectCallsOnly {
 		imports = append(imports, `"reflect"`)
 		importAliases["reflect"] = "reflect"
 	}
@@ -107,6 +113,9 @@ func exportPkg(pkg *Package, sname string, id string, tagList []string, fname st
 			imports = append(imports, `_ "unsafe"`)
 		}
 	}
+	if flagDirectCallsOnly {
+		tmpl = template_directcall
+	}
 	if flagCustomPkg != "" {
 		pkg.Path = path.Clean(flagCustomPkg)
 		pkg.Name = path.Base(pkg.Path)
@@ -120,7 +129,7 @@ func exportPkg(pkg *Package, sname string, id string, tagList []string, fname st
 	}
 
 	var ext string
-	if len(pkg.Alias) != 0 && flagExportAlias {
+	if !flagDirectCallsOnly && len(pkg.Alias) != 0 && flagExportAlias {
 		imports = append(imports, `"github.com/goplus/ixgo/alias"`)
 		importAliases["github.com/goplus/ixgo/alias"] = "alias"
 		ext = "\nAlias: map[string]alias.Type{" + joinList(pkg.Alias) + "},"
@@ -140,8 +149,10 @@ func exportPkg(pkg *Package, sname string, id string, tagList []string, fname st
 		return packageName
 	})
 	var directCalls string
+	var directCallsOnly string
 	if len(entries) != 0 {
 		directCalls = fmt.Sprintf("\n\tixgo.RegisterDirectCalls(%q, map[string]ixgo.DirectCallAdapter{%s})", pkg.Path, joinList(entries))
+		directCallsOnly = joinList(entries)
 	}
 	directCallAdapters := strings.Join(adapters, "\n\n")
 	r := strings.NewReplacer("$PKGNAME", pkg.Name,
@@ -154,6 +165,7 @@ func exportPkg(pkg *Package, sname string, id string, tagList []string, fname st
 		"$VARS", joinList(pkg.Vars),
 		"$FUNCS", joinList(pkg.Funcs),
 		"$DIRECTCALLS", directCalls,
+		"$D_CALLS_ONLY", directCallsOnly,
 		"$DIRECTCALLADAPTERS", directCallAdapters,
 		"$TYPEDCONSTS", joinList(pkg.TypedConsts),
 		"$UNTYPEDCONSTS", joinList(pkg.UntypedConsts),
@@ -196,6 +208,23 @@ func init() {$INIT
 		TypedConsts: map[string]ixgo.TypedConst{$TYPEDCONSTS},
 		UntypedConsts: map[string]ixgo.UntypedConst{$UNTYPEDCONSTS},$EXT
 	})$DIRECTCALLS
+}
+
+$DIRECTCALLADAPTERS
+`
+
+var template_directcall = `// export by github.com/goplus/ixgo/cmd/qexp
+
+$TAGS
+
+package $PKGNAME
+
+import (
+	$IMPORTS
+)
+
+func init() {
+	ixgo.RegisterDirectCalls("$PKGPATH", map[string]ixgo.DirectCallAdapter{$D_CALLS_ONLY})
 }
 
 $DIRECTCALLADAPTERS

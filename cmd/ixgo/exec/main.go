@@ -28,6 +28,7 @@ import (
 	"github.com/goplus/ixgo/cmd/internal/test"
 	"github.com/goplus/ixgo/cmd/internal/version"
 
+	_ "github.com/goplus/ixgo/directcall"
 	_ "github.com/goplus/ixgo/pkg"
 )
 

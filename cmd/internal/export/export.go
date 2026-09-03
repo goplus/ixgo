@@ -31,20 +31,21 @@ import (
 )
 
 var (
-	flagExportDir      string
-	flagCustomPkg      string
-	flagBuildContext   string
-	flagCustomTags     string
-	flagBuildTags      string
-	flagExportFileName string
-	flagExportSource   bool
-	flagExportCode     bool
-	flagExportTypes    bool
-	flagExportAlias    bool
-	flagExportLazy     bool
-	flagAliasTypes     string
-	flagDirectCalls    string
-	flagSkip           string
+	flagExportDir       string
+	flagCustomPkg       string
+	flagBuildContext    string
+	flagCustomTags      string
+	flagBuildTags       string
+	flagExportFileName  string
+	flagExportSource    bool
+	flagExportCode      bool
+	flagExportTypes     bool
+	flagExportAlias     bool
+	flagExportLazy      bool
+	flagAliasTypes      string
+	flagDirectCalls     string
+	flagDirectCallsOnly bool
+	flagSkip            string
 )
 
 var (
@@ -88,6 +89,7 @@ func init() {
 	flag.BoolVar(&flagExportLazy, "lazy", false, "deferred initialization of registered packages to first use")
 	flag.StringVar(&flagAliasTypes, "alias_types", "", "set export types alias list, split by ;")
 	flag.StringVar(&flagDirectCalls, "directcalls", "", "generate direct adapters for Func, Type.Method, *, Type.*, *.*, or all selectors (separate selectors with , or ;)")
+	flag.BoolVar(&flagDirectCallsOnly, "directcalls-only", false, "generate only direct-call adapters without registering the package")
 	flag.StringVar(&flagSkip, "skip", "", "skip exported package symbols (separate pkg.Symbol or Symbol selectors with ',' or ';' bare Symbol matches all packages)")
 }
 
@@ -257,6 +259,9 @@ func ExportPkgs(pkgs []string, ctx *build.Context) error {
 }
 
 func ExportPkg(prog *Program, pkg string, ctx *build.Context) (string, error) {
+	if flagDirectCallsOnly && flagDirectCalls == "" {
+		return "", errors.New("-directcalls-only requires -directcalls")
+	}
 	if flagDirectCalls != "" && flagCustomPkg != "" {
 		return "", errors.New("-directcalls cannot be combined with -pkgpath")
 	}

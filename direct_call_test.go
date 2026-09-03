@@ -51,6 +51,10 @@ func directCallWrongCounterValue(*directcalltest.Counter) int {
 	return -1
 }
 
+type pendingDirectCallReceiver struct{}
+
+func (*pendingDirectCallReceiver) Value() int { return 42 }
+
 func registerStaticDirectCallPackage(binding DirectCallAdapter) {
 	RegisterPackage(&Package{
 		Name:          "directcall",
@@ -132,27 +136,25 @@ func TestDirectCallSignatureIncludesMethodReceiver(t *testing.T) {
 	}
 }
 
-func TestRegisteredDirectCallMethod(t *testing.T) {
-	registerHostDirectCalls(nil)
-	tests := []struct {
-		name     string
-		selector string
-		wantType reflect.Type
-		wantName string
-	}{
-		{name: "value", selector: testValueCounterSelector, wantType: reflect.TypeOf(directcalltest.ValueCounter(0)), wantName: "Value"},
-		{name: "pointer", selector: testCounterSelector, wantType: reflect.TypeOf((*directcalltest.Counter)(nil)), wantName: "Value"},
+func TestDirectCallMethodRegistrationDoesNotDependOnPackageOrder(t *testing.T) {
+	pkgPath := reflect.TypeOf(pendingDirectCallReceiver{}).PkgPath()
+	adapter := DirectCallAdapter(func(ctx DirectCallContext) { ctx.SetResult(42) })
+	RegisterDirectCalls(pkgPath, map[string]DirectCallAdapter{
+		"pendingDirectCallReceiver.Value":       adapter,
+		"(*pendingDirectCallReceiver).ValuePtr": adapter,
+	})
+	RegisterPackage(&Package{
+		Name:       "ixgo",
+		Path:       pkgPath,
+		NamedTypes: map[string]reflect.Type{"pendingDirectCallReceiver": reflect.TypeOf(pendingDirectCallReceiver{})},
+	})
+	got, ok := resolveInvokeDirectCall(reflect.TypeOf(pendingDirectCallReceiver{}), "Value")
+	if !ok || got == nil {
+		t.Fatal("pending method binding was not registered")
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			gotType, gotName, ok := registeredDirectCallMethod(testDirectCallHostPkgPath, test.selector)
-			if !ok {
-				t.Fatal("registeredDirectCallMethod did not recognize a named receiver")
-			}
-			if gotType != test.wantType || gotName != test.wantName {
-				t.Fatalf("method = (%v, %q); want (%v, %q)", gotType, gotName, test.wantType, test.wantName)
-			}
-		})
+	got, ok = resolveInvokeDirectCall(reflect.TypeOf((*pendingDirectCallReceiver)(nil)), "ValuePtr")
+	if !ok || got == nil {
+		t.Fatal("pending pointer method binding was not registered")
 	}
 }
 
