@@ -307,9 +307,9 @@ func (r *Repl) eval(tok token.Token, expr string) (err error) {
 	if evalImport {
 		for _, im := range pkg.Pkg.Imports() {
 			if _, ok := r.importPkgs[im.Path()]; !ok {
-				// Only source packages have an init body that can be run by the
-				// interpreter. Standard packages are backed by registered APIs.
-				if r.ctx.SourcePackage(im.Path()) == nil {
+				// Direct-call adapters execute against the already initialized host
+				// package. Re-running its source init mixes host and interpreter values.
+				if hasDirectCalls(im.Path()) || r.ctx.SourcePackage(im.Path()) == nil {
 					r.importPkgs[im.Path()] = im
 					continue
 				}
