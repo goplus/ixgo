@@ -3,17 +3,17 @@ module github.com/goplus/ixgo
 go 1.25.0
 
 require (
-	github.com/goplus/gogen v1.23.6-0.20260816085451-b240c8b2c5b1
-	github.com/goplus/mod v0.21.2
-	github.com/goplus/reflectx v1.7.8
-	github.com/goplus/xgo v1.7.6-0.20260818050008-fd36b6192e30
+	github.com/goplus/gogen v1.24.1
+	github.com/goplus/mod v0.22.0
+	github.com/goplus/reflectx v1.7.9
+	github.com/goplus/xgo v1.7.6-0.20260914223547-753850a9f7e9
 	github.com/peterh/liner v1.2.2
 	github.com/qiniu/x v1.18.3
 	github.com/visualfc/funcval v0.1.5
-	github.com/visualfc/gid v0.3.5
+	github.com/visualfc/gid v0.3.6
 	github.com/visualfc/goembed v0.3.4
 	github.com/visualfc/xtype v0.3.3
-	golang.org/x/mod v0.39.0
+	golang.org/x/mod v0.40.0
 	golang.org/x/tools v0.49.0
 )
 
