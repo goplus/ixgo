@@ -3841,3 +3841,35 @@ func TestGeneratedDirectCalls(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Unnamed struct with an unexported field and a promoted method is cloned by
+// NewMethodSet (goplus/reflectx#115).
+func TestUnnamedStructUnexportedFieldPkgPath(t *testing.T) {
+	const source = `package main
+
+import "reflect"
+
+type E struct{}
+
+func (E) M() {}
+
+func main() {
+	var x struct {
+		E
+		hidden int
+	}
+	_ = x.M
+	t := reflect.TypeOf(x)
+	hidden, ok := t.FieldByName("hidden")
+	if !ok {
+		panic("missing hidden")
+	}
+	if hidden.PkgPath != "main" {
+		panic("hidden PkgPath=" + hidden.PkgPath)
+	}
+}
+`
+	if _, err := ixgo.NewContext(0).RunFile("main.go", source, nil); err != nil {
+		t.Fatal(err)
+	}
+}
