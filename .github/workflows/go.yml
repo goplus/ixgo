@@ -53,3 +53,41 @@ jobs:
 
     - name: Test pkg patch
       run: go test -v ./test/patch/...
+
+  Test-IfaceFuncval:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        go-tag: [go1.25.14, go1.26.8, go1.27.1]
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Set up Go
+      uses: actions/setup-go@v6
+      with:
+        go-version: '1.27.x'
+
+    - name: Install iface_patch
+      run: go install github.com/goplus/reflectx/cmd/iface_patch@v1.8.1
+
+    - name: Clone Go ${{ matrix.go-tag }}
+      run: git clone --depth 1 --branch ${{ matrix.go-tag }} https://github.com/golang/go.git "$HOME/${{ matrix.go-tag }}"
+
+    - name: Patch Go
+      run: |
+        iface_patch "$HOME/${{ matrix.go-tag }}"
+        iface_patch -check "$HOME/${{ matrix.go-tag }}"
+
+    - name: Rebuild Go
+      run: cd "$HOME/${{ matrix.go-tag }}/src" && ./make.bash
+
+    - name: Test ixgo ifacefuncval
+      run: |
+        export GOROOT="$HOME/${{ matrix.go-tag }}"
+        export PATH="$GOROOT/bin:$PATH"
+        go test -v -race -tags goplus.ifacefuncval .
+        go test -v -race -tags goplus.ifacefuncval ./xgobuild
+        go test -v -race -tags goplus.ifacefuncval ./transform/...
+        go install -tags goplus.ifacefuncval -v ./cmd/ixgo
+        ixgo test -v ./cmd/ixgotest/_data/iter

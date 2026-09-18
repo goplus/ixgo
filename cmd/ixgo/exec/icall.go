@@ -1,5 +1,5 @@
-//go:build !llgo
-// +build !llgo
+//go:build !llgo && !goplus.ifacefuncval
+// +build !llgo,!goplus.ifacefuncval
 
 package exec
 
