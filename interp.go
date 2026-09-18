@@ -1430,26 +1430,31 @@ func (i *Interp) RunInit() (err error) {
 }
 
 // ResetAllIcall is reset all reflectx icall, all interp methods invalid.
+// With -tags goplus.ifacefuncval it still invalidates methods (no stub pool).
 func ResetAllIcall() {
 	reflectx.ResetAll()
 }
 
-// IcallStat return reflectx icall allocate stat
+// IcallStat return reflectx icall allocate stat.
+// With -tags goplus.ifacefuncval there is no stub pool; all three values are 0.
 func IcallStat() (capacity int, allocate int, aviable int) {
 	return reflectx.IcallStat()
 }
 
-// IcallCached return reflectx icall cached
+// IcallCached return reflectx icall cached.
+// With -tags goplus.ifacefuncval there is no stub pool; the result is 0.
 func IcallCached() int {
 	return reflectx.IcallCached()
 }
 
-// icall allocate
+// IcallAlloc return reflectx icall allocate for this interp.
+// With -tags goplus.ifacefuncval there is no stub pool; the result is 0.
 func (i *Interp) IcallAlloc() int {
 	return i.rctx.IcallAlloc()
 }
 
 // ResetIcall is reset reflectx icall, all methods invalid.
+// With -tags goplus.ifacefuncval it still invalidates methods (no stub pool).
 func (i *Interp) ResetIcall() {
 	i.rctx.Reset()
 }
