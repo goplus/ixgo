@@ -367,6 +367,11 @@ func (r *TypesLoader) GetPackage(pkg string) *types.Package {
 	if p, ok := r.packages[pkg]; ok {
 		return p
 	}
+	if _, ok := registerPkgs[pkg]; ok {
+		if p, err := r.Import(pkg); err == nil {
+			return p
+		}
+	}
 	var name string
 	if r.curpkg != nil {
 		name = r.curpkg.Deps[pkg]
