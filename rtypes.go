@@ -223,11 +223,12 @@ var (
 )
 
 func (r *TypesLoader) installPackage(pkg *Package) (err error) {
+	prev := r.curpkg
 	defer func() {
 		if e := recover(); e != nil {
 			err = e.(error)
 		}
-		r.curpkg = nil
+		r.curpkg = prev
 	}()
 	r.curpkg = pkg
 	r.installed[pkg.Path] = pkg
@@ -366,6 +367,13 @@ func (r *TypesLoader) GetPackage(pkg string) *types.Package {
 	}
 	if p, ok := r.packages[pkg]; ok {
 		return p
+	}
+	if _, ok := registerPkgs[pkg]; ok {
+		p, err := r.Import(pkg)
+		if err == nil {
+			return p
+		}
+		log.Printf("ixgo warning: load registered pkg %v: %v\n", pkg, err)
 	}
 	var name string
 	if r.curpkg != nil {
