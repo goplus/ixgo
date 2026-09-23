@@ -519,6 +519,108 @@ func TestDirectCallPreservesDeferFrame(t *testing.T) {
 	}
 }
 
+func TestDeferContext(t *testing.T) {
+	const source = `package main
+func Hold(wait func()) { defer wait() }
+func Deferred(invoke func(func()), native func(), nested, fail bool) (caught interface{}) {
+	defer func() { caught = recover() }()
+	defer func() {
+		invoke(func() {
+			if nested { defer native() }
+			native()
+			if fail { PanicNested() }
+		})
+	}()
+	panic("outer")
+}
+func PanicNested() {
+	defer func() {}()
+	panicLeaf()
+}
+func panicLeaf() { panic("callback") }
+`
+	for _, test := range []struct {
+		name   string
+		nested bool
+		panic  bool
+		calls  int
+	}{
+		{name: "plain", calls: 3},
+		{name: "nested_defer", nested: true, calls: 6},
+		{name: "host_recovers_callback", panic: true, calls: 3},
+		{name: "nested_defer_host_recovers", nested: true, panic: true, calls: 6},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := NewContext(SupportMultipleInterp | EnableCachedReg)
+			ctx.SetLeastCallForEnablePool(0)
+			i, err := ctx.LoadInterp("defer.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(i.UnsafeRelease)
+			ready, release := make(chan struct{}), make(chan struct{})
+			done := make(chan error, 1)
+			go func() {
+				_, err := i.RunFunc("Hold", func() { close(ready); <-release })
+				done <- err
+			}()
+			select {
+			case <-ready:
+			case err := <-done:
+				t.Fatalf("deferred call did not block: %v", err)
+			}
+			defer func() {
+				close(release)
+				if err := <-done; err != nil {
+					t.Error(err)
+				}
+			}()
+			calls := 0
+			invoke := func(callback func()) {
+				id := goroutineID()
+				caller, ok := i.deferMap.Load(id)
+				if !ok {
+					t.Fatal("missing active deferred frame")
+				}
+				for n := 0; n < 3; n++ {
+					if test.panic {
+						var panicked bool
+						func() {
+							defer func() { panicked = recover() != nil }()
+							callback()
+						}()
+						if !panicked {
+							t.Error("callback panic was not propagated to the host")
+						}
+					} else {
+						callback()
+					}
+					current, ok := i.deferMap.Load(id)
+					if !ok || current != caller {
+						t.Errorf("call %d: deferred frame was not restored", n)
+					}
+				}
+			}
+			result, err := i.RunFunc("Deferred", invoke, func() { calls++ }, test.nested, test.panic)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := i.deferMap.Load(goroutineID()); ok {
+				t.Error("completed defer retained its goroutine mapping")
+			}
+			if i.tryDeferFrame().pfn != nil {
+				t.Error("callback re-entry found a completed frame")
+			}
+			if result != "outer" {
+				t.Errorf("recovered panic = %v; want outer", result)
+			}
+			if calls != test.calls {
+				t.Errorf("native calls = %d; want %d", calls, test.calls)
+			}
+		})
+	}
+}
+
 func BenchmarkDirectCall(b *testing.B) {
 	fnValue := reflect.ValueOf(directCallAdd)
 	registerStaticDirectCallPackage(func(ctx DirectCallContext) {

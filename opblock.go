@@ -186,6 +186,7 @@ func (p *function) allocFrame(caller *frame) *frame {
 }
 
 func (p *function) deleteFrame(caller *frame, fr *frame) {
+	p.Interp.trackDeferFrame(caller)
 	if atomic.LoadInt32(&p.cached) == 1 {
 		p.pool.Put(fr)
 	} else {
