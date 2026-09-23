@@ -206,11 +206,30 @@ type mfnValue struct {
 	id int
 }
 
-func indexsToString(index []int) string {
+// indexsToString encodes the promotion path with outer size and field offsets,
+// e.g. "16.1@8.5". FuncId is reused as a reflectx method table entry, which
+// bakes in those offsets, so types that share a selection index but not a
+// layout must not share an id.
+func indexsToString(typ reflect.Type, index []int) string {
+	if typ.Kind() == reflect.Ptr {
+		typ = typ.Elem()
+	}
 	var sb strings.Builder
-	for _, v := range index {
+	sb.WriteString(strconv.FormatUint(uint64(typ.Size()), 10))
+	last := len(index) - 1
+	for i, v := range index {
 		sb.WriteByte('.')
 		sb.WriteString(strconv.Itoa(v))
+		if i == last {
+			break
+		}
+		for typ.Kind() == reflect.Ptr {
+			typ = typ.Elem()
+		}
+		f := typ.Field(v)
+		sb.WriteByte('@')
+		sb.WriteString(strconv.FormatUint(uint64(f.Offset), 10))
+		typ = f.Type
 	}
 	return sb.String()
 }
@@ -590,9 +609,11 @@ func embedFunc(typ reflect.Type, name string, idx []int, pointer bool, indirect 
 	}
 }
 
-// mfnMap and mfnId are process-global: they cache embed-func closures across
-// all Context instances. Entries are never evicted. Closures stored here must
-// not capture any per-Context state.
+// mfnMap and mfnId are process-global: they cache embed-func closures and
+// FuncIds across all Context instances. Entries are never evicted. Closures
+// stored here must not capture any per-Context state. FuncId identifies a
+// reflectx method table entry, so indexs includes offsets along the
+// promotion path.
 var (
 	mfnId  int64
 	mfnMap sync.Map
@@ -622,7 +643,13 @@ func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 			indirect := methods[i].Indirect()
 			rtyp := fn.Type().Underlying().(*types.Signature).Recv().Type()
 			rt, _ := r.ToType(rtyp)
-			key := mfnKey{typ: rt, name: fn.Name(), indexs: indexsToString(idx), pointer: pointer, indirect: indirect}
+			key := mfnKey{
+				typ:      rt,
+				name:     fn.Name(),
+				indexs:   indexsToString(typ, idx),
+				pointer:  pointer,
+				indirect: indirect,
+			}
 			actual, ok := mfnMap.Load(key)
 			if !ok {
 				variadic := mtyp.IsVariadic()
