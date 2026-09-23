@@ -3179,6 +3179,164 @@ func main() {
 	interp2.UnsafeRelease()
 }
 
+func promotedWrapperSrc(fields, prefix string, mode int) string {
+	return fmt.Sprintf(`package main
+
+import "os"
+
+type Wrapper struct {
+	%s
+	os.FileMode
+}
+
+func New() any {
+	return &Wrapper{Prefix: %s, FileMode: %d}
+}
+
+func main() {
+	w := &Wrapper{Prefix: %s, FileMode: %d}
+	want := os.FileMode(%d).String()
+	var s interface{ String() string } = w
+	if g := s.String(); g != want {
+		panic(g)
+	}
+}
+`, fields, prefix, mode, prefix, mode, mode)
+}
+
+func loadPromotedWrapper(t *testing.T, src string) (*ixgo.Interp, any) {
+	t.Helper()
+	ctx := ixgo.NewContext(ixgo.SupportMultipleInterp)
+	pkg, err := ctx.LoadFile("main.go", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	interp, err := ctx.NewInterp(pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := interp.RunInit(); err != nil {
+		t.Fatal(err)
+	}
+	obj, err := interp.RunFunc("New")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return interp, obj
+}
+
+func callPromotedString(t *testing.T, label string, obj any, want string) {
+	t.Helper()
+	s, ok := obj.(interface{ String() string })
+	if !ok {
+		t.Fatalf("%s: missing String method", label)
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			t.Fatalf("%s: String() panicked: %v", label, p)
+		}
+	}()
+	if g := s.String(); g != want {
+		t.Fatalf("%s: interface String() = %q, want %q", label, g, want)
+	}
+	out := reflect.ValueOf(obj).MethodByName("String").Call(nil)
+	if g := out[0].Interface().(string); g != want {
+		t.Fatalf("%s: reflect String() = %q, want %q", label, g, want)
+	}
+}
+
+// Sequential interpreters whose wrappers share a promoted-method index but
+// not field offsets must not reuse reflectx method table entries (issue #513).
+// Prefix values are chosen so a wrong-offset read of os.FileMode yields
+// FileMode(111) or FileMode(len("abc")) instead of the embedded mode.
+func TestPromotedMethodLayoutSameIndexDifferentOffsets(t *testing.T) {
+	srcInt64 := promotedWrapperSrc("Prefix int64", "111", 11)
+	srcString := promotedWrapperSrc("Prefix string", `"abc"`, 22)
+	wantA := os.FileMode(11).String()
+	wantB := os.FileMode(22).String()
+
+	a, objA := loadPromotedWrapper(t, srcInt64)
+	defer a.UnsafeRelease()
+	callPromotedString(t, "A", objA, wantA)
+	if _, err := a.RunMain(); err != nil {
+		t.Fatal(err)
+	}
+
+	b, objB := loadPromotedWrapper(t, srcString)
+	defer b.UnsafeRelease()
+	callPromotedString(t, "B", objB, wantB)
+	if _, err := b.RunMain(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPromotedMethodLayoutReverseOrder(t *testing.T) {
+	srcString := promotedWrapperSrc("Prefix string", `"abc"`, 22)
+	srcInt64 := promotedWrapperSrc("Prefix int64", "111", 11)
+	wantA := os.FileMode(11).String()
+	wantB := os.FileMode(22).String()
+
+	b, objB := loadPromotedWrapper(t, srcString)
+	defer b.UnsafeRelease()
+	callPromotedString(t, "B", objB, wantB)
+
+	a, objA := loadPromotedWrapper(t, srcInt64)
+	defer a.UnsafeRelease()
+	callPromotedString(t, "A", objA, wantA)
+}
+
+func TestPromotedMethodLayoutIdentical(t *testing.T) {
+	capacity, _, _ := ixgo.IcallStat()
+	src := promotedWrapperSrc("Prefix int64", "111", 11)
+	want := os.FileMode(11).String()
+
+	a, objA := loadPromotedWrapper(t, src)
+	defer a.UnsafeRelease()
+	callPromotedString(t, "A", objA, want)
+	_, allocA, _ := ixgo.IcallStat()
+	cachedA := ixgo.IcallCached()
+
+	b, objB := loadPromotedWrapper(t, src)
+	defer b.UnsafeRelease()
+	callPromotedString(t, "B", objB, want)
+	if capacity == 0 {
+		return
+	}
+	_, allocB, _ := ixgo.IcallStat()
+	cachedB := ixgo.IcallCached()
+	if allocB != allocA || cachedB != cachedA {
+		t.Fatalf("identical layouts should reuse icall slots: alloc %d->%d cached %d->%d",
+			allocA, allocB, cachedA, cachedB)
+	}
+}
+
+func TestPromotedMethodLayoutDifferentIndices(t *testing.T) {
+	srcLeading := `package main
+
+import "os"
+
+type Wrapper struct {
+	os.FileMode
+	Extra int64
+}
+
+func New() any {
+	return &Wrapper{FileMode: 11, Extra: 111}
+}
+
+func main() {}
+`
+	srcTrailing := promotedWrapperSrc("Prefix int64", "111", 22)
+
+	a, objA := loadPromotedWrapper(t, srcLeading)
+	defer a.UnsafeRelease()
+	callPromotedString(t, "leading", objA, os.FileMode(11).String())
+
+	b, objB := loadPromotedWrapper(t, srcTrailing)
+	defer b.UnsafeRelease()
+	callPromotedString(t, "trailing", objB, os.FileMode(22).String())
+}
+
 func TestPrebuildSSA(t *testing.T) {
 	ctx := ixgo.NewContext(0)
 	ctx.RegisterPatch("fmt", `package fmt
