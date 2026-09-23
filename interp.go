@@ -776,7 +776,12 @@ func (i *Interp) callFunction(caller *frame, pfn *function, args []value, env []
 		fr.stack[pfn.narg+i+pfn.nres] = env[i]
 	}
 	fr.run()
-	if pfn.nres == 1 {
+	if fr.ipc != -1 {
+		// Abort can stop before Return.
+		if pfn.nres > 1 {
+			result = make(tuple, pfn.nres)
+		}
+	} else if pfn.nres == 1 {
 		result = fr.stack[0]
 	} else if pfn.nres > 1 {
 		result = tuple(fr.stack[0:pfn.nres])
@@ -798,7 +803,7 @@ func (i *Interp) callFunctionByReflect(caller *frame, pfn *function, typ reflect
 		results = make([]reflect.Value, pfn.nres)
 		for i := 0; i < pfn.nres; i++ {
 			v := fr.stack[i]
-			if v == nil {
+			if fr.ipc != -1 || v == nil {
 				results[i] = reflect.New(typ.Out(i)).Elem()
 			} else {
 				results[i] = reflect.ValueOf(v)

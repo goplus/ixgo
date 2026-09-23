@@ -148,5 +148,5 @@ func (pfn *function) makeFunction(typ reflect.Type, env []value) reflect.Value {
 type makeFuncVal struct {
 	interp *Interp
 	pfn    *function
-	env    []interface{}
+	env    []value
 }
