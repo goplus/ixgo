@@ -21,20 +21,16 @@ func init() {
 	if funcval.IsSupport {
 		RegisterExternal("(reflect.Value).Pointer", func(fr *frame, v reflect.Value) uintptr {
 			if v.Kind() == reflect.Func {
-				if fv, n := funcval.Get(v.Interface()); n == 1 {
-					if c := (*makeFuncVal)(unsafe.Pointer(fv)); c.interp == fr.interp {
-						return uintptr(c.pfn.base)
-					}
+				if c := fr.interp.getMakeFuncVal(v.Interface()); c != nil && c.interp == fr.interp {
+					return uintptr(c.pfn.base)
 				}
 			}
 			return v.Pointer()
 		})
 		RegisterExternal("(reflect.Value).UnsafePointer", func(fr *frame, v reflect.Value) unsafe.Pointer {
 			if v.Kind() == reflect.Func {
-				if fv, n := funcval.Get(v.Interface()); n == 1 {
-					if c := (*makeFuncVal)(unsafe.Pointer(fv)); c.interp == fr.interp {
-						return unsafe.Pointer(uintptr(c.pfn.base))
-					}
+				if c := fr.interp.getMakeFuncVal(v.Interface()); c != nil && c.interp == fr.interp {
+					return unsafe.Pointer(uintptr(c.pfn.base))
 				}
 			}
 			return v.UnsafePointer()
@@ -87,15 +83,13 @@ const supportFuncVal = funcval.IsSupport
 func dynamicFunCall(interp *Interp, iv register, ir register, ia []register) func(fr *frame) {
 	return func(fr *frame) {
 		fn := fr.reg(iv)
-		if fv, n := funcval.Get(fn); n == 1 {
-			if c := (*makeFuncVal)(unsafe.Pointer(fv)); c.interp == interp {
-				if c.pfn.Recover == nil {
-					interp.callFunctionByStackNoRecoverWithEnv(fr, c.pfn, ir, ia, c.env)
-				} else {
-					interp.callFunctionByStackWithEnv(fr, c.pfn, ir, ia, c.env)
-				}
-				return
+		if c := interp.getMakeFuncVal(fn); c != nil && c.interp == interp {
+			if c.pfn.Recover == nil {
+				interp.callFunctionByStackNoRecoverWithEnv(fr, c.pfn, ir, ia, c.env)
+			} else {
+				interp.callFunctionByStackWithEnv(fr, c.pfn, ir, ia, c.env)
 			}
+			return
 		}
 		v := reflect.ValueOf(fn)
 		interp.callExternalByStack(fr, v, ir, ia)
@@ -103,19 +97,67 @@ func dynamicFunCall(interp *Interp, iv register, ir register, ia []register) fun
 }
 
 func (pfn *function) makeFunction(typ reflect.Type, env []value) reflect.Value {
-	interp := pfn.Interp
-	return reflect.MakeFunc(typ, func(args []reflect.Value) []reflect.Value {
-		return interp.callFunctionByReflect(interp.tryDeferFrame(), pfn, typ, args, env)
-	})
+	c := makeFuncVal{interp: pfn.Interp, pfn: pfn, typ: typ, env: env}
+	if supportFuncVal {
+		switch typ {
+		case callbackVoidType:
+			return reflect.ValueOf(c.callVoid)
+		case callbackBoolType:
+			return reflect.ValueOf(c.callBool)
+		}
+	}
+	return reflect.MakeFunc(typ, c.callReflect)
 }
 
-// makeFuncVal sync with function.makeFunction
 type makeFuncVal struct {
-	funcval.FuncVal
 	interp *Interp
 	pfn    *function
 	typ    reflect.Type
-	env    []interface{}
+	env    []value
+}
+
+var (
+	callbackVoidType  = reflect.TypeFor[func()]()
+	callbackBoolType  = reflect.TypeFor[func() bool]()
+	callbackVoidPC    = reflect.ValueOf(makeFuncVal{}.callVoid).Pointer()
+	callbackBoolPC    = reflect.ValueOf(makeFuncVal{}.callBool).Pointer()
+	callbackReflectPC = reflect.ValueOf(makeFuncVal{}.callReflect).Pointer()
+)
+
+func (c makeFuncVal) callVoid() {
+	c.interp.callFunctionDiscardsResult(c.interp.tryDeferFrame(), c.pfn, nil, c.env)
+}
+
+func (c makeFuncVal) callBool() bool {
+	result := c.interp.callFunction(c.interp.tryDeferFrame(), c.pfn, nil, c.env)
+	return result != nil && result.(bool)
+}
+
+func (c makeFuncVal) callReflect(args []reflect.Value) []reflect.Value {
+	return c.interp.callFunctionByReflect(c.interp.tryDeferFrame(), c.pfn, c.typ, args, c.env)
 }
 
 type interpExt struct{}
+
+// Callers must check interpreter ownership.
+func (*interpExt) getMakeFuncVal(fn interface{}) *makeFuncVal {
+	v := reflect.ValueOf(fn)
+	if v.Kind() != reflect.Func || v.IsNil() {
+		return nil
+	}
+	fv, n := funcval.Get(fn)
+	switch {
+	case n == 0 && (fv.Fn == callbackVoidPC || fv.Fn == callbackBoolPC):
+		// Direct method value.
+	case n == 1 && fv.Fn == callbackReflectPC:
+		// One reflect.MakeFunc bridge.
+	default:
+		return nil
+	}
+	// gc ABI: FuncVal is one word, followed by the receiver.
+	// The call methods must retain value receivers.
+	return &(*struct {
+		funcval.FuncVal
+		receiver makeFuncVal
+	})(unsafe.Pointer(fv)).receiver
+}
