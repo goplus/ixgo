@@ -253,7 +253,7 @@ func (i *Interp) invokeDirectCall(fr *frame, adapter DirectCallAdapter, result r
 }
 
 func (i *Interp) trackDeferFrame(fr *frame) {
-	if fr.deferid != 0 {
+	if fr != nil && fr.deferid != 0 {
 		i.deferMap.Store(fr.deferid, fr)
 	}
 }

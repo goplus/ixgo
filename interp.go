@@ -772,7 +772,11 @@ func (fr *frame) resultTuple() tuple {
 	return append(tuple(nil), fr.stack[:fr.pfn.nres]...)
 }
 
+// Callback entries restore context even when panic skips deleteFrame.
 func (i *Interp) callFunction(caller *frame, pfn *function, args []value, env []value) (result value) {
+	if caller.deferid != 0 {
+		defer i.trackDeferFrame(caller)
+	}
 	fr := pfn.allocFrame(caller)
 	for i := 0; i < pfn.narg; i++ {
 		fr.stack[i+pfn.nres] = args[i]
@@ -791,6 +795,9 @@ func (i *Interp) callFunction(caller *frame, pfn *function, args []value, env []
 }
 
 func (i *Interp) callFunctionByReflect(caller *frame, pfn *function, typ reflect.Type, args []reflect.Value, env []value) (results []reflect.Value) {
+	if caller.deferid != 0 {
+		defer i.trackDeferFrame(caller)
+	}
 	fr := pfn.allocFrame(caller)
 	for i := 0; i < pfn.narg; i++ {
 		fr.stack[i+pfn.nres] = args[i].Interface()
@@ -815,6 +822,9 @@ func (i *Interp) callFunctionByReflect(caller *frame, pfn *function, typ reflect
 }
 
 func (i *Interp) callFunctionDiscardsResult(caller *frame, pfn *function, args []value, env []value) {
+	if caller.deferid != 0 {
+		defer i.trackDeferFrame(caller)
+	}
 	fr := pfn.allocFrame(caller)
 	for i := 0; i < pfn.narg; i++ {
 		fr.stack[i+pfn.nres] = args[i]
@@ -826,6 +836,7 @@ func (i *Interp) callFunctionDiscardsResult(caller *frame, pfn *function, args [
 	pfn.deleteFrame(caller, fr)
 }
 
+// Stack calls unwind through a callback entry or runDefers.
 func (i *Interp) callFunctionByStack0(caller *frame, pfn *function, ir register, ia []register) {
 	fr := pfn.allocFrame(caller)
 	for i := 0; i < len(ia); i++ {
@@ -949,9 +960,7 @@ func (i *Interp) callFunctionByStackNoRecoverWithEnv(caller *frame, pfn *functio
 }
 
 func (i *Interp) callExternal(caller *frame, fn reflect.Value, args []value, env []value) value {
-	if caller != nil && caller.deferid != 0 {
-		i.deferMap.Store(caller.deferid, caller)
-	}
+	i.trackDeferFrame(caller)
 	var ins []reflect.Value
 	typ := fn.Type()
 	isVariadic := fn.Type().IsVariadic()
@@ -994,9 +1003,7 @@ func (i *Interp) callExternal(caller *frame, fn reflect.Value, args []value, env
 	}
 }
 func (i *Interp) callExternalDiscardsResult(caller *frame, fn reflect.Value, args []value, env []value) {
-	if caller != nil && caller.deferid != 0 {
-		i.deferMap.Store(caller.deferid, caller)
-	}
+	i.trackDeferFrame(caller)
 	var ins []reflect.Value
 	typ := fn.Type()
 	isVariadic := fn.Type().IsVariadic()
@@ -1024,9 +1031,7 @@ func (i *Interp) callExternalDiscardsResult(caller *frame, fn reflect.Value, arg
 }
 
 func (i *Interp) callExternalByStack(caller *frame, fn reflect.Value, ir register, ia []register) {
-	if caller.deferid != 0 {
-		i.deferMap.Store(caller.deferid, caller)
-	}
+	i.trackDeferFrame(caller)
 	var ins []reflect.Value
 	typ := fn.Type()
 	isVariadic := fn.Type().IsVariadic()
@@ -1073,9 +1078,7 @@ func (i *Interp) callExternalByStack(caller *frame, fn reflect.Value, ir registe
 }
 
 func (i *Interp) callExternalWithFrameByStack(caller *frame, fn reflect.Value, ir register, ia []register) {
-	if caller.deferid != 0 {
-		i.deferMap.Store(caller.deferid, caller)
-	}
+	i.trackDeferFrame(caller)
 	var ins []reflect.Value
 	typ := fn.Type()
 	isVariadic := fn.Type().IsVariadic()
