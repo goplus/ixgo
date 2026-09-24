@@ -115,7 +115,7 @@ func TestTypedCallbackFunctionValues(t *testing.T) {
 			t.Fatalf("callback %T lost its interpreter, function or closure environment", fn)
 		}
 	}
-	external := reflect.MakeFunc(reflect.TypeFor[func()](), func([]reflect.Value) []reflect.Value {
+	external := reflect.MakeFunc(reflect.TypeOf((*func())(nil)).Elem(), func([]reflect.Value) []reflect.Value {
 		return nil
 	}).Interface()
 	for _, fn := range []interface{}{
@@ -131,11 +131,11 @@ func TestTypedCallbackFunctionValues(t *testing.T) {
 func TestTypedCallbackExternalMakeFunc(t *testing.T) {
 	interp := loadCallbacks(t, EnableCachedReg, 0)
 	calls := 0
-	void := reflect.MakeFunc(reflect.TypeFor[func()](), func([]reflect.Value) []reflect.Value {
+	void := reflect.MakeFunc(reflect.TypeOf((*func())(nil)).Elem(), func([]reflect.Value) []reflect.Value {
 		calls++
 		return nil
 	}).Interface()
-	boolean := reflect.MakeFunc(reflect.TypeFor[func() bool](), func([]reflect.Value) []reflect.Value {
+	boolean := reflect.MakeFunc(reflect.TypeOf((*func() bool)(nil)).Elem(), func([]reflect.Value) []reflect.Value {
 		return []reflect.Value{reflect.ValueOf(calls%2 == 0)}
 	}).Interface()
 	for i := 1; i <= 4; i++ {
