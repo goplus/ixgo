@@ -89,19 +89,24 @@ ixgo repl -go              # run repl mode, disable XGo syntax
 
 ### ifacefuncval (optional)
 
-Alternative to reflectx icall stubs: tagged MakeFunc ifn. Needs a
-**patched Go 1.25.x, 1.26.x, or 1.27.x** and `-tags goplus.ifacefuncval`.
+Alternative to reflectx icall stubs: methods share `makeFuncStub`.
+reflectx stores an untagged `*makeFuncImpl` in `addReflectOff` and
+sets `tflagIfaceFuncval` (`1<<6`). A patched runtime tags `itab.Fun`
+(`makeFuncImpl*|1`) so interface calls unwrap.
+
+Needs a **patched Go 1.25.x, 1.26.x, or 1.27.x** and `-tags goplus.ifacefuncval`.
 Supported `GOARCH`: wasm, arm64, amd64, 386.
 
 ```
 go install github.com/goplus/reflectx/cmd/iface_patch@latest
 ```
 ```shell
-iface_patch /path/to/go
+iface_patch /path/to/go   # 1.25.x, 1.26.x, or 1.27.x
 cd /path/to/go/src && ./make.bash
 export GOROOT=/path/to/go
 export PATH="$GOROOT/bin:$PATH"
 go test -tags goplus.ifacefuncval .
+# wasip1: GOOS=wasip1 GOARCH=wasm go test -exec wasmtime -tags goplus.ifacefuncval .
 ```
 
 Without the tag, a patched compiler matches official gc. An unpatched
