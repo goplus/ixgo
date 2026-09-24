@@ -767,6 +767,11 @@ func (i *Interp) callDiscardsResult(caller *frame, fn value, args []value, ssaAr
 	}
 }
 
+// Copy results so they do not alias the pooled frame stack.
+func (fr *frame) resultTuple() tuple {
+	return append(tuple(nil), fr.stack[:fr.pfn.nres]...)
+}
+
 func (i *Interp) callFunction(caller *frame, pfn *function, args []value, env []value) (result value) {
 	fr := pfn.allocFrame(caller)
 	for i := 0; i < pfn.narg; i++ {
@@ -779,7 +784,7 @@ func (i *Interp) callFunction(caller *frame, pfn *function, args []value, env []
 	if pfn.nres == 1 {
 		result = fr.stack[0]
 	} else if pfn.nres > 1 {
-		result = tuple(fr.stack[0:pfn.nres])
+		result = fr.resultTuple()
 	}
 	pfn.deleteFrame(caller, fr)
 	return
@@ -846,7 +851,7 @@ func (i *Interp) callFunctionByStackN(caller *frame, pfn *function, ir register,
 		fr.stack[i+pfn.nres] = caller.reg(ia[i])
 	}
 	fr.run()
-	caller.setReg(ir, tuple(fr.stack[0:pfn.nres]))
+	caller.setReg(ir, fr.resultTuple())
 	pfn.deleteFrame(caller, fr)
 }
 
@@ -859,7 +864,7 @@ func (i *Interp) callFunctionByStack(caller *frame, pfn *function, ir register, 
 	if pfn.nres == 1 {
 		caller.setReg(ir, fr.stack[0])
 	} else if pfn.nres > 1 {
-		caller.setReg(ir, tuple(fr.stack[0:pfn.nres]))
+		caller.setReg(ir, fr.resultTuple())
 	}
 	pfn.deleteFrame(caller, fr)
 }
@@ -901,7 +906,7 @@ func (i *Interp) callFunctionByStackNoRecoverN(caller *frame, pfn *function, ir 
 		fr.ipc++
 		fn(fr)
 	}
-	caller.setReg(ir, tuple(fr.stack[0:pfn.nres]))
+	caller.setReg(ir, fr.resultTuple())
 	pfn.deleteFrame(caller, fr)
 }
 
@@ -917,7 +922,7 @@ func (i *Interp) callFunctionByStackWithEnv(caller *frame, pfn *function, ir reg
 	if pfn.nres == 1 {
 		caller.setReg(ir, fr.stack[0])
 	} else if pfn.nres > 1 {
-		caller.setReg(ir, tuple(fr.stack[0:pfn.nres]))
+		caller.setReg(ir, fr.resultTuple())
 	}
 	pfn.deleteFrame(caller, fr)
 }
@@ -938,7 +943,7 @@ func (i *Interp) callFunctionByStackNoRecoverWithEnv(caller *frame, pfn *functio
 	if pfn.nres == 1 {
 		caller.setReg(ir, fr.stack[0])
 	} else if pfn.nres > 1 {
-		caller.setReg(ir, tuple(fr.stack[0:pfn.nres]))
+		caller.setReg(ir, fr.resultTuple())
 	}
 	pfn.deleteFrame(caller, fr)
 }
