@@ -18,6 +18,7 @@ package ixgo
 
 import (
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -97,6 +98,99 @@ func TestTupleClosures(t *testing.T) {
 	}
 }
 
+func TestFrameCleanup(t *testing.T) {
+	interp := loadFrame(t, EnableCachedReg)
+	p := interp.funcs[interp.mainpkg.Func("Work")]
+	if len(p.Fn.Locals) != 1 || p.Fn.Locals[0].Heap || len(p.cacheRegs) == 0 {
+		t.Fatal("fixture needs one reusable local and a hidden cache")
+	}
+	argReg := p.regIndex(p.Fn.Params[0])
+	localReg := p.regIndex(p.Fn.Locals[0])
+	var active *frame
+	first := p.Instrs[0]
+	p.Instrs[0] = func(fr *frame) {
+		active = fr
+		fr.phiVals = []value{new(int)}
+		first(fr)
+	}
+	for call := 0; call < 3; call++ {
+		var local value
+		result := runFrame(t, interp, "Work", func() { local = active.stack[localReg] })
+		if result != 7 || local == nil {
+			t.Fatalf("call %d: result = %v, local = %v", call, result, local)
+		}
+		if active.caller != nil || active.callee != nil || active._defer != nil || active._panic != nil || active.deferid != 0 {
+			t.Fatalf("call %d: returned frame retains its call chain", call)
+		}
+		if active.stack[argReg] != nil {
+			t.Errorf("call %d: callback argument retained", call)
+		}
+		if active.stack[localReg] != local || !reflect.ValueOf(local).Elem().IsZero() {
+			t.Errorf("call %d: reusable local was replaced or retained a value", call)
+		}
+		for _, reg := range p.cacheRegs {
+			if active.stack[reg] != nil {
+				t.Errorf("call %d: hidden cache %d retained %T", call, reg, active.stack[reg])
+			}
+		}
+		for _, v := range active.phiVals {
+			if v != nil {
+				t.Errorf("call %d: phi scratch retained %T", call, v)
+			}
+		}
+	}
+}
+
+func TestFrameResults(t *testing.T) {
+	interp := loadFrame(t, 0)
+	retained := runFrame(t, interp, "Values", 7).(Tuple)
+	pointer := runFrame(t, interp, "LocalPointer", 7)
+	for n := 20; n < 24; n++ {
+		runFrame(t, interp, "Values", n)
+		runFrame(t, interp, "LocalPointer", n)
+	}
+	check := func(record reflect.Value, want int) {
+		t.Helper()
+		if got := record.FieldByName("Numbers").Interface().([]int); !reflect.DeepEqual(got, []int{want, want + 1}) {
+			t.Errorf("numbers = %v; want [%d %d]", got, want, want+1)
+		}
+		if got := record.FieldByName("Lookup").Interface().(map[string]int)["n"]; got != want {
+			t.Errorf("map value = %d; want %d", got, want)
+		}
+		if got := record.FieldByName("Any").Interface(); got != want {
+			t.Errorf("interface value = %v; want %d", got, want)
+		}
+	}
+	check(reflect.ValueOf(retained[0]), 7)
+	check(reflect.ValueOf(retained[1]).Elem(), 9)
+	if got := retained[2].(func() int)(); got != 7 {
+		t.Errorf("captured value = %d; want 7", got)
+	}
+	if got := *pointer.(*int); got != 7 {
+		t.Errorf("returned local pointer = %d; want 7", got)
+	}
+}
+
+func TestFramePanicStack(t *testing.T) {
+	interp := loadFrame(t, 0)
+	runFrame(t, interp, "Crash", 1)
+	_, err := interp.RunFunc("Crash", -1)
+	panicked, ok := err.(FatalError)
+	if !ok {
+		t.Fatalf("panic = %v; want FatalError", err)
+	}
+	stack := string(panicked.Stack())
+	for _, name := range []string{"main.Crash", "main.crashLeaf", "frame.go:"} {
+		if !strings.Contains(stack, name) {
+			t.Errorf("panic stack missing %q:\n%s", name, stack)
+		}
+	}
+	runFrame(t, interp, "Crash", 2)
+	if string(panicked.Stack()) != stack {
+		t.Error("retained panic stack changed after another call")
+	}
+}
+
 func loadTuple(t *testing.T) *Interp {
 	t.Helper()
 	ctx := NewContext(SupportMultipleInterp)
@@ -116,6 +210,27 @@ func runTuple(t *testing.T, interp *Interp, name string, n int) Tuple {
 		t.Fatal(err)
 	}
 	return v.(Tuple)
+}
+
+func loadFrame(t testing.TB, mode Mode) *Interp {
+	t.Helper()
+	ctx := NewContext(SupportMultipleInterp | mode)
+	ctx.SetLeastCallForEnablePool(0)
+	interp, err := ctx.LoadInterp("frame.go", frameSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(interp.UnsafeRelease)
+	return interp
+}
+
+func runFrame(t testing.TB, interp *Interp, name string, args ...interface{}) interface{} {
+	t.Helper()
+	v, err := interp.RunFunc(name, args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
 }
 
 const tupleSource = `package main
@@ -140,5 +255,44 @@ func Capture(n int) (func() int, func() int) {
 	data := new([256]byte)
 	data[0], data[1] = byte(n), byte(n + 1)
 	return func() int { return int(data[0]) }, func() int { return int(data[1]) }
+}
+`
+
+const frameSource = `package main
+var bias int
+func Add(n int) int { return n + bias }
+func Work(cb func()) int {
+	bias = 3
+	var local struct { callbacks [1]func(); value int }
+	local.callbacks[0] = cb
+	local.value = 4
+	if local.callbacks[0] != nil { local.callbacks[0]() }
+	return Add(local.value)
+}
+
+type Data struct {
+	Numbers []int
+	Lookup map[string]int
+	Any interface{}
+}
+func Values(n int) (Data, *Data, func() int) {
+	var local Data
+	local.Numbers = []int{n, n + 1}
+	local.Lookup = map[string]int{"n": n}
+	local.Any = n
+	ptr := &Data{[]int{n + 2, n + 3}, map[string]int{"n": n + 2}, n + 2}
+	return local, ptr, func() int { return n }
+}
+func LocalPointer(n int) *int {
+	var local struct{ N int }
+	local.N = n
+	return &local.N
+}
+
+func Crash(n int) int { return crashLeaf(n) }
+func crashLeaf(n int) int {
+	var p *int
+	if n < 0 { return *p }
+	return n
 }
 `

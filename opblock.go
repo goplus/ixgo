@@ -127,7 +127,13 @@ type function struct {
 	nenv       int                          // closure free vars count
 	used       int32                        // function used count
 	cached     int32                        // enable cached by pool
+
+	clearRanges []stackRange // slots cleared before pooling
+	localRefs   []register   // non-escaping locals holding references
 }
+
+// stackRange is a half-open stack interval [start, end).
+type stackRange struct{ start, end register }
 
 func (p *function) UnsafeRelease() {
 	p.Interp = nil
@@ -144,9 +150,12 @@ func (p *function) UnsafeRelease() {
 	p.stack = nil
 	p.ssaInstrs = nil
 	p.Main = nil
+	p.clearRanges = nil
+	p.localRefs = nil
 }
 
 func (p *function) initPool() {
+	p.planCleanup()
 	p.pool = &sync.Pool{}
 	p.pool.New = func() interface{} {
 		fr := &frame{interp: p.Interp, pfn: p, block: p.Main}
@@ -168,8 +177,6 @@ func (p *function) allocFrame(caller *frame) *frame {
 	if atomic.LoadInt32(&p.cached) == 1 {
 		fr = p.pool.Get().(*frame)
 		fr.block = p.Main
-		fr._defer = nil
-		fr._panic = nil
 		fr.ipc = 0
 		fr.pred = 0
 	} else {
@@ -187,12 +194,72 @@ func (p *function) allocFrame(caller *frame) *frame {
 
 func (p *function) deleteFrame(caller *frame, fr *frame) {
 	p.Interp.trackDeferFrame(caller)
-	if atomic.LoadInt32(&p.cached) == 1 {
-		p.pool.Put(fr)
-	} else {
+	if caller.callee == fr {
 		caller.callee = nil
 	}
-	fr = nil
+	if atomic.LoadInt32(&p.cached) == 1 {
+		for _, regs := range p.clearRanges {
+			clear(fr.stack[regs.start:regs.end])
+		}
+		// SSA marks escaping locals Heap, so these can be zeroed in place.
+		for _, reg := range p.localRefs {
+			// Alloc may not have run yet.
+			if local := fr.stack[reg]; local != nil {
+				reflect.ValueOf(local).Elem().SetZero()
+			}
+		}
+		clear(fr.phiVals)
+		fr.caller, fr.callee = nil, nil
+		fr._defer, fr._panic = nil, nil
+		fr.deferid = 0
+		p.pool.Put(fr)
+	}
+}
+
+// planCleanup selects slots to clear and reusable locals to zero.
+// Templates are kept; callers copy results out before their slots are cleared.
+func (p *function) planCleanup() {
+	keep := make([]bool, len(p.stack))
+	for v, encoded := range p.index {
+		reg := register(encoded & 0xffffff)
+		if kind(encoded >> 30).isStatic() {
+			keep[reg] = true
+		} else if alloc, ok := v.(*ssa.Alloc); ok && !alloc.Heap {
+			keep[reg] = true
+			if hasRefs(p.Interp.preToType(alloc.Type()).Elem()) {
+				p.localRefs = append(p.localRefs, reg)
+			}
+		}
+	}
+	for i := 0; i < len(keep); {
+		if keep[i] {
+			i++
+			continue
+		}
+		start := i
+		for i < len(keep) && !keep[i] {
+			i++
+		}
+		p.clearRanges = append(p.clearRanges, stackRange{register(start), register(i)})
+	}
+}
+
+// hasRefs reports whether typ transitively contains references.
+func hasRefs(typ reflect.Type) bool {
+	switch typ.Kind() {
+	case reflect.Array:
+		return typ.Len() != 0 && hasRefs(typ.Elem())
+	case reflect.Struct:
+		for i := 0; i < typ.NumField(); i++ {
+			if hasRefs(typ.Field(i).Type) {
+				return true
+			}
+		}
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr,
+		reflect.Slice, reflect.String, reflect.UnsafePointer:
+		return true
+	}
+	return false
 }
 
 func (p *function) InstrForPC(pc int) ssa.Instruction {
