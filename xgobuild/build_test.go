@@ -57,7 +57,7 @@ echo "XGo"
 import "fmt"
 //line main.xgo:2
 func main() {
-//line main.xgo:2:1
+	//line main.xgo:2:1
 	fmt.Println("XGo")
 }
 `)
@@ -134,31 +134,31 @@ type MyGame struct {
 }
 //line main.tspx:2
 func (this *MyGame) MainEntry() {
-//line main.tspx:2:1
+	//line main.tspx:2:1
 	tspx.OnStart(func() {
-//line main.tspx:3:1
+		//line main.tspx:3:1
 		x := 1
-//line main.tspx:4:1
+		//line main.tspx:4:1
 		tspx.RepeatUntil(func() bool {
-//line main.tspx:4:1
+			//line main.tspx:4:1
 			return x > 10
 		}, func() {
-//line main.tspx:5:1
+			//line main.tspx:5:1
 			fmt.Println("Hi")
-//line main.tspx:6:1
+			//line main.tspx:6:1
 			x++
 		})
-//line main.tspx:8:1
+		//line main.tspx:8:1
 		tspx.When(func() bool {
-//line main.tspx:8:1
+			//line main.tspx:8:1
 			return x == 11
 		}, func() {
-//line main.tspx:9:1
+			//line main.tspx:9:1
 			fmt.Println("x = 11")
 		})
-//line main.tspx:11:1
+		//line main.tspx:11:1
 		tspx.ForEver(func() {
-//line main.tspx:12:1
+			//line main.tspx:12:1
 			this.Step(1)
 		})
 	})
@@ -194,7 +194,7 @@ type Rect struct {
 //line Rect.gox:8
 func (this *Rect) Main() {
 	this.XGo_Init()
-//line Rect.gox:8:1
+	//line Rect.gox:8:1
 	fmt.Println(*this)
 }
 func (this *Rect) XGo_Init() *Rect {
@@ -219,7 +219,7 @@ type Rect struct {
 }
 //line Rect.gox:2
 func (this *Rect) Main() {
-//line Rect.gox:2:1
+	//line Rect.gox:2:1
 	fmt.Println("Go+")
 }
 func main() {
@@ -248,7 +248,7 @@ type Rect struct {
 }
 //line Rect.gox:9
 func (this *Rect) Main() {
-//line Rect.gox:9:1
+	//line Rect.gox:9:1
 	fmt.Println("Go+")
 }
 func main() {
@@ -277,7 +277,7 @@ type Rect struct {
 }
 //line Rect.gox:9
 func (this *Rect) Main() {
-//line Rect.gox:9:1
+	//line Rect.gox:9:1
 	fmt.Println("Go+")
 }
 func main() {
@@ -304,7 +304,7 @@ type Rect struct {
 }
 //line Rect.gox:7
 func (this *Rect) Main() {
-//line Rect.gox:7:1
+	//line Rect.gox:7:1
 	fmt.Println("Go+")
 }
 func main() {
@@ -331,7 +331,7 @@ type Rect struct {
 }
 //line Rect.gox:7
 func (this *Rect) Main() {
-//line Rect.gox:7:1
+	//line Rect.gox:7:1
 	fmt.Println("Go+")
 }
 func main() {
@@ -353,9 +353,9 @@ import (
 )
 //line main.xgo:2
 func main() {
-//line main.xgo:2:1
+	//line main.xgo:2:1
 	a := ng.Bigrat_Init__2(big.NewRat(1, 2))
-//line main.xgo:3:1
+	//line main.xgo:3:1
 	fmt.Println((ng.Bigrat).XGo_Add(a, ng.Bigrat_Init__2(big.NewRat(1, 2))))
 }
 `)
@@ -371,9 +371,9 @@ echo(v)
 import "fmt"
 //line main.xgo:2
 func main() {
-//line main.xgo:2:1
+	//line main.xgo:2:1
 	v := typeof(100)
-//line main.xgo:3:1
+	//line main.xgo:3:1
 	fmt.Println(v)
 }
 `)
@@ -400,9 +400,9 @@ var r io.Reader
 //line main.xgo:6
 func main() {
 	for
-//line main.xgo:6:1
+	//line main.xgo:6:1
 	line := range osx.Lines(r) {
-//line main.xgo:7:1
+		//line main.xgo:7:1
 		fmt.Println(line)
 	}
 }
@@ -438,101 +438,101 @@ import (
 )
 //line main.xgo:6:1
 func add(x string, y string) (int, error) {
-//line main.xgo:7:1
+	//line main.xgo:7:1
 	var _autoGo_1 int
-//line main.xgo:7:1
+	//line main.xgo:7:1
 	{
-//line main.xgo:7:1
+		//line main.xgo:7:1
 		var _xgo_err error
-//line main.xgo:7:1
+		//line main.xgo:7:1
 		_autoGo_1, _xgo_err = strconv.Atoi(x)
-//line main.xgo:7:1
+		//line main.xgo:7:1
 		if _xgo_err != nil {
-//line main.xgo:7:1
+			//line main.xgo:7:1
 			_xgo_err = errors.NewFrame(_xgo_err, "strconv.Atoi(x)", "main.xgo", 7, "main.add")
-//line main.xgo:7:1
+			//line main.xgo:7:1
 			return 0, _xgo_err
 		}
-//line main.xgo:7:1
+		//line main.xgo:7:1
 		goto _autoGo_2
 	_autoGo_2:
-//line main.xgo:7:1
+		//line main.xgo:7:1
 	}
-//line main.xgo:7:1
+	//line main.xgo:7:1
 	var _autoGo_3 int
-//line main.xgo:7:1
+	//line main.xgo:7:1
 	{
-//line main.xgo:7:1
+		//line main.xgo:7:1
 		var _xgo_err error
-//line main.xgo:7:1
+		//line main.xgo:7:1
 		_autoGo_3, _xgo_err = strconv.Atoi(y)
-//line main.xgo:7:1
+		//line main.xgo:7:1
 		if _xgo_err != nil {
-//line main.xgo:7:1
+			//line main.xgo:7:1
 			_xgo_err = errors.NewFrame(_xgo_err, "strconv.Atoi(y)", "main.xgo", 7, "main.add")
-//line main.xgo:7:1
+			//line main.xgo:7:1
 			return 0, _xgo_err
 		}
-//line main.xgo:7:1
+		//line main.xgo:7:1
 		goto _autoGo_4
 	_autoGo_4:
-//line main.xgo:7:1
+		//line main.xgo:7:1
 	}
-//line main.xgo:7:1
+	//line main.xgo:7:1
 	return _autoGo_1 + _autoGo_3, nil
 }
 //line main.xgo:10:1
 func addSafe(x string, y string) int {
-//line main.xgo:11:1
+	//line main.xgo:11:1
 	return func() (_xgo_ret int) {
-//line main.xgo:11:1
+		//line main.xgo:11:1
 		var _xgo_err error
-//line main.xgo:11:1
+		//line main.xgo:11:1
 		_xgo_ret, _xgo_err = strconv.Atoi(x)
-//line main.xgo:11:1
+		//line main.xgo:11:1
 		if _xgo_err != nil {
-//line main.xgo:11:1
+			//line main.xgo:11:1
 			return 0
 		}
-//line main.xgo:11:1
+		//line main.xgo:11:1
 		return
 	}() + func() (_xgo_ret int) {
-//line main.xgo:11:1
+		//line main.xgo:11:1
 		var _xgo_err error
-//line main.xgo:11:1
+		//line main.xgo:11:1
 		_xgo_ret, _xgo_err = strconv.Atoi(y)
-//line main.xgo:11:1
+		//line main.xgo:11:1
 		if _xgo_err != nil {
-//line main.xgo:11:1
+			//line main.xgo:11:1
 			return 0
 		}
-//line main.xgo:11:1
+		//line main.xgo:11:1
 		return
 	}()
 }
 //line main.xgo:14
 func main() {
-//line main.xgo:14:1
+	//line main.xgo:14:1
 	fmt.Println(func() (_xgo_ret int) {
-//line main.xgo:14:1
+		//line main.xgo:14:1
 		var _xgo_err error
-//line main.xgo:14:1
+		//line main.xgo:14:1
 		_xgo_ret, _xgo_err = add("100", "23")
-//line main.xgo:14:1
+		//line main.xgo:14:1
 		if _xgo_err != nil {
-//line main.xgo:14:1
+			//line main.xgo:14:1
 			_xgo_err = errors.NewFrame(_xgo_err, "add(\"100\", \"23\")", "main.xgo", 14, "main.main")
-//line main.xgo:14:1
+			//line main.xgo:14:1
 			panic(_xgo_err)
 		}
-//line main.xgo:14:1
+		//line main.xgo:14:1
 		return
 	}())
-//line main.xgo:16:1
+	//line main.xgo:16:1
 	sum, err := add("10", "abc")
-//line main.xgo:17:1
+	//line main.xgo:17:1
 	fmt.Println(sum, err)
-//line main.xgo:19:1
+	//line main.xgo:19:1
 	fmt.Println(addSafe("10", "abc"))
 }
 `)
@@ -557,19 +557,19 @@ type exec struct {
 }
 //line exec.gsh:2
 func (this *exec) MainEntry() {
-//line exec.gsh:2:1
+	//line exec.gsh:2:1
 	this.XGo_Exec("gop", "run", "./foo")
-//line exec.gsh:3:1
+	//line exec.gsh:3:1
 	this.Exec__1("gop run ./foo")
-//line exec.gsh:4:1
+	//line exec.gsh:4:1
 	this.Exec__1("FOO=100 gop run ./foo")
-//line exec.gsh:5:1
+	//line exec.gsh:5:1
 	this.Exec__0(map[string]string{"FOO": "101"}, "gop", "run", "./foo")
-//line exec.gsh:6:1
+	//line exec.gsh:6:1
 	this.Exec__2("gop", "run", "./foo")
-//line exec.gsh:7:1
+	//line exec.gsh:7:1
 	this.Exec__1("ls $HOME")
-//line exec.gsh:8:1
+	//line exec.gsh:8:1
 	this.XGo_Exec("ls", this.XGo_Env("HOME"))
 }
 func (this *exec) Main() {
@@ -652,23 +652,23 @@ type App struct {
 }
 //line main.gsh:2
 func (this *App) MainEntry() {
-//line main.gsh:2:1
+	//line main.gsh:2:1
 	gsh1.XGot_App_XGox_GetWidget[int](this, "info")
-//line main.gsh:3:1
+	//line main.gsh:3:1
 	pt := &gsh1.Point{100, 200}
-//line main.gsh:4:1
+	//line main.gsh:4:1
 	pt.Info()
-//line main.gsh:5:1
+	//line main.gsh:5:1
 	fmt.Println(pt.X)
-//line main.gsh:6:1
+	//line main.gsh:6:1
 	gsh1.Dump(pt)
-//line main.gsh:9:1
+	//line main.gsh:9:1
 	gsh1.Dump(gsh1.Zero)
-//line main.gsh:11:1
+	//line main.gsh:11:1
 	fmt.Println(gsh1.Version)
-//line main.gsh:13:1
+	//line main.gsh:13:1
 	pt2 := &gsh1.MyPoint{1, 2}
-//line main.gsh:14:1
+	//line main.gsh:14:1
 	gsh1.Dump(pt2)
 }
 func (this *App) Main() {
@@ -712,23 +712,23 @@ type App struct {
 }
 //line main.gsh:2
 func (this *App) MainEntry() {
-//line main.gsh:2:1
+	//line main.gsh:2:1
 	gsh.XGot_App_XGox_GetWidget[int](this, "info")
-//line main.gsh:3:1
+	//line main.gsh:3:1
 	pt := &gsh.Point{100, 200}
-//line main.gsh:4:1
+	//line main.gsh:4:1
 	pt.Info()
-//line main.gsh:5:1
+	//line main.gsh:5:1
 	fmt.Println(pt.X)
-//line main.gsh:6:1
+	//line main.gsh:6:1
 	gsh.Dump(pt)
-//line main.gsh:9:1
+	//line main.gsh:9:1
 	gsh.Dump(gsh.Zero)
-//line main.gsh:11:1
+	//line main.gsh:11:1
 	fmt.Println(gsh.Version)
-//line main.gsh:13:1
+	//line main.gsh:13:1
 	pt2 := &gsh.MyPoint{1, 2}
-//line main.gsh:14:1
+	//line main.gsh:14:1
 	gsh.Dump(pt2)
 }
 func (this *App) Main() {
@@ -757,7 +757,7 @@ type App struct {
 }
 //line main.gsh:2
 func (this *App) MainEntry() {
-//line main.gsh:2:1
+	//line main.gsh:2:1
 	this.XGo_Exec("ls", this.XGo_Env("HOME"))
 }
 func (this *App) Main() {
@@ -823,9 +823,9 @@ import (
 )
 //line main.xgo:2
 func main() {
-//line main.xgo:2:1
+	//line main.xgo:2:1
 	fmt.Println(strings.Repeat("a", 10))
-//line main.xgo:3:1
+	//line main.xgo:3:1
 	fmt.Println(strings.ToTitle("hello"))
 }
 `)
@@ -842,7 +842,7 @@ import (
 )
 //line main.xgo:2
 func main() {
-//line main.xgo:2:1
+	//line main.xgo:2:1
 	fmt.Println(reflect.TypeOf(100))
 }
 `)
@@ -871,11 +871,11 @@ import (
 )
 //line main.xgo:3
 func main() {
-//line main.xgo:3:1
+	//line main.xgo:3:1
 	cl := func() (_xgo_ret tpl.Compiler) {
-//line main.xgo:3:1
+		//line main.xgo:3:1
 		var _xgo_err error
-//line main.xgo:3:1
+		//line main.xgo:3:1
 		_xgo_ret, _xgo_err = tpl.NewEx(` + "`" + `
 expr = INT % "," => {
     return tpl.ListOp[int](self, v => {
@@ -883,50 +883,50 @@ expr = INT % "," => {
     })
 }
 ` + "`" + `, "main.xgo", 3, 10, "expr", func(self []interface{}) interface{} {
-//line main.xgo:5:1
+			//line main.xgo:5:1
 			return tpl.ListOp[int](self, func(v any) int {
-//line main.xgo:6:1
+				//line main.xgo:6:1
 				return func() (_xgo_ret int) {
-//line main.xgo:6:1
+					//line main.xgo:6:1
 					var _xgo_err error
-//line main.xgo:6:1
+					//line main.xgo:6:1
 					_xgo_ret, _xgo_err = strconv.Atoi(v.(*tpl.Token).Lit)
-//line main.xgo:6:1
+					//line main.xgo:6:1
 					if _xgo_err != nil {
-//line main.xgo:6:1
+						//line main.xgo:6:1
 						_xgo_err = errors.NewFrame(_xgo_err, "v.(*tpl.Token).Lit.int", "main.xgo", 6, "main.main")
-//line main.xgo:6:1
+						//line main.xgo:6:1
 						panic(_xgo_err)
 					}
-//line main.xgo:6:1
+					//line main.xgo:6:1
 					return
 				}()
 			})
 		})
-//line main.xgo:3:1
+		//line main.xgo:3:1
 		if _xgo_err != nil {
-//line main.xgo:3:1
+			//line main.xgo:3:1
 			_xgo_err = errors.NewFrame(_xgo_err, "tpl` + "`" + `\nexpr = INT % \",\" => {\n    return tpl.ListOp[int](self, v => {\n        return v.(*tpl.Token).Lit.int!\n    })\n}\n` + "`" + `", "main.xgo", 3, "main.main")
-//line main.xgo:3:1
+			//line main.xgo:3:1
 			panic(_xgo_err)
 		}
-//line main.xgo:3:1
+		//line main.xgo:3:1
 		return
 	}()
-//line main.xgo:11:1
+	//line main.xgo:11:1
 	fmt.Println(func() (_xgo_ret interface{}) {
-//line main.xgo:11:1
+		//line main.xgo:11:1
 		var _xgo_err error
-//line main.xgo:11:1
+		//line main.xgo:11:1
 		_xgo_ret, _xgo_err = cl.ParseExpr("1, 2, 3", nil)
-//line main.xgo:11:1
+		//line main.xgo:11:1
 		if _xgo_err != nil {
-//line main.xgo:11:1
+			//line main.xgo:11:1
 			_xgo_err = errors.NewFrame(_xgo_err, "cl.parseExpr(\"1, 2, 3\", nil)", "main.xgo", 11, "main.main")
-//line main.xgo:11:1
+			//line main.xgo:11:1
 			panic(_xgo_err)
 		}
-//line main.xgo:11:1
+		//line main.xgo:11:1
 		return
 	}())
 }
