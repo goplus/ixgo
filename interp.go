@@ -538,6 +538,11 @@ func (fr *frame) copyReg(dst register, src register) {
 	fr.stack[dst] = fr.stack[src]
 }
 
+// Copy results so they do not alias the pooled frame stack.
+func (fr *frame) resultTuple() tuple {
+	return append(tuple(nil), fr.stack[:fr.pfn.nres]...)
+}
+
 func (fr *frame) runtimeError(instr funcInstr, text string) error {
 	if fr.interp.ctx.panicFunc != nil {
 		return fr.interp.ctx.handlePanic(fr, instr, RuntimeError(text))
@@ -765,11 +770,6 @@ func (i *Interp) callDiscardsResult(caller *frame, fn value, args []value, ssaAr
 	default:
 		i.callExternalDiscardsResult(caller, reflect.ValueOf(fn), args, nil)
 	}
-}
-
-// Copy results so they do not alias the pooled frame stack.
-func (fr *frame) resultTuple() tuple {
-	return append(tuple(nil), fr.stack[:fr.pfn.nres]...)
 }
 
 // Callback entries restore context even when panic skips deleteFrame.
