@@ -261,6 +261,9 @@ func (ctx *Context) SetLeastCallForEnablePool(count int) {
 func (ctx *Context) SetDebug(fn func(*DebugInfo)) {
 	ctx.BuilderMode |= ssa.GlobalDebug
 	ctx.debugFunc = fn
+	if ctx.Builder != nil {
+		ctx.Builder.Reset()
+	}
 }
 
 func (ctx *Context) SetPanic(fn func(*PanicInfo)) {
