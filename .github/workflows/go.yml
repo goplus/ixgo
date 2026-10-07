@@ -22,13 +22,19 @@ jobs:
         go-version: ${{ matrix.go-version }}
 
     - name: Test ixgo
-      run: go test -race -v .
+      run: go test -race -v -coverprofile=coverage.txt -covermode=atomic .
 
     - name: Test xgobuild
-      run: go test -race -v ./xgobuild
+      run: go test -race -v -coverprofile=coverage.xgobuild.txt -covermode=atomic ./xgobuild
 
     - name: Test transform
-      run: go test -race -v ./transform/...
+      run: go test -race -v -coverprofile=coverage.transform.txt -covermode=atomic ./transform/...
+
+    - name: Codecov
+      uses: codecov/codecov-action@v7
+      with:
+        slug: goplus/ixgo
+        files: coverage.txt,coverage.xgobuild.txt,coverage.transform.txt
 
     - name: Install ixgo
       run: go install -v ./cmd/ixgo
