@@ -1,0 +1,11 @@
+coverage:
+  ignore:
+    - "pkg"
+    - "directcall"
+    - "testdata"
+    - "test"
+    - "cmd"
+    - "binop_gen.go"
+    - "binop_shift_gen.go"
+    - "opcvt_gen.go"
+    - "unop_gen.go"

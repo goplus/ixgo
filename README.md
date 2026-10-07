@@ -1,6 +1,7 @@
 # iXGo The Go/XGo Interpreter
 
 [![Build Status](https://github.com/goplus/ixgo/workflows/Go/badge.svg)](https://github.com/goplus/ixgo/actions/workflows/go.yml)
+[![Coverage Status](https://codecov.io/gh/goplus/ixgo/branch/main/graph/badge.svg)](https://codecov.io/gh/goplus/ixgo)
 [![Go Reference](https://pkg.go.dev/badge/github.com/goplus/ixgo.svg)](https://pkg.go.dev/github.com/goplus/ixgo)
 
 A fast Go interpreter that supports all Go language features, including generics and generic methods.
