@@ -22,13 +22,13 @@ jobs:
         go-version: ${{ matrix.go-version }}
 
     - name: Test ixgo
-      run: go test -race -v -coverprofile=coverage.txt -covermode=atomic .
+      run: go test -race -v -coverprofile="coverage.txt" -covermode=atomic .
 
     - name: Test xgobuild
-      run: go test -race -v -coverprofile=coverage.xgobuild.txt -covermode=atomic ./xgobuild
+      run: go test -race -v -coverprofile="coverage.xgobuild.txt" -covermode=atomic ./xgobuild
 
     - name: Test transform
-      run: go test -race -v -coverprofile=coverage.transform.txt -covermode=atomic ./transform/...
+      run: go test -race -v -coverprofile="coverage.transform.txt" -covermode=atomic ./transform/...
 
     - name: Codecov
       uses: codecov/codecov-action@v7
