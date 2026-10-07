@@ -155,7 +155,7 @@ func (inter *Interp) callBuiltin(fr *frame, fn *ssa.Builtin, args []value, ssaAr
 	case "Add":
 		ptr := args[0].(unsafe.Pointer)
 		length := asInt(args[1])
-		return unsafe.Pointer(uintptr(ptr) + uintptr(length))
+		return unsafe.Add(ptr, length)
 	case "Slice":
 		//func Slice(ptr *ArbitraryType, len IntegerType) []ArbitraryType
 		//(*[len]ArbitraryType)(unsafe.Pointer(ptr))[:]
@@ -173,7 +173,7 @@ func (inter *Interp) callBuiltin(fr *frame, fn *ssa.Builtin, args []value, ssaAr
 			panic(fr.runtimeError(fn, "unsafe.Slice: len out of range"))
 		}
 		typ := reflect.ArrayOf(length, etyp)
-		v := reflect.NewAt(typ, unsafe.Pointer(ptr.Pointer()))
+		v := reflect.NewAt(typ, ptr.UnsafePointer())
 		return v.Elem().Slice(0, length).Interface()
 	case "SliceData":
 		// SliceData returns a pointer to the underlying array of the argument
@@ -216,8 +216,7 @@ func (inter *Interp) callBuiltin(fr *frame, fn *ssa.Builtin, args []value, ssaAr
 		if overflow || mem > -uintptr(unsafe.Pointer(ptr)) {
 			panic(fr.runtimeError(fn, "unsafe.String: len out of range"))
 		}
-		sh := reflect.StringHeader{Data: uintptr(unsafe.Pointer(ptr)), Len: length}
-		return *(*string)(unsafe.Pointer(&sh))
+		return unsafe.String(ptr, length)
 	case "StringData":
 		// StringData returns a pointer to the underlying bytes of str.
 		// For an empty string the return value is unspecified, and may be nil.
@@ -225,9 +224,7 @@ func (inter *Interp) callBuiltin(fr *frame, fn *ssa.Builtin, args []value, ssaAr
 		// Since Go strings are immutable, the bytes returned by StringData
 		// must not be modified.
 		// func StringData(str string) *byte
-		s := args[0].(string)
-		data := (*reflect.StringHeader)(unsafe.Pointer(&s)).Data
-		return (*byte)(unsafe.Pointer(data))
+		return unsafe.StringData(args[0].(string))
 	default:
 		panic("unknown built-in: " + fnName)
 	}
@@ -504,7 +501,7 @@ func (interp *Interp) makeBuiltinByStack(fn *ssa.Builtin, ssaArgs []ssa.Value, i
 			arg1 := fr.reg(ia[1])
 			ptr := arg0.(unsafe.Pointer)
 			length := asInt(arg1)
-			fr.setReg(ir, unsafe.Pointer(uintptr(ptr)+uintptr(length)))
+			fr.setReg(ir, unsafe.Add(ptr, length))
 		}
 	case "Slice":
 		//func Slice(ptr *ArbitraryType, len IntegerType) []ArbitraryType
@@ -527,7 +524,7 @@ func (interp *Interp) makeBuiltinByStack(fn *ssa.Builtin, ssaArgs []ssa.Value, i
 				panic(fr.runtimeError(fn, "unsafe.Slice: len out of range"))
 			}
 			typ := reflect.ArrayOf(length, etyp)
-			v := reflect.NewAt(typ, unsafe.Pointer(ptr.Pointer()))
+			v := reflect.NewAt(typ, ptr.UnsafePointer())
 			fr.setReg(ir, v.Elem().Slice(0, length).Interface())
 		}
 	case "SliceData":
@@ -576,8 +573,7 @@ func (interp *Interp) makeBuiltinByStack(fn *ssa.Builtin, ssaArgs []ssa.Value, i
 			if overflow || mem > -uintptr(unsafe.Pointer(ptr)) {
 				panic(fr.runtimeError(fn, "unsafe.String: len out of range"))
 			}
-			sh := reflect.StringHeader{Data: uintptr(unsafe.Pointer(ptr)), Len: length}
-			fr.setReg(ir, *(*string)(unsafe.Pointer(&sh)))
+			fr.setReg(ir, unsafe.String(ptr, length))
 		}
 	case "StringData":
 		// StringData returns a pointer to the underlying bytes of str.
@@ -587,9 +583,7 @@ func (interp *Interp) makeBuiltinByStack(fn *ssa.Builtin, ssaArgs []ssa.Value, i
 		// must not be modified.
 		// func StringData(str string) *byte
 		return func(fr *frame) {
-			s := fr.string(ia[0])
-			data := (*reflect.StringHeader)(unsafe.Pointer(&s)).Data
-			fr.setReg(ir, (*byte)(unsafe.Pointer(data)))
+			fr.setReg(ir, unsafe.StringData(fr.string(ia[0])))
 		}
 	case "Sizeof": // instance of generic function
 		return func(fr *frame) {
