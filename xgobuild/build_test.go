@@ -18,15 +18,23 @@ package xgobuild
 
 import (
 	"fmt"
+	"go/constant"
+	"go/token"
+	"go/types"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 
+	"github.com/goplus/gogen"
 	"github.com/goplus/ixgo"
 	_ "github.com/goplus/ixgo/pkg/bytes"
 	_ "github.com/goplus/ixgo/xgobuild/pkg/dql"
 	_ "github.com/goplus/ixgo/xgobuild/pkg/encoding"
 	_ "github.com/goplus/ixgo/xgobuild/pkg/gsh"
 	_ "github.com/goplus/ixgo/xgobuild/pkg/tpl"
+	"github.com/goplus/mod/modfile"
+	"github.com/goplus/xgo/parser/fsx"
 )
 
 func gopClTest(t *testing.T, gopcode, expected string) {
@@ -989,5 +997,176 @@ func TestDqlXGo(t *testing.T) {
 	_, err := ctx.RunFile("main.xgo", dqlXGo, nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBuildDirAndParseAPIs(t *testing.T) {
+	dir := t.TempDir()
+	src := []byte("echo \"hi\"\n")
+	if err := os.WriteFile(filepath.Join(dir, "main.xgo"), src, 0644); err != nil {
+		t.Fatal(err)
+	}
+	ctx := ixgo.NewContext(0)
+	data, err := BuildDir(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) == 0 {
+		t.Fatal("BuildDir empty")
+	}
+	data, err = BuildFSDir(ctx, fsx.Local, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) == 0 {
+		t.Fatal("BuildFSDir empty")
+	}
+
+	c := NewContext(ctx)
+	pkg, err := c.ParseDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkg.MainPkg() == nil {
+		t.Fatal("MainPkg")
+	}
+	ast, err := pkg.ToAst()
+	if err != nil || ast == nil {
+		t.Fatal("ToAst", err)
+	}
+	var n int
+	pkg.ForEachFile(func(_ *gogen.Package, _ string) { n++ })
+	if n == 0 {
+		t.Fatal("ForEachFile")
+	}
+	files, err := c.ParseFiles([]string{filepath.Join(dir, "main.xgo")})
+	if err != nil || files == nil {
+		t.Fatal("ParseFiles", err)
+	}
+
+	empty := &Package{}
+	if empty.MainPkg() != nil {
+		t.Fatal("empty MainPkg")
+	}
+	if _, err := empty.ToSource(); err == nil {
+		t.Fatal("empty ToSource")
+	}
+	if _, err := empty.ToAst(); err == nil {
+		t.Fatal("empty ToAst")
+	}
+	empty.ForEachFile(func(_ *gogen.Package, _ string) {})
+
+	eval := ixgo.NewContext(0)
+	eval.SetEvalMode(true)
+	_ = NewContext(eval)
+	static := ixgo.NewContext(StaticLoad)
+	cstatic := NewContext(static)
+	if _, err := cstatic.Import("fmt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Import("fmt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Import("fmt"); err != nil {
+		t.Fatal("cached import")
+	}
+	if _, err := BuildDir(ctx, filepath.Join(dir, "missing")); err == nil {
+		t.Fatal("BuildDir missing")
+	}
+	if _, err := BuildFSDir(ctx, fsx.Local, filepath.Join(dir, "missing")); err == nil {
+		t.Fatal("BuildFSDir missing")
+	}
+	if _, err := c.ParseDir(filepath.Join(dir, "missing")); err == nil {
+		t.Fatal("ParseDir missing")
+	}
+	if _, err := c.ParseFiles([]string{filepath.Join(dir, "missing.xgo")}); err == nil {
+		t.Fatal("ParseFiles missing")
+	}
+
+	ixgo.RegisterPackage(&ixgo.Package{
+		Name: "coverimp",
+		Path: "ixgo.test/coverimp",
+		Import: func(fset *token.FileSet, pkgs map[string]*types.Package) (*types.Package, error) {
+			p := types.NewPackage("ixgo.test/coverimp", "coverimp")
+			p.MarkComplete()
+			return p, nil
+		},
+	})
+	if _, err := c.Import("ixgo.test/coverimp"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Import("ixgo.test/coverimp/missing"); err == nil {
+		t.Fatal("expected import error")
+	}
+
+	norm := ixgo.NewContext(NormalizeExport)
+	if err := RegisterPackagePatch(norm, "example.com/owned", "package owned\n"); err != nil {
+		t.Fatal(err)
+	}
+	cn := NewContext(norm)
+	if !cn.isOwnedPackage("example.com/owned") {
+		t.Fatal("expected owned patch package")
+	}
+	ixgo.RegisterPackage(&ixgo.Package{
+		Name: "goppkg",
+		Path: "example.com/goppkg",
+		UntypedConsts: map[string]ixgo.UntypedConst{
+			"GopPackage": {Typ: "untyped bool", Value: constant.MakeBool(true)},
+		},
+	})
+	ixgo.RegisterPackage(&ixgo.Package{
+		Name: "xgopkg",
+		Path: "example.com/xgopkg",
+		UntypedConsts: map[string]ixgo.UntypedConst{
+			"XGoPackage": {Typ: "untyped bool", Value: constant.MakeBool(true)},
+		},
+	})
+	if !c.isOwnedPackage("example.com/goppkg") || !c.isOwnedPackage("example.com/xgopkg") {
+		t.Fatal("isOwnedPackage consts")
+	}
+}
+
+func TestClassKindAndRegister(t *testing.T) {
+	if _, ok := ClassKind("app.gmx"); !ok {
+		t.Fatal("gmx")
+	}
+	if _, ok := ClassKind("sprite.spx"); !ok {
+		t.Fatal("spx")
+	}
+	if _, ok := ClassKind("main.go"); ok {
+		t.Fatal("go")
+	}
+	info, isProj, ok := ClassInfo("app.gmx")
+	if !ok || !isProj {
+		t.Fatal("ClassInfo gmx", info, isProj)
+	}
+	RegisterProject(&modfile.Project{
+		Ext:   ".coverx",
+		Class: "App",
+		Works: []*modfile.Class{
+			{Ext: ".coverw", Class: "Work"},
+		},
+	})
+	if _, ok := ClassKind("a.coverx"); !ok {
+		t.Fatal("register project")
+	}
+	if err := RegisterPackagePatch(ixgo.NewContext(0), "example.com/p", "package p\n"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBuildFileRecover(t *testing.T) {
+	ctx := ixgo.NewContext(0)
+	if _, err := BuildFile(ctx, "main.xgo", "this is not xgo $$$"); err == nil {
+		t.Fatal("expected error")
+	}
+	if _, err := BuildFile(nil, "main.xgo", "echo 1"); err == nil {
+		t.Fatal("BuildFile nil ctx")
+	}
+	if _, err := BuildDir(nil, "."); err == nil {
+		t.Fatal("BuildDir nil ctx")
+	}
+	if _, err := BuildFSDir(nil, fsx.Local, "."); err == nil {
+		t.Fatal("BuildFSDir nil ctx")
 	}
 }
