@@ -3444,6 +3444,16 @@ func main() {
 		mustPanic(func() { _ = unsafe.Slice(new(uint64), maxUintptr/8) })
 		mustPanic(func() { _ = unsafe.Slice(new(uint64), maxUintptr/8+1) })
 	}
+
+	// unsafe.String / unsafe.StringData
+	{
+		s := unsafe.String(&p[0], 3)
+		assert(s == string(p[:3]))
+		assert(unsafe.StringData(s) == &p[0])
+		assert(unsafe.String((*byte)(nil), 0) == "")
+		sd := unsafe.SliceData(p[:])
+		assert(sd == &p[0])
+	}
 }
 
 func assert(ok bool) {
