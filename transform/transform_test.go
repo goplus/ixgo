@@ -95,3 +95,31 @@ func main() {
 		t.Fatalf("want negative shift panic, got %v", err)
 	}
 }
+
+func TestMoreConstantFolds(t *testing.T) {
+	err := runSrc(t, `package main
+func main() {
+	_ = 1 ^ 3
+	_ = 7 &^ 1
+	_ = 1 < 2
+	_ = 3 > 1
+	_ = 2 <= 2
+	_ = 2 >= 2
+	_ = 1 != 2
+	_ = int8(1) + int8(2)
+	_ = int16(3) * int16(4)
+	_ = uint32(8) / uint32(2)
+	_ = uint64(7) % uint64(3)
+	_ = float32(1.5) + float32(2.5)
+	_ = float64(8) / float64(2)
+	_ = -int32(4)
+	_ = ^uint8(0)
+	_ = int64(1)
+	_ = uint(2)
+	_ = complex64(1) + complex64(2)
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+}

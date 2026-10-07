@@ -171,6 +171,54 @@ func u() uint8 {
 	}
 }
 
+func TestMoreFolds(t *testing.T) {
+	cases := []struct {
+		src, name string
+	}{
+		{`package p
+func b() bool { x := true; return x == true }`, "b"},
+		{`package p
+func n() bool { x := true; return !x }`, "n"},
+		{`package p
+func u() bool { a := uint8(3); return a >= uint8(2) }`, "u"},
+		{`package p
+func f() float32 { return float32(1) + float32(2) }`, "f"},
+		{`package p
+func x() uint8 { a := uint8(0); return ^a }`, "x"},
+		{`package p
+func s() uint8 { a := uint8(1); return -a }`, "s"},
+		{`package p
+func c() float64 { return float64(int64(3)) }`, "c"},
+		{`package p
+func d() int { return int(2.0) }`, "d"},
+		{`package p
+func e() bool { a := uint16(1); return a != uint16(2) }`, "e"},
+		{`package p
+func g() float64 { return float64(1.5) * float64(2) }`, "g"},
+	}
+	for _, tc := range cases {
+		fn := runSCCP(t, tc.src, tc.name)
+		if returnConst(fn) == nil {
+			fn.WriteTo(testWriter{t})
+			t.Fatalf("%s: expected constant return", tc.name)
+		}
+	}
+}
+
+func TestNonFoldableTypes(t *testing.T) {
+	fn := runSCCP(t, `package p
+func s() string {
+	a := "x"
+	return a + "y"
+}`, "s")
+	assertSSASane(t, fn)
+	fn = runSCCP(t, `package p
+func c() complex128 {
+	return (1 + 2i) + (3 + 4i)
+}`, "c")
+	assertSSASane(t, fn)
+}
+
 func TestMethodsAndClosures(t *testing.T) {
 	pkg := buildPackage(t, `package p
 type T int
