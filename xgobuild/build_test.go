@@ -1105,7 +1105,7 @@ func TestBuildDirAndParseAPIs(t *testing.T) {
 	}
 	cn := NewContext(norm)
 	if !cn.isOwnedPackage("example.com/owned") {
-		t.Log("owned patch may be unloaded")
+		t.Fatal("expected owned patch package")
 	}
 	ixgo.RegisterPackage(&ixgo.Package{
 		Name: "goppkg",

@@ -668,7 +668,7 @@ func TestEmptyTypeAndOffsetof(t *testing.T) {
 		reflect.Array, reflect.Chan, reflect.Func, reflect.Interface,
 		reflect.Map, reflect.Ptr, reflect.Slice, reflect.Struct, reflect.String,
 	} {
-		if emptyType(kind) == nil && kind != reflect.String {
+		if emptyType(kind) == nil {
 			t.Fatalf("emptyType %v", kind)
 		}
 	}

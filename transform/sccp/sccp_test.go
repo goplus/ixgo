@@ -211,10 +211,14 @@ func s() string {
 	a := "x"
 	return a + "y"
 }`, "s")
-	assertSSASane(t, fn)
+	if returnConst(fn) != nil {
+		t.Fatal("string concat should not fold")
+	}
 	fn = runSCCP(t, `package p
 func c() complex128 {
-	return (1 + 2i) + (3 + 4i)
+	a := 1 + 2i
+	b := 3 + 4i
+	return a + b
 }`, "c")
 	assertSSASane(t, fn)
 }

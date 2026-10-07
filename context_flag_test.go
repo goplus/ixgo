@@ -176,8 +176,12 @@ func main() {}
 		t.Fatal("ExitCode")
 	}
 	interp.Abort()
-	if _, err := interp.RunMain(); err != nil && false {
+	code, err := interp.RunMain()
+	if err != nil {
 		t.Fatal(err)
+	}
+	if code != interp.ExitCode() {
+		t.Fatalf("abort RunMain code %v", code)
 	}
 
 	fn := pkg.Func("Add")
@@ -350,7 +354,9 @@ func main() {
 `, nil); err != nil {
 		t.Fatal(err)
 	}
-	_ = hit
+	if !hit {
+		t.Fatal("debug callback not invoked")
+	}
 }
 
 func TestReplAPI(t *testing.T) {
@@ -546,7 +552,10 @@ func main() {
 	var nsl []int
 	_ = unsafe.SliceData(nsl)
 	b := []byte("hi")
-	_ = unsafe.String(&b[0], 2)
+	str := unsafe.String(&b[0], 2)
+	if unsafe.StringData(str) != &b[0] {
+		panic("StringData")
+	}
 	_ = unsafe.String((*byte)(nil), 0)
 	_ = unsafe.Sizeof(0)
 	_ = unsafe.Alignof(0)
@@ -582,6 +591,7 @@ func main() {
 	_ = unsafe.SliceData([]int{1})
 	b := []byte("ab")
 	_ = unsafe.String(&b[0], 2)
+	_ = unsafe.StringData("ab")
 	print(1)
 	println(1)
 }
@@ -688,6 +698,9 @@ func main() {
 		bs := []byte("hi")
 		interp.callBuiltin(fr, b, []value{&bs[0], 2}, nil)
 		interp.callBuiltin(fr, b, []value{(*byte)(nil), 0}, nil)
+	}
+	if b := maybe("StringData"); b != nil {
+		interp.callBuiltin(fr, b, []value{"hi"}, nil)
 	}
 	if b := maybe("print"); b != nil {
 		interp.callBuiltin(fr, b, []value{1, "x"}, nil)
