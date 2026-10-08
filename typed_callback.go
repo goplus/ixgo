@@ -19,7 +19,6 @@ package ixgo
 import (
 	"fmt"
 	"reflect"
-	"sync"
 )
 
 // TypedCallbackMaker builds a Go function value for an interpreted function of
@@ -93,7 +92,6 @@ type typedCallbackEntry struct {
 }
 
 var (
-	typedCallbackMu     sync.RWMutex
 	typedCallbackMakers = map[reflect.Type]typedCallbackEntry{}
 	typedCallbackPCs    = map[uintptr]struct{}{}
 )
@@ -116,8 +114,6 @@ func RegisterTypedCallback(typ reflect.Type, maker TypedCallbackMaker) {
 	if maker != nil {
 		pc = validateTypedCallback(typ, maker)
 	}
-	typedCallbackMu.Lock()
-	defer typedCallbackMu.Unlock()
 	if old, ok := typedCallbackMakers[typ]; ok {
 		delete(typedCallbackPCs, old.pc)
 		delete(typedCallbackMakers, typ)
@@ -176,9 +172,7 @@ func checkTypedCallbackType(typ reflect.Type, maker TypedCallbackMaker) {
 }
 
 func lookupTypedCallback(typ reflect.Type) (TypedCallbackMaker, bool) {
-	typedCallbackMu.RLock()
 	e, ok := typedCallbackMakers[typ]
-	typedCallbackMu.RUnlock()
 	if !ok {
 		return nil, false
 	}
@@ -186,8 +180,6 @@ func lookupTypedCallback(typ reflect.Type) (TypedCallbackMaker, bool) {
 }
 
 func isTypedCallbackPC(pc uintptr) bool {
-	typedCallbackMu.RLock()
 	_, ok := typedCallbackPCs[pc]
-	typedCallbackMu.RUnlock()
 	return ok
 }

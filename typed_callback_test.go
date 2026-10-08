@@ -604,16 +604,12 @@ func checkReflectBridges(t *testing.T, fn interface{}, want int) {
 
 func isolateTypedCallbacks(t testing.TB) {
 	t.Helper()
-	typedCallbackMu.Lock()
 	makers, pcs := typedCallbackMakers, typedCallbackPCs
 	typedCallbackMakers = map[reflect.Type]typedCallbackEntry{}
 	typedCallbackPCs = map[uintptr]struct{}{}
-	typedCallbackMu.Unlock()
 	t.Cleanup(func() {
-		typedCallbackMu.Lock()
 		typedCallbackMakers = makers
 		typedCallbackPCs = pcs
-		typedCallbackMu.Unlock()
 	})
 }
 
