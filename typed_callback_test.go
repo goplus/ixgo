@@ -241,9 +241,6 @@ func TestRegisterTypedCallbackValidation(t *testing.T) {
 		RegisterTypedCallback(reflect.TypeFor[int](), nil)
 	})
 	t.Run("wrong_result_type", func(t *testing.T) {
-		if !funcval.IsSupport {
-			t.Skip("requires gc function values")
-		}
 		defer func() {
 			if recover() == nil {
 				t.Fatal("expected panic")

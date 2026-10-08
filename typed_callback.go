@@ -112,12 +112,13 @@ func RegisterTypedCallback(typ reflect.Type, maker TypedCallbackMaker) {
 	if typ == nil || typ.Kind() != reflect.Func {
 		panic("ixgo: typed callback type must be a function")
 	}
-	if !funcval.IsSupport {
-		return
-	}
 	var pc uintptr
 	if maker != nil {
-		pc = validateTypedCallback(typ, maker)
+		if funcval.IsSupport {
+			pc = validateTypedCallback(typ, maker)
+		} else {
+			checkTypedCallbackType(typ, maker)
+		}
 	}
 	typedCallbackMu.Lock()
 	defer typedCallbackMu.Unlock()
@@ -128,7 +129,9 @@ func RegisterTypedCallback(typ reflect.Type, maker TypedCallbackMaker) {
 	if maker == nil {
 		return
 	}
-	typedCallbackPCs[pc] = struct{}{}
+	if pc != 0 {
+		typedCallbackPCs[pc] = struct{}{}
+	}
 	typedCallbackMakers[typ] = typedCallbackEntry{make: maker, pc: pc}
 }
 
@@ -164,6 +167,17 @@ func RegisterTypedCallbackFunc[F any](bind func(FuncVal) F) {
 	RegisterTypedCallback(typ, func(c FuncVal) reflect.Value {
 		return reflect.ValueOf(bind(c))
 	})
+}
+
+func checkTypedCallbackType(typ reflect.Type, maker TypedCallbackMaker) reflect.Value {
+	v := maker(FuncVal{})
+	if !v.IsValid() || v.Kind() != reflect.Func || v.Type() != typ {
+		panic(fmt.Sprintf("ixgo: typed callback maker returned %v, want %v", v.Type(), typ))
+	}
+	if v.IsNil() {
+		panic("ixgo: typed callback maker returned a nil function")
+	}
+	return v
 }
 
 func validateTypedCallback(typ reflect.Type, maker TypedCallbackMaker) uintptr {

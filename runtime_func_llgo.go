@@ -124,6 +124,9 @@ func (i *interpExt) loadMakeFunc(ptr unsafe.Pointer) *FuncVal {
 	if ptr == nil {
 		return nil
 	}
+	if r, ok := i.makeFuncs.Load(ptr); ok {
+		return r.(*FuncVal)
+	}
 	r, ok := i.makeFuncs.Load((*llgoClosure)(ptr).fn)
 	if !ok {
 		return nil
@@ -133,15 +136,15 @@ func (i *interpExt) loadMakeFunc(ptr unsafe.Pointer) *FuncVal {
 
 func (pfn *function) makeFunction(typ reflect.Type, env []value) reflect.Value {
 	interp := pfn.Interp
+	c := &FuncVal{interp: interp, pfn: pfn, typ: typ, env: env}
+	if v, ok := makeTypedFunction(*c, typ); ok {
+		interp.makeFuncs.Store((*reflectValue)(unsafe.Pointer(&v)).ptr, c)
+		return v
+	}
 	v := reflect.MakeFunc(typ, func(args []reflect.Value) []reflect.Value {
 		return interp.callFunctionByReflect(interp.tryDeferFrame(), pfn, typ, args, env)
 	})
 	fn := (*reflectValue)(unsafe.Pointer(&v)).ptr
-	interp.makeFuncs.Store((*llgoClosure)(fn).fn, &FuncVal{
-		interp: interp,
-		pfn:    pfn,
-		typ:    typ,
-		env:    env,
-	})
+	interp.makeFuncs.Store((*llgoClosure)(fn).fn, c)
 	return v
 }
