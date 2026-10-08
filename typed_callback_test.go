@@ -550,10 +550,10 @@ func (c resultCallback[T]) get() T {
 	return v.(T)
 }
 
-// missingFuncValCallback is large enough to decode as FuncVal without
-// embedding it, so registration must reject the method value.
+// missingFuncValCallback is at least as large as FuncVal so validation can
+// decode the receiver without reading past it. It does not embed FuncVal.
 type missingFuncValCallback struct {
-	a, b, c, d, e uintptr
+	_ [16]uintptr
 }
 
 func (missingFuncValCallback) call() {}
