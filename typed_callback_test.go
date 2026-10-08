@@ -24,6 +24,33 @@ import (
 	"github.com/visualfc/funcval"
 )
 
+type exampleCallback struct {
+	FuncVal
+}
+
+func (c exampleCallback) Int(n int) int {
+	return c.Call(n).(int)
+}
+
+func TestTypedCallbackRegisterAndCall(t *testing.T) {
+	RegisterTypedCallbackFunc(func(c FuncVal) func(int) int {
+		return exampleCallback{c}.Int
+	})
+	t.Cleanup(func() { RegisterTypedCallbackFunc[func(int) int](nil) })
+
+	_, err := RunFile("main.go", `package main
+func main() {
+	add := func(x int) int { return x + 1 }
+	if add(41) != 42 {
+		panic(add(41))
+	}
+}
+`, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestTypedCallbacks(t *testing.T) {
 	for _, mode := range []struct {
 		name string
@@ -96,20 +123,10 @@ func TestTypedCallbacks(t *testing.T) {
 }
 
 func TestTypedCallbackFunctionValues(t *testing.T) {
-	if !funcval.IsSupport {
-		t.Skip("requires gc function values")
-	}
 	i := loadCallbacks(t, 0, 0)
 	values := runFunc(t, i, "MakeCallbacks", 1).([]interface{})
-	for index, fn := range values {
-		_, reflectBridges := funcval.Get(fn)
-		want := 0
-		if index == 2 {
-			want = 1 // Reflection fallback.
-		}
-		if reflectBridges != want {
-			t.Errorf("callback %T uses %d reflection bridges; want %d", fn, reflectBridges, want)
-		}
+	for _, fn := range values {
+		checkReflectBridges(t, fn, 0)
 		c := i.getMakeFuncVal(fn)
 		if c == nil || c.interp != i || c.pfn == nil || len(c.env) != 1 {
 			t.Fatalf("callback %T lost its interpreter, function or closure environment", fn)
@@ -126,6 +143,142 @@ func TestTypedCallbackFunctionValues(t *testing.T) {
 			t.Errorf("value %T identified as an interpreted function", fn)
 		}
 	}
+}
+
+func TestTypedCallbackDefaultMakeFunc(t *testing.T) {
+	isolateTypedCallbacks(t)
+	i := newCallbackInterp(t, 0, 0)
+	values := runFunc(t, i, "MakeCallbacks", 1).([]interface{})
+	for index, fn := range values {
+		want := 1
+		if index == 0 {
+			want = 0 // func() is built in.
+		}
+		checkReflectBridges(t, fn, want)
+		c := i.getMakeFuncVal(fn)
+		if c == nil || c.interp != i || c.pfn == nil || len(c.env) != 1 {
+			t.Fatalf("callback %T lost its interpreter, function or closure environment", fn)
+		}
+	}
+	left := callbackSet{values[0].(func()), values[1].(func() bool), values[2].(func() int)}
+	if left.even() {
+		t.Fatal("even(1) = true")
+	}
+	left.increment()
+	if !left.even() || left.count() != 2 {
+		t.Fatalf("after increment: even = %v, count = %d", left.even(), left.count())
+	}
+}
+
+func TestTypedCallbackWithArgs(t *testing.T) {
+	t.Run("default_makefunc", func(t *testing.T) {
+		isolateTypedCallbacks(t)
+		i := newCallbackInterp(t, 0, 0)
+		values := runFunc(t, i, "MakeArgCallbacks", 1).([]interface{})
+		for _, fn := range values {
+			checkReflectBridges(t, fn, 1)
+		}
+		add := values[0].(func(int))
+		sum := values[1].(func(int) int)
+		even := values[2].(func(int) bool)
+		add(3)
+		if got := sum(2); got != 6 {
+			t.Fatalf("func(int) int = %d; want 6", got)
+		}
+		if even(1) {
+			t.Fatal("func(int) bool(1) = true; want false")
+		}
+	})
+	t.Run("registered", func(t *testing.T) {
+		enableArgCallbacks(t)
+		i := loadCallbacks(t, EnableCachedReg, 0)
+		values := runFunc(t, i, "MakeArgCallbacks", 1).([]interface{})
+		for _, fn := range values {
+			checkReflectBridges(t, fn, 0)
+			c := i.getMakeFuncVal(fn)
+			if c == nil || c.interp != i || c.pfn == nil || len(c.env) != 1 {
+				t.Fatalf("callback %T lost its interpreter, function or closure environment", fn)
+			}
+		}
+		add := values[0].(func(int))
+		sum := values[1].(func(int) int)
+		even := values[2].(func(int) bool)
+		add(3)
+		if got := sum(2); got != 6 {
+			t.Fatalf("func(int) int = %d; want 6", got)
+		}
+		if even(1) {
+			t.Fatal("native func(int) bool lost its environment")
+		}
+		runFunc(t, i, "InvokeInt", add, 4)
+		if got := runFunc(t, i, "InvokeIntInt", sum, 1).(int); got != 11 {
+			t.Fatalf("interpreted func(int) int = %d; want 11", got)
+		}
+		if !runFunc(t, i, "InvokeIntBool", even, 1).(bool) {
+			t.Fatal("interpreted func(int) bool lost its environment")
+		}
+		native := 0
+		runFunc(t, i, "InvokeInt", func(x int) { native = x }, 9)
+		if native != 9 {
+			t.Fatalf("native func(int) = %d; want 9", native)
+		}
+		if got := runFunc(t, i, "InvokeIntInt", func(x int) int { return x + 1 }, 41).(int); got != 42 {
+			t.Fatalf("native func(int) int = %d; want 42", got)
+		}
+		if !runFunc(t, i, "InvokeIntBool", func(x int) bool { return x == 7 }, 7).(bool) {
+			t.Fatal("native func(int) bool fallback failed")
+		}
+	})
+}
+
+func TestRegisterTypedCallbackValidation(t *testing.T) {
+	t.Run("not_a_function", func(t *testing.T) {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("expected panic")
+			}
+		}()
+		RegisterTypedCallback(reflect.TypeFor[int](), nil)
+	})
+	t.Run("wrong_result_type", func(t *testing.T) {
+		if !funcval.IsSupport {
+			t.Skip("requires gc function values")
+		}
+		defer func() {
+			if recover() == nil {
+				t.Fatal("expected panic")
+			}
+		}()
+		RegisterTypedCallback(reflect.TypeFor[func()](), func(FuncVal) reflect.Value {
+			return reflect.ValueOf(func() bool { return false })
+		})
+	})
+	t.Run("make_func", func(t *testing.T) {
+		if !funcval.IsSupport {
+			t.Skip("requires gc function values")
+		}
+		defer func() {
+			if recover() == nil {
+				t.Fatal("expected panic")
+			}
+		}()
+		RegisterTypedCallbackFunc(func(FuncVal) func() {
+			return func() {}
+		})
+	})
+	t.Run("missing_funcval", func(t *testing.T) {
+		if !funcval.IsSupport {
+			t.Skip("requires gc function values")
+		}
+		defer func() {
+			if recover() == nil {
+				t.Fatal("expected panic")
+			}
+		}()
+		RegisterTypedCallbackFunc(func(FuncVal) func() {
+			return missingFuncValCallback{}.call
+		})
+	})
 }
 
 func TestTypedCallbackExternalMakeFunc(t *testing.T) {
@@ -366,7 +519,113 @@ type callbackSet struct {
 	count     func() int
 }
 
+type argCallback struct {
+	FuncVal
+}
+
+func (c argCallback) Int(n int) {
+	c.CallDiscard(n)
+}
+
+func (c argCallback) IntRet(n int) int {
+	v := c.Call(n)
+	if v == nil {
+		return 0
+	}
+	return v.(int)
+}
+
+func (c argCallback) IntBool(n int) bool {
+	v := c.Call(n)
+	return v != nil && v.(bool)
+}
+
+type resultCallback[T any] struct {
+	FuncVal
+}
+
+func (c resultCallback[T]) get() T {
+	v := c.Call()
+	if v == nil {
+		var zero T
+		return zero
+	}
+	return v.(T)
+}
+
+// missingFuncValCallback is at least as large as FuncVal so validation can
+// decode the receiver without reading past it. It does not embed FuncVal.
+type missingFuncValCallback struct {
+	_ [16]uintptr
+}
+
+func (missingFuncValCallback) call() {}
+
+func checkReflectBridges(t *testing.T, fn interface{}, want int) {
+	t.Helper()
+	if !funcval.IsSupport {
+		return
+	}
+	_, n := funcval.Get(fn)
+	if n != want {
+		t.Errorf("callback %T uses %d reflection bridges; want %d", fn, n, want)
+	}
+}
+
+func isolateTypedCallbacks(t testing.TB) {
+	t.Helper()
+	typedCallbackMu.Lock()
+	makers, pcs := typedCallbackMakers, typedCallbackPCs
+	typedCallbackMakers = map[reflect.Type]typedCallbackEntry{}
+	typedCallbackPCs = map[uintptr]struct{}{}
+	typedCallbackMu.Unlock()
+	t.Cleanup(func() {
+		typedCallbackMu.Lock()
+		typedCallbackMakers = makers
+		typedCallbackPCs = pcs
+		typedCallbackMu.Unlock()
+	})
+}
+
+func enableTypedResults(t testing.TB) {
+	t.Helper()
+	RegisterTypedCallbackFunc(func(c FuncVal) func() bool {
+		return resultCallback[bool]{c}.get
+	})
+	RegisterTypedCallbackFunc(func(c FuncVal) func() int {
+		return resultCallback[int]{c}.get
+	})
+	t.Cleanup(func() {
+		RegisterTypedCallbackFunc[func() bool](nil)
+		RegisterTypedCallbackFunc[func() int](nil)
+	})
+}
+
+func enableArgCallbacks(t testing.TB) {
+	t.Helper()
+	RegisterTypedCallbackFunc(func(c FuncVal) func(int) {
+		return argCallback{c}.Int
+	})
+	RegisterTypedCallbackFunc(func(c FuncVal) func(int) int {
+		return argCallback{c}.IntRet
+	})
+	RegisterTypedCallbackFunc(func(c FuncVal) func(int) bool {
+		return argCallback{c}.IntBool
+	})
+	t.Cleanup(func() {
+		RegisterTypedCallbackFunc[func(int)](nil)
+		RegisterTypedCallbackFunc[func(int) int](nil)
+		RegisterTypedCallbackFunc[func(int) bool](nil)
+	})
+}
+
 func loadCallbacks(t testing.TB, mode Mode, threshold int) *Interp {
+	t.Helper()
+	enableTypedResults(t)
+	return newCallbackInterp(t, mode, threshold)
+}
+
+func newCallbackInterp(t testing.TB, mode Mode, threshold int) *Interp {
 	t.Helper()
 	ctx := NewContext(mode | SupportMultipleInterp)
 	ctx.SetLeastCallForEnablePool(threshold)
@@ -436,8 +695,20 @@ func MakeCallbacks(start int) []interface{} {
 	}
 }
 
+func MakeArgCallbacks(start int) []interface{} {
+	n := start
+	return []interface{}{
+		func(x int) { n += x },
+		func(x int) int { n += x; return n },
+		func(x int) bool { return (n+x)%2 == 0 },
+	}
+}
+
 func InvokeVoid(f func()) { f() }
 func InvokeBool(f func() bool) bool { return f() }
+func InvokeInt(f func(int), x int) { f(x) }
+func InvokeIntInt(f func(int) int, x int) int { return f(x) }
+func InvokeIntBool(f func(int) bool, x int) bool { return f(x) }
 
 func Reentrant(invoke func(func()), start int) func() bool {
 	n := start

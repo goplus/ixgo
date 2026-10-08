@@ -110,17 +110,17 @@ type llgoClosure struct {
 	env unsafe.Pointer
 }
 
-func (i *interpExt) getMakeFuncValue(v reflect.Value) *makeFuncVal {
+func (i *interpExt) getMakeFuncValue(v reflect.Value) *FuncVal {
 	pv := (*reflectValue)(unsafe.Pointer(&v))
 	return i.loadMakeFunc(pv.ptr)
 }
 
-func (i *interpExt) getMakeFuncVal(v interface{}) *makeFuncVal {
+func (i *interpExt) getMakeFuncVal(v interface{}) *FuncVal {
 	e := (*emptyInterface)(unsafe.Pointer(&v))
 	return i.loadMakeFunc(e.word)
 }
 
-func (i *interpExt) loadMakeFunc(ptr unsafe.Pointer) *makeFuncVal {
+func (i *interpExt) loadMakeFunc(ptr unsafe.Pointer) *FuncVal {
 	if ptr == nil {
 		return nil
 	}
@@ -128,7 +128,7 @@ func (i *interpExt) loadMakeFunc(ptr unsafe.Pointer) *makeFuncVal {
 	if !ok {
 		return nil
 	}
-	return r.(*makeFuncVal)
+	return r.(*FuncVal)
 }
 
 func (pfn *function) makeFunction(typ reflect.Type, env []value) reflect.Value {
@@ -137,16 +137,11 @@ func (pfn *function) makeFunction(typ reflect.Type, env []value) reflect.Value {
 		return interp.callFunctionByReflect(interp.tryDeferFrame(), pfn, typ, args, env)
 	})
 	fn := (*reflectValue)(unsafe.Pointer(&v)).ptr
-	interp.makeFuncs.Store((*llgoClosure)(fn).fn, &makeFuncVal{
+	interp.makeFuncs.Store((*llgoClosure)(fn).fn, &FuncVal{
 		interp: interp,
 		pfn:    pfn,
+		typ:    typ,
 		env:    env,
 	})
 	return v
-}
-
-type makeFuncVal struct {
-	interp *Interp
-	pfn    *function
-	env    []value
 }

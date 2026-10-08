@@ -97,67 +97,33 @@ func dynamicFunCall(interp *Interp, iv register, ir register, ia []register) fun
 }
 
 func (pfn *function) makeFunction(typ reflect.Type, env []value) reflect.Value {
-	c := makeFuncVal{interp: pfn.Interp, pfn: pfn, typ: typ, env: env}
+	c := FuncVal{interp: pfn.Interp, pfn: pfn, typ: typ, env: env}
 	if supportFuncVal {
-		switch typ {
-		case callbackVoidType:
-			return reflect.ValueOf(c.callVoid)
-		case callbackBoolType:
-			return reflect.ValueOf(c.callBool)
+		if v, ok := makeTypedFunction(c, typ); ok {
+			return v
 		}
 	}
 	return reflect.MakeFunc(typ, c.callReflect)
 }
 
-type makeFuncVal struct {
-	interp *Interp
-	pfn    *function
-	typ    reflect.Type
-	env    []value
-}
-
-var (
-	callbackVoidType  = reflect.TypeFor[func()]()
-	callbackBoolType  = reflect.TypeFor[func() bool]()
-	callbackVoidPC    = reflect.ValueOf(makeFuncVal{}.callVoid).Pointer()
-	callbackBoolPC    = reflect.ValueOf(makeFuncVal{}.callBool).Pointer()
-	callbackReflectPC = reflect.ValueOf(makeFuncVal{}.callReflect).Pointer()
-)
-
-func (c makeFuncVal) callVoid() {
-	c.interp.callFunctionDiscardsResult(c.interp.tryDeferFrame(), c.pfn, nil, c.env)
-}
-
-func (c makeFuncVal) callBool() bool {
-	result := c.interp.callFunction(c.interp.tryDeferFrame(), c.pfn, nil, c.env)
-	return result != nil && result.(bool)
-}
-
-func (c makeFuncVal) callReflect(args []reflect.Value) []reflect.Value {
-	return c.interp.callFunctionByReflect(c.interp.tryDeferFrame(), c.pfn, c.typ, args, c.env)
-}
+var callbackReflectPC = reflect.ValueOf(FuncVal{}.callReflect).Pointer()
 
 type interpExt struct{}
 
 // Callers must check interpreter ownership.
-func (*interpExt) getMakeFuncVal(fn interface{}) *makeFuncVal {
+func (*interpExt) getMakeFuncVal(fn interface{}) *FuncVal {
 	v := reflect.ValueOf(fn)
 	if v.Kind() != reflect.Func || v.IsNil() {
 		return nil
 	}
 	fv, n := funcval.Get(fn)
 	switch {
-	case n == 0 && (fv.Fn == callbackVoidPC || fv.Fn == callbackBoolPC):
+	case n == 0 && (fv.Fn == callbackVoidPC || isTypedCallbackPC(fv.Fn)):
 		// Direct method value.
 	case n == 1 && fv.Fn == callbackReflectPC:
 		// One reflect.MakeFunc bridge.
 	default:
 		return nil
 	}
-	// gc ABI: FuncVal is one word, followed by the receiver.
-	// The call methods must retain value receivers.
-	return &(*struct {
-		funcval.FuncVal
-		receiver makeFuncVal
-	})(unsafe.Pointer(fv)).receiver
+	return typedCallbackReceiver(fv)
 }
