@@ -50,5 +50,6 @@ Named types (for example `type Action func()`) stay on `reflect.MakeFunc`
 unless the host registers them.
 
 A later registration for the same signature replaces an earlier one. Passing a
-nil maker to `RegisterTypedCallback` or `RegisterTypedCallbackFunc` removes the
-registration.
+nil maker to `RegisterTypedCallback`, or a nil bind to
+`RegisterTypedCallbackFunc`, removes the registration. Do not unregister or
+replace a signature while function values of that type are still in use.

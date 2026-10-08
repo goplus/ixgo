@@ -36,7 +36,6 @@ func TestTypedCallbackRegisterAndCall(t *testing.T) {
 	RegisterTypedCallbackFunc(func(c FuncVal) func(int) int {
 		return exampleCallback{c}.Int
 	})
-	t.Cleanup(func() { RegisterTypedCallbackFunc[func(int) int](nil) })
 
 	_, err := RunFile("main.go", `package main
 func main() {
@@ -232,6 +231,14 @@ func TestTypedCallbackWithArgs(t *testing.T) {
 }
 
 func TestRegisterTypedCallbackValidation(t *testing.T) {
+	t.Run("nil_type", func(t *testing.T) {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("expected panic")
+			}
+		}()
+		RegisterTypedCallback(nil, nil)
+	})
 	t.Run("not_a_function", func(t *testing.T) {
 		defer func() {
 			if recover() == nil {
@@ -240,10 +247,17 @@ func TestRegisterTypedCallbackValidation(t *testing.T) {
 		}()
 		RegisterTypedCallback(reflect.TypeFor[int](), nil)
 	})
+	t.Run("nil_function", func(t *testing.T) {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("expected panic")
+			}
+		}()
+		RegisterTypedCallback(reflect.TypeFor[func() int](), func(FuncVal) reflect.Value {
+			return reflect.ValueOf((func() int)(nil))
+		})
+	})
 	t.Run("wrong_result_type", func(t *testing.T) {
-		if !funcval.IsSupport {
-			t.Skip("requires gc function values")
-		}
 		defer func() {
 			if recover() == nil {
 				t.Fatal("expected panic")
@@ -574,16 +588,12 @@ func checkReflectBridges(t *testing.T, fn interface{}, want int) {
 
 func isolateTypedCallbacks(t testing.TB) {
 	t.Helper()
-	typedCallbackMu.Lock()
 	makers, pcs := typedCallbackMakers, typedCallbackPCs
 	typedCallbackMakers = map[reflect.Type]typedCallbackEntry{}
 	typedCallbackPCs = map[uintptr]struct{}{}
-	typedCallbackMu.Unlock()
 	t.Cleanup(func() {
-		typedCallbackMu.Lock()
 		typedCallbackMakers = makers
 		typedCallbackPCs = pcs
-		typedCallbackMu.Unlock()
 	})
 }
 
@@ -594,10 +604,6 @@ func enableTypedResults(t testing.TB) {
 	})
 	RegisterTypedCallbackFunc(func(c FuncVal) func() int {
 		return resultCallback[int]{c}.get
-	})
-	t.Cleanup(func() {
-		RegisterTypedCallbackFunc[func() bool](nil)
-		RegisterTypedCallbackFunc[func() int](nil)
 	})
 }
 
@@ -611,11 +617,6 @@ func enableArgCallbacks(t testing.TB) {
 	})
 	RegisterTypedCallbackFunc(func(c FuncVal) func(int) bool {
 		return argCallback{c}.IntBool
-	})
-	t.Cleanup(func() {
-		RegisterTypedCallbackFunc[func(int)](nil)
-		RegisterTypedCallbackFunc[func(int) int](nil)
-		RegisterTypedCallbackFunc[func(int) bool](nil)
 	})
 }
 

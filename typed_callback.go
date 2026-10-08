@@ -19,10 +19,6 @@ package ixgo
 import (
 	"fmt"
 	"reflect"
-	"sync"
-	"unsafe"
-
-	"github.com/visualfc/funcval"
 )
 
 // TypedCallbackMaker builds a Go function value for an interpreted function of
@@ -81,22 +77,21 @@ var (
 )
 
 func makeTypedFunction(c FuncVal, typ reflect.Type) (reflect.Value, bool) {
-	if maker, ok := lookupTypedCallback(typ); ok {
-		return maker(c), true
-	}
 	if typ == callbackVoidType {
 		return reflect.ValueOf(voidCallback{c}.call), true
+	}
+	if maker, ok := lookupTypedCallback(typ); ok {
+		return maker(c), true
 	}
 	return reflect.Value{}, false
 }
 
 type typedCallbackEntry struct {
-	make TypedCallbackMaker
-	pc   uintptr
+	maker TypedCallbackMaker
+	pc    uintptr
 }
 
 var (
-	typedCallbackMu     sync.RWMutex
 	typedCallbackMakers = map[reflect.Type]typedCallbackEntry{}
 	typedCallbackPCs    = map[uintptr]struct{}{}
 )
@@ -104,23 +99,21 @@ var (
 // RegisterTypedCallback registers a maker for functions of type typ.
 // Later registrations for the same type replace earlier ones.
 // Passing a nil maker removes the registration.
+// Do not unregister or replace a signature while function values of that
+// type are still in use.
 //
 // The maker must return a method value of type typ whose receiver embeds
-// FuncVal as its first field. Registration panics if the maker does not
-// satisfy that contract.
+// FuncVal as its first field. On gc, registration panics if the maker does
+// not satisfy that contract. func() is built in and is not taken from the
+// registry.
 func RegisterTypedCallback(typ reflect.Type, maker TypedCallbackMaker) {
 	if typ == nil || typ.Kind() != reflect.Func {
 		panic("ixgo: typed callback type must be a function")
-	}
-	if !funcval.IsSupport {
-		return
 	}
 	var pc uintptr
 	if maker != nil {
 		pc = validateTypedCallback(typ, maker)
 	}
-	typedCallbackMu.Lock()
-	defer typedCallbackMu.Unlock()
 	if old, ok := typedCallbackMakers[typ]; ok {
 		delete(typedCallbackPCs, old.pc)
 		delete(typedCallbackMakers, typ)
@@ -128,8 +121,10 @@ func RegisterTypedCallback(typ reflect.Type, maker TypedCallbackMaker) {
 	if maker == nil {
 		return
 	}
-	typedCallbackPCs[pc] = struct{}{}
-	typedCallbackMakers[typ] = typedCallbackEntry{make: maker, pc: pc}
+	if pc != 0 {
+		typedCallbackPCs[pc] = struct{}{}
+	}
+	typedCallbackMakers[typ] = typedCallbackEntry{maker: maker, pc: pc}
 }
 
 // RegisterTypedCallbackFunc registers a typed callback for signature F.
@@ -166,53 +161,25 @@ func RegisterTypedCallbackFunc[F any](bind func(FuncVal) F) {
 	})
 }
 
-func validateTypedCallback(typ reflect.Type, maker TypedCallbackMaker) uintptr {
-	sentinel := new(Interp)
-	fn := new(function)
-	env := []value{sentinel}
-	v := maker(FuncVal{interp: sentinel, pfn: fn, typ: typ, env: env})
+func checkTypedCallbackType(typ reflect.Type, maker TypedCallbackMaker) {
+	v := maker(FuncVal{})
 	if !v.IsValid() || v.Kind() != reflect.Func || v.Type() != typ {
 		panic(fmt.Sprintf("ixgo: typed callback maker returned %v, want %v", v.Type(), typ))
 	}
 	if v.IsNil() {
 		panic("ixgo: typed callback maker returned a nil function")
 	}
-	fv, n := funcval.Get(v.Interface())
-	if n != 0 {
-		panic("ixgo: typed callback maker must return a method value")
-	}
-	got := typedCallbackReceiver(fv)
-	if got == nil || got.interp != sentinel || got.pfn != fn || got.typ != typ || len(got.env) != 1 || got.env[0] != sentinel {
-		panic("ixgo: typed callback receiver must embed ixgo.FuncVal as its first field")
-	}
-	return fv.Fn
 }
 
 func lookupTypedCallback(typ reflect.Type) (TypedCallbackMaker, bool) {
-	typedCallbackMu.RLock()
 	e, ok := typedCallbackMakers[typ]
-	typedCallbackMu.RUnlock()
 	if !ok {
 		return nil, false
 	}
-	return e.make, true
+	return e.maker, true
 }
 
 func isTypedCallbackPC(pc uintptr) bool {
-	typedCallbackMu.RLock()
 	_, ok := typedCallbackPCs[pc]
-	typedCallbackMu.RUnlock()
 	return ok
-}
-
-func typedCallbackReceiver(fv *funcval.FuncVal) *FuncVal {
-	if fv == nil {
-		return nil
-	}
-	// gc ABI: FuncVal is one word, followed by the receiver.
-	// The call methods must retain value receivers.
-	return &(*struct {
-		funcval.FuncVal
-		receiver FuncVal
-	})(unsafe.Pointer(fv)).receiver
 }
