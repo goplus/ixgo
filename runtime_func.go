@@ -4,6 +4,7 @@
 package ixgo
 
 import (
+	"fmt"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -126,4 +127,42 @@ func (*interpExt) getMakeFuncVal(fn interface{}) *FuncVal {
 		return nil
 	}
 	return typedCallbackReceiver(fv)
+}
+
+func validateTypedCallback(typ reflect.Type, maker TypedCallbackMaker) uintptr {
+	if !funcval.IsSupport {
+		checkTypedCallbackType(typ, maker)
+		return 0
+	}
+	sentinel := new(Interp)
+	fn := new(function)
+	env := []value{sentinel}
+	v := maker(FuncVal{interp: sentinel, pfn: fn, typ: typ, env: env})
+	if !v.IsValid() || v.Kind() != reflect.Func || v.Type() != typ {
+		panic(fmt.Sprintf("ixgo: typed callback maker returned %v, want %v", v.Type(), typ))
+	}
+	if v.IsNil() {
+		panic("ixgo: typed callback maker returned a nil function")
+	}
+	fv, n := funcval.Get(v.Interface())
+	if n != 0 {
+		panic("ixgo: typed callback maker must return a method value")
+	}
+	got := typedCallbackReceiver(fv)
+	if got == nil || got.interp != sentinel || got.pfn != fn || got.typ != typ || len(got.env) != 1 || got.env[0] != sentinel {
+		panic("ixgo: typed callback receiver must embed ixgo.FuncVal as its first field")
+	}
+	return fv.Fn
+}
+
+func typedCallbackReceiver(fv *funcval.FuncVal) *FuncVal {
+	if fv == nil {
+		return nil
+	}
+	// gc ABI: FuncVal is one word, followed by the receiver.
+	// The call methods must retain value receivers.
+	return &(*struct {
+		funcval.FuncVal
+		receiver FuncVal
+	})(unsafe.Pointer(fv)).receiver
 }

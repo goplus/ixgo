@@ -148,3 +148,8 @@ func (pfn *function) makeFunction(typ reflect.Type, env []value) reflect.Value {
 	interp.makeFuncs.Store((*llgoClosure)(fn).fn, c)
 	return v
 }
+
+func validateTypedCallback(typ reflect.Type, maker TypedCallbackMaker) uintptr {
+	checkTypedCallbackType(typ, maker)
+	return 0
+}

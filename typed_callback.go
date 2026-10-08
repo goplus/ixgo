@@ -111,7 +111,7 @@ func RegisterTypedCallback(typ reflect.Type, maker TypedCallbackMaker) {
 	}
 	var pc uintptr
 	if maker != nil {
-		pc = inspectTypedCallback(typ, maker)
+		pc = validateTypedCallback(typ, maker)
 	}
 	typedCallbackMu.Lock()
 	defer typedCallbackMu.Unlock()
