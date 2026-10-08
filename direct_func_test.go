@@ -25,15 +25,15 @@ import (
 )
 
 type exampleCallback struct {
-	FuncVal
+	DirectFuncVal
 }
 
 func (c exampleCallback) Int(n int) int {
 	return c.Call(n).(int)
 }
 
-func TestTypedCallbackRegisterAndCall(t *testing.T) {
-	RegisterTypedCallbackFunc(func(c FuncVal) func(int) int {
+func TestDirectFuncRegisterAndCall(t *testing.T) {
+	RegisterDirectFuncFor(func(c DirectFuncVal) func(int) int {
 		return exampleCallback{c}.Int
 	})
 
@@ -50,7 +50,7 @@ func main() {
 	}
 }
 
-func TestTypedCallbacks(t *testing.T) {
+func TestDirectFuncs(t *testing.T) {
 	for _, mode := range []struct {
 		name string
 		mode Mode
@@ -121,7 +121,7 @@ func TestTypedCallbacks(t *testing.T) {
 	}
 }
 
-func TestTypedCallbackFunctionValues(t *testing.T) {
+func TestDirectFuncFunctionValues(t *testing.T) {
 	i := loadCallbacks(t, 0, 0)
 	values := runFunc(t, i, "MakeCallbacks", 1).([]interface{})
 	for _, fn := range values {
@@ -144,8 +144,8 @@ func TestTypedCallbackFunctionValues(t *testing.T) {
 	}
 }
 
-func TestTypedCallbackDefaultMakeFunc(t *testing.T) {
-	isolateTypedCallbacks(t)
+func TestDirectFuncDefaultMakeFunc(t *testing.T) {
+	isolateDirectFuncs(t)
 	i := newCallbackInterp(t, 0, 0)
 	values := runFunc(t, i, "MakeCallbacks", 1).([]interface{})
 	for index, fn := range values {
@@ -169,9 +169,9 @@ func TestTypedCallbackDefaultMakeFunc(t *testing.T) {
 	}
 }
 
-func TestTypedCallbackWithArgs(t *testing.T) {
+func TestDirectFuncWithArgs(t *testing.T) {
 	t.Run("default_makefunc", func(t *testing.T) {
-		isolateTypedCallbacks(t)
+		isolateDirectFuncs(t)
 		i := newCallbackInterp(t, 0, 0)
 		values := runFunc(t, i, "MakeArgCallbacks", 1).([]interface{})
 		for _, fn := range values {
@@ -230,14 +230,14 @@ func TestTypedCallbackWithArgs(t *testing.T) {
 	})
 }
 
-func TestRegisterTypedCallbackValidation(t *testing.T) {
+func TestRegisterDirectFuncValidation(t *testing.T) {
 	t.Run("nil_type", func(t *testing.T) {
 		defer func() {
 			if recover() == nil {
 				t.Fatal("expected panic")
 			}
 		}()
-		RegisterTypedCallback(nil, nil)
+		RegisterDirectFunc(nil, nil)
 	})
 	t.Run("not_a_function", func(t *testing.T) {
 		defer func() {
@@ -245,7 +245,7 @@ func TestRegisterTypedCallbackValidation(t *testing.T) {
 				t.Fatal("expected panic")
 			}
 		}()
-		RegisterTypedCallback(reflect.TypeFor[int](), nil)
+		RegisterDirectFunc(reflect.TypeFor[int](), nil)
 	})
 	t.Run("nil_function", func(t *testing.T) {
 		defer func() {
@@ -253,7 +253,7 @@ func TestRegisterTypedCallbackValidation(t *testing.T) {
 				t.Fatal("expected panic")
 			}
 		}()
-		RegisterTypedCallback(reflect.TypeFor[func() int](), func(FuncVal) reflect.Value {
+		RegisterDirectFunc(reflect.TypeFor[func() int](), func(DirectFuncVal) reflect.Value {
 			return reflect.ValueOf((func() int)(nil))
 		})
 	})
@@ -263,7 +263,7 @@ func TestRegisterTypedCallbackValidation(t *testing.T) {
 				t.Fatal("expected panic")
 			}
 		}()
-		RegisterTypedCallback(reflect.TypeFor[func()](), func(FuncVal) reflect.Value {
+		RegisterDirectFunc(reflect.TypeFor[func()](), func(DirectFuncVal) reflect.Value {
 			return reflect.ValueOf(func() bool { return false })
 		})
 	})
@@ -276,7 +276,7 @@ func TestRegisterTypedCallbackValidation(t *testing.T) {
 				t.Fatal("expected panic")
 			}
 		}()
-		RegisterTypedCallbackFunc(func(FuncVal) func() {
+		RegisterDirectFuncFor(func(DirectFuncVal) func() {
 			return func() {}
 		})
 	})
@@ -289,13 +289,13 @@ func TestRegisterTypedCallbackValidation(t *testing.T) {
 				t.Fatal("expected panic")
 			}
 		}()
-		RegisterTypedCallbackFunc(func(FuncVal) func() {
-			return missingFuncValCallback{}.call
+		RegisterDirectFuncFor(func(DirectFuncVal) func() {
+			return missingDirectFuncVal{}.call
 		})
 	})
 }
 
-func TestTypedCallbackExternalMakeFunc(t *testing.T) {
+func TestDirectFuncExternalMakeFunc(t *testing.T) {
 	interp := loadCallbacks(t, EnableCachedReg, 0)
 	calls := 0
 	void := reflect.MakeFunc(reflect.TypeFor[func()](), func([]reflect.Value) []reflect.Value {
@@ -316,7 +316,7 @@ func TestTypedCallbackExternalMakeFunc(t *testing.T) {
 	}
 }
 
-func TestTypedCallbacksConcurrent(t *testing.T) {
+func TestDirectFuncsConcurrent(t *testing.T) {
 	const workers, calls = 8, 100
 	interp := loadCallbacks(t, EnableCachedReg, 0)
 	callbacks := make([]callbackSet, workers)
@@ -346,7 +346,7 @@ func TestTypedCallbacksConcurrent(t *testing.T) {
 	}
 }
 
-func TestTypedCallbackRecover(t *testing.T) {
+func TestDirectFuncRecover(t *testing.T) {
 	interp := loadCallbacks(t, EnableCachedReg, 0)
 	for _, value := range []interface{}{"panic", nil} {
 		marks := 0
@@ -479,7 +479,7 @@ func TestCallbackResults(t *testing.T) {
 	}
 }
 
-func BenchmarkTypedCallback(b *testing.B) {
+func BenchmarkDirectFunc(b *testing.B) {
 	for _, name := range []string{"void", "bool", "create_void", "create_bool", "create_int", "dynamic_void_128", "dynamic_bool_128", "stop"} {
 		b.Run(name, func(b *testing.B) {
 			interp := loadCallbacks(b, EnableCachedReg, 0)
@@ -534,7 +534,7 @@ type callbackSet struct {
 }
 
 type argCallback struct {
-	FuncVal
+	DirectFuncVal
 }
 
 func (c argCallback) Int(n int) {
@@ -555,7 +555,7 @@ func (c argCallback) IntBool(n int) bool {
 }
 
 type resultCallback[T any] struct {
-	FuncVal
+	DirectFuncVal
 }
 
 func (c resultCallback[T]) get() T {
@@ -567,13 +567,13 @@ func (c resultCallback[T]) get() T {
 	return v.(T)
 }
 
-// missingFuncValCallback is at least as large as FuncVal so validation can
-// decode the receiver without reading past it. It does not embed FuncVal.
-type missingFuncValCallback struct {
+// missingDirectFuncVal is at least as large as DirectFuncVal so validation can
+// decode the receiver without reading past it. It does not embed DirectFuncVal.
+type missingDirectFuncVal struct {
 	_ [16]uintptr
 }
 
-func (missingFuncValCallback) call() {}
+func (missingDirectFuncVal) call() {}
 
 func checkReflectBridges(t *testing.T, fn interface{}, want int) {
 	t.Helper()
@@ -586,43 +586,43 @@ func checkReflectBridges(t *testing.T, fn interface{}, want int) {
 	}
 }
 
-func isolateTypedCallbacks(t testing.TB) {
+func isolateDirectFuncs(t testing.TB) {
 	t.Helper()
-	makers, pcs := typedCallbackMakers, typedCallbackPCs
-	typedCallbackMakers = map[reflect.Type]typedCallbackEntry{}
-	typedCallbackPCs = map[uintptr]struct{}{}
+	makers, pcs := directFuncMakers, directFuncPCs
+	directFuncMakers = map[reflect.Type]directFuncEntry{}
+	directFuncPCs = map[uintptr]struct{}{}
 	t.Cleanup(func() {
-		typedCallbackMakers = makers
-		typedCallbackPCs = pcs
+		directFuncMakers = makers
+		directFuncPCs = pcs
 	})
 }
 
-func enableTypedResults(t testing.TB) {
+func enableDirectFuncResults(t testing.TB) {
 	t.Helper()
-	RegisterTypedCallbackFunc(func(c FuncVal) func() bool {
+	RegisterDirectFuncFor(func(c DirectFuncVal) func() bool {
 		return resultCallback[bool]{c}.get
 	})
-	RegisterTypedCallbackFunc(func(c FuncVal) func() int {
+	RegisterDirectFuncFor(func(c DirectFuncVal) func() int {
 		return resultCallback[int]{c}.get
 	})
 }
 
 func enableArgCallbacks(t testing.TB) {
 	t.Helper()
-	RegisterTypedCallbackFunc(func(c FuncVal) func(int) {
+	RegisterDirectFuncFor(func(c DirectFuncVal) func(int) {
 		return argCallback{c}.Int
 	})
-	RegisterTypedCallbackFunc(func(c FuncVal) func(int) int {
+	RegisterDirectFuncFor(func(c DirectFuncVal) func(int) int {
 		return argCallback{c}.IntRet
 	})
-	RegisterTypedCallbackFunc(func(c FuncVal) func(int) bool {
+	RegisterDirectFuncFor(func(c DirectFuncVal) func(int) bool {
 		return argCallback{c}.IntBool
 	})
 }
 
 func loadCallbacks(t testing.TB, mode Mode, threshold int) *Interp {
 	t.Helper()
-	enableTypedResults(t)
+	enableDirectFuncResults(t)
 	return newCallbackInterp(t, mode, threshold)
 }
 
@@ -630,7 +630,7 @@ func newCallbackInterp(t testing.TB, mode Mode, threshold int) *Interp {
 	t.Helper()
 	ctx := NewContext(mode | SupportMultipleInterp)
 	ctx.SetLeastCallForEnablePool(threshold)
-	interp, err := ctx.LoadInterp("callbacks.go", typedCallbackSource)
+	interp, err := ctx.LoadInterp("callbacks.go", directFuncSource)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -680,7 +680,7 @@ func checkAbortCall(t *testing.T, fn interface{}, want []interface{}) {
 	}
 }
 
-const typedCallbackSource = `package main
+const directFuncSource = `package main
 
 import (
 	"reflect"

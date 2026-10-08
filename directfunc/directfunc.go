@@ -14,18 +14,18 @@
  * limitations under the License.
  */
 
-// Package typed registers typed callbacks for func() T with common result types.
+// Package directfunc registers DirectFunc wrappers for func() T with common result types.
 //
-//	import _ "github.com/goplus/ixgo/typed"
+//	import _ "github.com/goplus/ixgo/directfunc"
 //
 // func() is built into ixgo. Signatures with parameters are not registered
-// here. Register those from the host with ixgo.RegisterTypedCallbackFunc.
-package typed
+// here. Register those from the host with ixgo.RegisterDirectFuncFor.
+package directfunc
 
 import "github.com/goplus/ixgo"
 
 type result[T any] struct {
-	ixgo.FuncVal
+	ixgo.DirectFuncVal
 }
 
 func (c result[T]) get() T {
@@ -33,7 +33,7 @@ func (c result[T]) get() T {
 }
 
 type resultError struct {
-	ixgo.FuncVal
+	ixgo.DirectFuncVal
 }
 
 func (c resultError) get() error {
@@ -45,7 +45,7 @@ func (c resultError) get() error {
 }
 
 func registerResult[T any]() {
-	ixgo.RegisterTypedCallbackFunc(func(c ixgo.FuncVal) func() T {
+	ixgo.RegisterDirectFuncFor(func(c ixgo.DirectFuncVal) func() T {
 		return result[T]{c}.get
 	})
 }
@@ -66,7 +66,7 @@ func init() {
 	registerResult[float32]()
 	registerResult[float64]()
 	registerResult[string]()
-	ixgo.RegisterTypedCallbackFunc(func(c ixgo.FuncVal) func() error {
+	ixgo.RegisterDirectFuncFor(func(c ixgo.DirectFuncVal) func() error {
 		return resultError{c}.get
 	})
 }

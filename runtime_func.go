@@ -98,73 +98,73 @@ func dynamicFunCall(interp *Interp, iv register, ir register, ia []register) fun
 }
 
 func (pfn *function) makeFunction(typ reflect.Type, env []value) reflect.Value {
-	c := FuncVal{interp: pfn.Interp, pfn: pfn, typ: typ, env: env}
+	c := DirectFuncVal{interp: pfn.Interp, pfn: pfn, typ: typ, env: env}
 	if supportFuncVal {
-		if v, ok := makeTypedFunction(c, typ); ok {
+		if v, ok := makeDirectFunction(c, typ); ok {
 			return v
 		}
 	}
 	return reflect.MakeFunc(typ, c.callReflect)
 }
 
-var callbackReflectPC = reflect.ValueOf(FuncVal{}.callReflect).Pointer()
+var callbackReflectPC = reflect.ValueOf(DirectFuncVal{}.callReflect).Pointer()
 
 type interpExt struct{}
 
 // Callers must check interpreter ownership.
-func (*interpExt) getMakeFuncVal(fn interface{}) *FuncVal {
+func (*interpExt) getMakeFuncVal(fn interface{}) *DirectFuncVal {
 	v := reflect.ValueOf(fn)
 	if v.Kind() != reflect.Func || v.IsNil() {
 		return nil
 	}
 	fv, n := funcval.Get(fn)
 	switch {
-	case n == 0 && (fv.Fn == callbackVoidPC || isTypedCallbackPC(fv.Fn)):
+	case n == 0 && (fv.Fn == directFuncVoidPC || isDirectFuncPC(fv.Fn)):
 		// Direct method value.
 	case n == 1 && fv.Fn == callbackReflectPC:
 		// One reflect.MakeFunc bridge.
 	default:
 		return nil
 	}
-	return typedCallbackReceiver(fv)
+	return directFuncReceiver(fv)
 }
 
-func validateTypedCallback(typ reflect.Type, maker TypedCallbackMaker) uintptr {
+func validateDirectFunc(typ reflect.Type, maker DirectFuncMaker) uintptr {
 	if !funcval.IsSupport {
-		checkTypedCallbackType(typ, maker)
+		checkDirectFuncType(typ, maker)
 		return 0
 	}
 	sentinel := new(Interp)
 	fn := new(function)
 	env := []value{sentinel}
-	v := maker(FuncVal{interp: sentinel, pfn: fn, typ: typ, env: env})
+	v := maker(DirectFuncVal{interp: sentinel, pfn: fn, typ: typ, env: env})
 	if !v.IsValid() || v.Kind() != reflect.Func || v.Type() != typ {
-		panic(fmt.Sprintf("ixgo: typed callback maker returned %v, want %v", v.Type(), typ))
+		panic(fmt.Sprintf("ixgo: DirectFunc maker returned %v, want %v", v.Type(), typ))
 	}
 	if v.IsNil() {
-		panic("ixgo: typed callback maker returned a nil function")
+		panic("ixgo: DirectFunc maker returned a nil function")
 	}
 	fv, n := funcval.Get(v.Interface())
 	if n != 0 {
-		panic("ixgo: typed callback maker must return a method value")
+		panic("ixgo: DirectFunc maker must return a method value")
 	}
-	got := typedCallbackReceiver(fv)
+	got := directFuncReceiver(fv)
 	if got == nil || got.interp != sentinel || got.pfn != fn || got.typ != typ || len(got.env) != 1 || got.env[0] != sentinel {
-		panic("ixgo: typed callback receiver must embed ixgo.FuncVal as its first field")
+		panic("ixgo: DirectFunc receiver must embed ixgo.DirectFuncVal as its first field")
 	}
 	return fv.Fn
 }
 
-func typedCallbackReceiver(fv *funcval.FuncVal) *FuncVal {
+func directFuncReceiver(fv *funcval.FuncVal) *DirectFuncVal {
 	if fv == nil {
 		return nil
 	}
-	// gc ABI: FuncVal is one word, followed by the method-value receiver.
-	// The receiver must be at least as large as FuncVal and must embed it
+	// gc ABI: DirectFuncVal is one word, followed by the method-value receiver.
+	// The receiver must be at least as large as DirectFuncVal and must embed it
 	// as its first field. Undersized receivers are rejected at registration
 	// only after this read, so makers must return a real method value.
 	return &(*struct {
 		funcval.FuncVal
-		receiver FuncVal
+		receiver DirectFuncVal
 	})(unsafe.Pointer(fv)).receiver
 }

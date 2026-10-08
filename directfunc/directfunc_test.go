@@ -14,17 +14,17 @@
  * limitations under the License.
  */
 
-package typed_test
+package directfunc_test
 
 import (
 	"testing"
 
 	"github.com/goplus/ixgo"
-	_ "github.com/goplus/ixgo/typed"
+	_ "github.com/goplus/ixgo/directfunc"
 	"github.com/visualfc/funcval"
 )
 
-func TestImportRegistersTypedCallbacks(t *testing.T) {
+func TestImportRegistersDirectFuncs(t *testing.T) {
 	ctx := ixgo.NewContext(0)
 	interp, err := ctx.LoadInterp("main.go", `package main
 type boom struct{}
