@@ -159,8 +159,10 @@ func typedCallbackReceiver(fv *funcval.FuncVal) *FuncVal {
 	if fv == nil {
 		return nil
 	}
-	// gc ABI: FuncVal is one word, followed by the receiver.
-	// The call methods must retain value receivers.
+	// gc ABI: FuncVal is one word, followed by the method-value receiver.
+	// The receiver must be at least as large as FuncVal and must embed it
+	// as its first field. Undersized receivers are rejected at registration
+	// only after this read, so makers must return a real method value.
 	return &(*struct {
 		funcval.FuncVal
 		receiver FuncVal

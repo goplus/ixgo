@@ -78,18 +78,18 @@ var (
 )
 
 func makeTypedFunction(c FuncVal, typ reflect.Type) (reflect.Value, bool) {
-	if maker, ok := lookupTypedCallback(typ); ok {
-		return maker(c), true
-	}
 	if typ == callbackVoidType {
 		return reflect.ValueOf(voidCallback{c}.call), true
+	}
+	if maker, ok := lookupTypedCallback(typ); ok {
+		return maker(c), true
 	}
 	return reflect.Value{}, false
 }
 
 type typedCallbackEntry struct {
-	make TypedCallbackMaker
-	pc   uintptr
+	maker TypedCallbackMaker
+	pc    uintptr
 }
 
 var (
@@ -101,10 +101,13 @@ var (
 // RegisterTypedCallback registers a maker for functions of type typ.
 // Later registrations for the same type replace earlier ones.
 // Passing a nil maker removes the registration.
+// Do not unregister or replace a signature while function values of that
+// type are still in use.
 //
 // The maker must return a method value of type typ whose receiver embeds
-// FuncVal as its first field. Registration panics if the maker does not
-// satisfy that contract.
+// FuncVal as its first field. On gc, registration panics if the maker does
+// not satisfy that contract. func() is built in and is not taken from the
+// registry.
 func RegisterTypedCallback(typ reflect.Type, maker TypedCallbackMaker) {
 	if typ == nil || typ.Kind() != reflect.Func {
 		panic("ixgo: typed callback type must be a function")
@@ -125,7 +128,7 @@ func RegisterTypedCallback(typ reflect.Type, maker TypedCallbackMaker) {
 	if pc != 0 {
 		typedCallbackPCs[pc] = struct{}{}
 	}
-	typedCallbackMakers[typ] = typedCallbackEntry{make: maker, pc: pc}
+	typedCallbackMakers[typ] = typedCallbackEntry{maker: maker, pc: pc}
 }
 
 // RegisterTypedCallbackFunc registers a typed callback for signature F.
@@ -162,7 +165,7 @@ func RegisterTypedCallbackFunc[F any](bind func(FuncVal) F) {
 	})
 }
 
-func checkTypedCallbackType(typ reflect.Type, maker TypedCallbackMaker) reflect.Value {
+func checkTypedCallbackType(typ reflect.Type, maker TypedCallbackMaker) {
 	v := maker(FuncVal{})
 	if !v.IsValid() || v.Kind() != reflect.Func || v.Type() != typ {
 		panic(fmt.Sprintf("ixgo: typed callback maker returned %v, want %v", v.Type(), typ))
@@ -170,7 +173,6 @@ func checkTypedCallbackType(typ reflect.Type, maker TypedCallbackMaker) reflect.
 	if v.IsNil() {
 		panic("ixgo: typed callback maker returned a nil function")
 	}
-	return v
 }
 
 func lookupTypedCallback(typ reflect.Type) (TypedCallbackMaker, bool) {
@@ -180,7 +182,7 @@ func lookupTypedCallback(typ reflect.Type) (TypedCallbackMaker, bool) {
 	if !ok {
 		return nil, false
 	}
-	return e.make, true
+	return e.maker, true
 }
 
 func isTypedCallbackPC(pc uintptr) bool {

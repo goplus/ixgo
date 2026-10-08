@@ -232,6 +232,14 @@ func TestTypedCallbackWithArgs(t *testing.T) {
 }
 
 func TestRegisterTypedCallbackValidation(t *testing.T) {
+	t.Run("nil_type", func(t *testing.T) {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("expected panic")
+			}
+		}()
+		RegisterTypedCallback(nil, nil)
+	})
 	t.Run("not_a_function", func(t *testing.T) {
 		defer func() {
 			if recover() == nil {
@@ -239,6 +247,16 @@ func TestRegisterTypedCallbackValidation(t *testing.T) {
 			}
 		}()
 		RegisterTypedCallback(reflect.TypeFor[int](), nil)
+	})
+	t.Run("nil_function", func(t *testing.T) {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("expected panic")
+			}
+		}()
+		RegisterTypedCallback(reflect.TypeFor[func() int](), func(FuncVal) reflect.Value {
+			return reflect.ValueOf((func() int)(nil))
+		})
 	})
 	t.Run("wrong_result_type", func(t *testing.T) {
 		defer func() {
@@ -276,6 +294,21 @@ func TestRegisterTypedCallbackValidation(t *testing.T) {
 			return missingFuncValCallback{}.call
 		})
 	})
+}
+
+func TestRegisterTypedCallbackUnregister(t *testing.T) {
+	if !funcval.IsSupport {
+		t.Skip("requires gc function values")
+	}
+	RegisterTypedCallbackFunc(func(c FuncVal) func() int {
+		return resultCallback[int]{c}.get
+	})
+	interp := newCallbackInterp(t, 0, 0)
+	values := runFunc(t, interp, "MakeCallbacks", 1).([]interface{})
+	checkReflectBridges(t, values[2], 0)
+	RegisterTypedCallbackFunc[func() int](nil)
+	values = runFunc(t, interp, "MakeCallbacks", 1).([]interface{})
+	checkReflectBridges(t, values[2], 1)
 }
 
 func TestTypedCallbackExternalMakeFunc(t *testing.T) {
