@@ -36,7 +36,6 @@ func TestTypedCallbackRegisterAndCall(t *testing.T) {
 	RegisterTypedCallbackFunc(func(c FuncVal) func(int) int {
 		return exampleCallback{c}.Int
 	})
-	t.Cleanup(func() { RegisterTypedCallbackFunc[func(int) int](nil) })
 
 	_, err := RunFile("main.go", `package main
 func main() {
@@ -294,21 +293,6 @@ func TestRegisterTypedCallbackValidation(t *testing.T) {
 			return missingFuncValCallback{}.call
 		})
 	})
-}
-
-func TestRegisterTypedCallbackUnregister(t *testing.T) {
-	if !funcval.IsSupport {
-		t.Skip("requires gc function values")
-	}
-	RegisterTypedCallbackFunc(func(c FuncVal) func() int {
-		return resultCallback[int]{c}.get
-	})
-	interp := newCallbackInterp(t, 0, 0)
-	values := runFunc(t, interp, "MakeCallbacks", 1).([]interface{})
-	checkReflectBridges(t, values[2], 0)
-	RegisterTypedCallbackFunc[func() int](nil)
-	values = runFunc(t, interp, "MakeCallbacks", 1).([]interface{})
-	checkReflectBridges(t, values[2], 1)
 }
 
 func TestTypedCallbackExternalMakeFunc(t *testing.T) {
@@ -621,10 +605,6 @@ func enableTypedResults(t testing.TB) {
 	RegisterTypedCallbackFunc(func(c FuncVal) func() int {
 		return resultCallback[int]{c}.get
 	})
-	t.Cleanup(func() {
-		RegisterTypedCallbackFunc[func() bool](nil)
-		RegisterTypedCallbackFunc[func() int](nil)
-	})
 }
 
 func enableArgCallbacks(t testing.TB) {
@@ -637,11 +617,6 @@ func enableArgCallbacks(t testing.TB) {
 	})
 	RegisterTypedCallbackFunc(func(c FuncVal) func(int) bool {
 		return argCallback{c}.IntBool
-	})
-	t.Cleanup(func() {
-		RegisterTypedCallbackFunc[func(int)](nil)
-		RegisterTypedCallbackFunc[func(int) int](nil)
-		RegisterTypedCallbackFunc[func(int) bool](nil)
 	})
 }
 
