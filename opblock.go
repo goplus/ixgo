@@ -824,7 +824,7 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 				m := fr.reg(ix)
 				idx := fr.reg(ii)
 				vm := reflect.ValueOf(m)
-				v := vm.MapIndex(reflect.ValueOf(idx))
+				v := vm.MapIndex(mapKeyValue(vm, idx))
 				ok := v.IsValid()
 				var rv value
 				if ok {
@@ -1169,17 +1169,18 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 		ik := pfn.regIndex(instr.Key)
 		iv, kv, vv := pfn.regIndex3(instr.Value)
 		if kv.isStatic() {
+			v := reflect.ValueOf(vv)
+			if vv == nil {
+				v = reflect.Zero(interp.preToType(instr.Map.Type()).Elem())
+			}
 			return func(fr *frame) {
 				vm := reflect.ValueOf(fr.reg(im))
-				vk := reflect.ValueOf(fr.reg(ik))
-				vm.SetMapIndex(vk, reflect.ValueOf(vv))
+				vm.SetMapIndex(mapKeyValue(vm, fr.reg(ik)), v)
 			}
 		}
 		return func(fr *frame) {
 			vm := reflect.ValueOf(fr.reg(im))
-			vk := reflect.ValueOf(fr.reg(ik))
-			v := fr.reg(iv)
-			vm.SetMapIndex(vk, reflect.ValueOf(v))
+			setMapIndex(vm, fr.reg(ik), fr.reg(iv))
 		}
 	case *ssa.DebugRef:
 		if v, ok := instr.Object().(*types.Var); ok {
