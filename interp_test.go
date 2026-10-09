@@ -254,6 +254,55 @@ func main() {
 	}
 }
 
+func TestIssue30116uBoundsMessages(t *testing.T) {
+	src := `package main
+
+func check(got any, want string) {
+	e, ok := got.(interface{ Error() string })
+	if !ok {
+		panic(got)
+	}
+	if e.Error() != want {
+		panic(e.Error())
+	}
+}
+
+func main() {
+	a := []int{1, 2, 3}
+	max := uint64(^uint64(0))
+	func() {
+		defer func() {
+			check(recover(), "runtime error: index out of range [18446744073709551615] with length 3")
+		}()
+		_ = a[max]
+	}()
+	func() {
+		defer func() {
+			check(recover(), "runtime error: slice bounds out of range [:18446744073709551615] with capacity 3")
+		}()
+		_ = a[:max]
+	}()
+	func() {
+		defer func() {
+			check(recover(), "runtime error: slice bounds out of range [18446744073709551615:0]")
+		}()
+		_ = a[max:0]
+	}()
+	i := -1
+	func() {
+		defer func() {
+			check(recover(), "runtime error: index out of range [-1]")
+		}()
+		_ = a[i]
+	}()
+}
+`
+	_, err := ixgo.RunFile("main.go", src, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestOpBin(t *testing.T) {
 	src := `package main
 

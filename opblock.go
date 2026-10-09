@@ -785,13 +785,12 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 			default:
 				panic(fmt.Sprintf("unexpected x type in IndexAddr: %T", x))
 			}
-			index := asInt(idx)
-			if index < 0 {
-				panic(fr.runtimeError(instr, fmt.Sprintf("index out of range [%v]", index)))
-			} else if length := v.Len(); index >= length {
-				panic(fr.runtimeError(instr, fmt.Sprintf("index out of range [%v] with length %v", index, length)))
+			idxb := asBound(idx)
+			length := v.Len()
+			if !idxb.ok || idxb.n >= length {
+				panicIndexBound(fr, instr, idxb, length)
 			}
-			fr.setReg(ir, v.Index(index).Addr().Interface())
+			fr.setReg(ir, v.Index(idxb.n).Addr().Interface())
 		}
 	case *ssa.Index:
 		ir := pfn.regIndex(instr)
@@ -800,14 +799,13 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 		return func(fr *frame) {
 			x := fr.reg(ix)
 			idx := fr.reg(ii)
-			index := asInt(idx)
+			idxb := asBound(idx)
 			v := reflect.ValueOf(x)
-			if index < 0 {
-				panic(fr.runtimeError(instr, fmt.Sprintf("index out of range [%v]", index)))
-			} else if length := v.Len(); index >= length {
-				panic(fr.runtimeError(instr, fmt.Sprintf("index out of range [%v] with length %v", index, length)))
+			length := v.Len()
+			if !idxb.ok || idxb.n >= length {
+				panicIndexBound(fr, instr, idxb, length)
 			}
-			fr.setReg(ir, v.Index(index).Interface())
+			fr.setReg(ir, v.Index(idxb.n).Interface())
 		}
 	case *ssa.Lookup:
 		typ := interp.preToType(instr.X.Type())
@@ -818,8 +816,12 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 		case reflect.String:
 			return func(fr *frame) {
 				v := fr.reg(ix)
-				idx := fr.reg(ii)
-				fr.setReg(ir, reflect.ValueOf(v).String()[asInt(idx)])
+				idxb := asBound(fr.reg(ii))
+				s := reflect.ValueOf(v).String()
+				if !idxb.ok || idxb.n >= len(s) {
+					panicIndexBound(fr, instr, idxb, len(s))
+				}
+				fr.setReg(ir, s[idxb.n])
 			}
 		case reflect.Map:
 			return func(fr *frame) {

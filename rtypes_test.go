@@ -159,6 +159,24 @@ func TestAsIntAndUint64(t *testing.T) {
 	}
 	mustPanic(t, func() { asInt("x") })
 
+	b := asBound(uint64(^uint64(0)))
+	if b.ok || b.signedNeg || b.disp != uint64(^uint64(0)) {
+		t.Fatalf("asBound uint64 max = %+v", b)
+	}
+	b = asBound(int(-1))
+	if b.ok || !b.signedNeg || b.disp != int64(-1) {
+		t.Fatalf("asBound int(-1) = %+v", b)
+	}
+	b = asBound(uint64(3))
+	if !b.ok || b.n != 3 || b.signedNeg {
+		t.Fatalf("asBound uint64(3) = %+v", b)
+	}
+	b = asBound(namedUint(5))
+	if !b.ok || b.n != 5 || b.signedNeg {
+		t.Fatalf("asBound namedUint(5) = %+v", b)
+	}
+	mustPanic(t, func() { asBound("x") })
+
 	if asUint64(int(3)) != 3 || asUint64(int8(3)) != 3 || asUint64(int16(3)) != 3 ||
 		asUint64(int32(3)) != 3 || asUint64(int64(3)) != 3 || asUint64(uint(3)) != 3 ||
 		asUint64(uint8(3)) != 3 || asUint64(uint16(3)) != 3 || asUint64(uint32(3)) != 3 ||

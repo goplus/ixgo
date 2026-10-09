@@ -46,7 +46,6 @@ func init() {
 	gorootTestSkips["fixedbugs/issue4618.go"] = "testing.AllocsPerRun"
 	gorootTestSkips["fixedbugs/issue4667.go"] = "testing.AllocsPerRun"
 	gorootTestSkips["fixedbugs/issue8606b.go"] = "BUG, optimization check"
-	gorootTestSkips["fixedbugs/issue30116u.go"] = "BUG, slice bound check"
 	gorootTestSkips["chan/select5.go"] = "bug, select case expr call order"
 
 	// fixedbugs/issue7740.go
