@@ -415,6 +415,8 @@ func (r *TypesRecord) toNamedType(t *types.Named) (reflect.Type, bool) {
 // the pointer-receiver set, it prefers the value-receiver selection when one
 // exists at an equal or shallower embedding depth (shorter Index), since that
 // selection is the canonical one for non-pointer dispatch.
+// Methods are matched by Object.Id so unexported methods from different
+// packages remain distinct (Go issue24693 / ixgo#515).
 func (r *TypesRecord) extractMethodSet(T types.Type) (methods []*types.Selection, pcount int, mcount int) {
 	pmset := r.prog.MethodSets.MethodSet(types.NewPointer(T))
 	pcount = pmset.Len()
@@ -433,14 +435,14 @@ func (r *TypesRecord) extractMethodSet(T types.Type) (methods []*types.Selection
 			mcache := make(map[string]*types.Selection)
 			for i := 0; i < mcount; i++ {
 				meth := mset.At(i)
-				mcache[meth.Obj().Name()] = meth
+				mcache[meth.Obj().Id()] = meth
 			}
 			for i := 0; i < pcount; i++ {
 				meth := pmset.At(i)
 				// Prefer the value-receiver selection (m) only when its embedding depth
 				// is no greater than the pointer-receiver entry (meth). A deeper m would
 				// mean meth is the more direct promotion and should not be replaced.
-				if m, ok := mcache[meth.Obj().Name()]; ok && len(meth.Index()) >= len(m.Index()) {
+				if m, ok := mcache[meth.Obj().Id()]; ok && len(meth.Index()) >= len(m.Index()) {
 					meth = m
 				}
 				methods[i] = meth
@@ -467,7 +469,7 @@ func (r *TypesRecord) extractMethodSet(T types.Type) (methods []*types.Selection
 					mcount--
 					continue
 				}
-				mcache[meth.Obj().Name()] = meth
+				mcache[meth.Obj().Id()] = meth
 			}
 			for i, index, n := 0, 0, pcount; i < n; i++ {
 				meth := pmset.At(i)
@@ -478,7 +480,7 @@ func (r *TypesRecord) extractMethodSet(T types.Type) (methods []*types.Selection
 				// Prefer the value-receiver selection (m) only when its embedding depth
 				// is no greater than the pointer-receiver entry (meth). A deeper m would
 				// mean meth is the more direct promotion and should not be replaced.
-				if m, ok := mcache[meth.Obj().Name()]; ok && len(meth.Index()) >= len(m.Index()) {
+				if m, ok := mcache[meth.Obj().Id()]; ok && len(meth.Index()) >= len(m.Index()) {
 					meth = m
 				}
 				methods[index] = meth
