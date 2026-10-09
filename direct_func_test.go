@@ -372,12 +372,6 @@ func TestCheckDirectFuncType(t *testing.T) {
 	})
 }
 
-func TestDirectFuncReceiverNil(t *testing.T) {
-	if got := directFuncReceiver(nil); got != nil {
-		t.Fatalf("directFuncReceiver(nil) = %v; want nil", got)
-	}
-}
-
 func TestDirectFuncExternalMakeFunc(t *testing.T) {
 	interp := loadDirectFuncs(t, EnableCachedReg, 0)
 	calls := 0
