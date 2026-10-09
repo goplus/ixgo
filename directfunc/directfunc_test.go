@@ -57,7 +57,7 @@ func main() {}
 		for i, fn := range values {
 			_, n := funcval.Get(fn)
 			if n != wantBridges[i] {
-				t.Errorf("callback %d (%T) uses %d reflection bridges; want %d", i, fn, n, wantBridges[i])
+				t.Errorf("function %d (%T) uses %d reflection bridges; want %d", i, fn, n, wantBridges[i])
 			}
 		}
 	}
@@ -76,10 +76,10 @@ func main() {}
 		t.Fatalf("after increment: even = %v, count = %d, int64 = %d", boolean(), count(), i64())
 	}
 	if str() != "ok" {
-		t.Fatalf("string callback = %q; want ok", str())
+		t.Fatalf("string function = %q; want ok", str())
 	}
 	if got := errcb(); got == nil || got.Error() != "boom" {
-		t.Fatalf("error callback = %v; want boom", got)
+		t.Fatalf("error function = %v; want boom", got)
 	}
 	add(4)
 	if count() != 5 {

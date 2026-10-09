@@ -107,7 +107,7 @@ func (pfn *function) makeFunction(typ reflect.Type, env []value) reflect.Value {
 	return reflect.MakeFunc(typ, c.callReflect)
 }
 
-var callbackReflectPC = reflect.ValueOf(DirectFuncVal{}.callReflect).Pointer()
+var directFuncReflectPC = reflect.ValueOf(DirectFuncVal{}.callReflect).Pointer()
 
 type interpExt struct{}
 
@@ -121,7 +121,7 @@ func (*interpExt) getMakeFuncVal(fn interface{}) *DirectFuncVal {
 	switch {
 	case n == 0 && (fv.Fn == directFuncVoidPC || isDirectFuncPC(fv.Fn)):
 		// Direct method value.
-	case n == 1 && fv.Fn == callbackReflectPC:
+	case n == 1 && fv.Fn == directFuncReflectPC:
 		// One reflect.MakeFunc bridge.
 	default:
 		return nil

@@ -24,17 +24,17 @@ import (
 	"github.com/visualfc/funcval"
 )
 
-type exampleCallback struct {
+type exampleFunc struct {
 	DirectFuncVal
 }
 
-func (c exampleCallback) Int(n int) int {
+func (c exampleFunc) Int(n int) int {
 	return c.Call(n).(int)
 }
 
 func TestDirectFuncRegisterAndCall(t *testing.T) {
 	RegisterDirectFuncFor(func(c DirectFuncVal) func(int) int {
-		return exampleCallback{c}.Int
+		return exampleFunc{c}.Int
 	})
 
 	_, err := RunFile("main.go", `package main
@@ -60,9 +60,9 @@ func TestDirectFuncs(t *testing.T) {
 		{name: "dynamic_fallback", mode: EnableCachedReg | DisableDynamicFuncCallAnalysis},
 	} {
 		t.Run(mode.name, func(t *testing.T) {
-			interp := loadCallbacks(t, mode.mode, 0)
-			left := newCallbacks(t, interp, 0)
-			right := newCallbacks(t, interp, 1)
+			interp := loadDirectFuncs(t, mode.mode, 0)
+			left := newDirectFuncs(t, interp, 0)
+			right := newDirectFuncs(t, interp, 1)
 			increment, even, other := left.increment, left.even, right.even
 			if !even() || other() {
 				t.Fatal("independent closures lost their initial environment")
@@ -71,11 +71,11 @@ func TestDirectFuncs(t *testing.T) {
 			for i := 0; i < 4; i++ {
 				increment()
 				if even() || other() {
-					t.Fatal("native callback changed the wrong closure environment")
+					t.Fatal("native function changed the wrong closure environment")
 				}
 				runFunc(t, interp, "InvokeVoid", increment)
 				if !runFunc(t, interp, "InvokeBool", even).(bool) {
-					t.Fatal("interpreted dynamic callback lost its environment")
+					t.Fatal("interpreted dynamic function lost its environment")
 				}
 			}
 			nativeCalls := 0
@@ -83,37 +83,37 @@ func TestDirectFuncs(t *testing.T) {
 			if nativeCalls != 1 || !runFunc(t, interp, "InvokeBool", func() bool { return true }).(bool) {
 				t.Fatal("native function fallback failed")
 			}
-			otherInterp := loadCallbacks(t, mode.mode, 0)
+			otherInterp := loadDirectFuncs(t, mode.mode, 0)
 			runFunc(t, otherInterp, "InvokeVoid", increment)
 			if runFunc(t, otherInterp, "InvokeBool", even).(bool) || other() {
-				t.Fatal("callback invoked from another interpreter lost its environment")
+				t.Fatal("function invoked from another interpreter lost its environment")
 			}
 			invoke := func(f func()) { f() }
 			reentrant := runFunc(t, interp, "Reentrant", invoke, 0).(func() bool)
 			if reentrant() || !reentrant() {
-				t.Fatal("nested host callbacks lost their environment")
+				t.Fatal("nested host functions lost their environment")
 			}
 			if !runFunc(t, interp, "Signatures", invoke, func(f func() bool) bool { return f() }).(bool) {
-				t.Fatal("named or unsupported callback signature failed")
+				t.Fatal("named or unsupported function signature failed")
 			}
 			fallbacks := runFunc(t, interp, "Fallbacks").([]interface{})
 			if !reflect.ValueOf(fallbacks[0]).Call(nil)[0].Bool() {
 				t.Fatal("named bool result changed")
 			}
 			if got := fallbacks[1].(func(int) int)(41); got != 42 {
-				t.Fatalf("callback with argument = %d; want 42", got)
+				t.Fatalf("function with argument = %d; want 42", got)
 			}
 			if got := fallbacks[2].(func(...int) int)(20, 22); got != 42 {
-				t.Fatalf("variadic callback = %d; want 42", got)
+				t.Fatalf("variadic function = %d; want 42", got)
 			}
 			if value, ok := fallbacks[3].(func() (int, bool))(); value != 42 || !ok {
-				t.Fatalf("multiple callback results = (%d, %v); want (42, true)", value, ok)
+				t.Fatalf("multiple function results = (%d, %v); want (42, true)", value, ok)
 			}
 			if !IsLLGo {
 				names := runFunc(t, interp, "PointerNames", increment, even).([]string)
 				for i, name := range names {
-					if name != []string{"main.MakeCallbacks.func1", "main.MakeCallbacks.func2"}[i] {
-						t.Errorf("callback %d runtime name = %q; want interpreted closure", i, name)
+					if name != []string{"main.MakeFuncs.func1", "main.MakeFuncs.func2"}[i] {
+						t.Errorf("function %d runtime name = %q; want interpreted closure", i, name)
 					}
 				}
 			}
@@ -122,13 +122,13 @@ func TestDirectFuncs(t *testing.T) {
 }
 
 func TestDirectFuncFunctionValues(t *testing.T) {
-	i := loadCallbacks(t, 0, 0)
-	values := runFunc(t, i, "MakeCallbacks", 1).([]interface{})
+	i := loadDirectFuncs(t, 0, 0)
+	values := runFunc(t, i, "MakeFuncs", 1).([]interface{})
 	for _, fn := range values {
 		checkReflectBridges(t, fn, 0)
 		c := i.getMakeFuncVal(fn)
 		if c == nil || c.interp != i || c.pfn == nil || len(c.env) != 1 {
-			t.Fatalf("callback %T lost its interpreter, function or closure environment", fn)
+			t.Fatalf("function %T lost its interpreter, function or closure environment", fn)
 		}
 	}
 	external := reflect.MakeFunc(reflect.TypeFor[func()](), func([]reflect.Value) []reflect.Value {
@@ -146,8 +146,8 @@ func TestDirectFuncFunctionValues(t *testing.T) {
 
 func TestDirectFuncDefaultMakeFunc(t *testing.T) {
 	isolateDirectFuncs(t)
-	i := newCallbackInterp(t, 0, 0)
-	values := runFunc(t, i, "MakeCallbacks", 1).([]interface{})
+	i := newDirectFuncInterp(t, 0, 0)
+	values := runFunc(t, i, "MakeFuncs", 1).([]interface{})
 	for index, fn := range values {
 		want := 1
 		if index == 0 {
@@ -156,10 +156,10 @@ func TestDirectFuncDefaultMakeFunc(t *testing.T) {
 		checkReflectBridges(t, fn, want)
 		c := i.getMakeFuncVal(fn)
 		if c == nil || c.interp != i || c.pfn == nil || len(c.env) != 1 {
-			t.Fatalf("callback %T lost its interpreter, function or closure environment", fn)
+			t.Fatalf("function %T lost its interpreter, function or closure environment", fn)
 		}
 	}
-	left := callbackSet{values[0].(func()), values[1].(func() bool), values[2].(func() int)}
+	left := directFuncSet{values[0].(func()), values[1].(func() bool), values[2].(func() int)}
 	if left.even() {
 		t.Fatal("even(1) = true")
 	}
@@ -172,8 +172,8 @@ func TestDirectFuncDefaultMakeFunc(t *testing.T) {
 func TestDirectFuncWithArgs(t *testing.T) {
 	t.Run("default_makefunc", func(t *testing.T) {
 		isolateDirectFuncs(t)
-		i := newCallbackInterp(t, 0, 0)
-		values := runFunc(t, i, "MakeArgCallbacks", 1).([]interface{})
+		i := newDirectFuncInterp(t, 0, 0)
+		values := runFunc(t, i, "MakeArgFuncs", 1).([]interface{})
 		for _, fn := range values {
 			checkReflectBridges(t, fn, 1)
 		}
@@ -189,14 +189,14 @@ func TestDirectFuncWithArgs(t *testing.T) {
 		}
 	})
 	t.Run("registered", func(t *testing.T) {
-		enableArgCallbacks(t)
-		i := loadCallbacks(t, EnableCachedReg, 0)
-		values := runFunc(t, i, "MakeArgCallbacks", 1).([]interface{})
+		enableArgFuncs(t)
+		i := loadDirectFuncs(t, EnableCachedReg, 0)
+		values := runFunc(t, i, "MakeArgFuncs", 1).([]interface{})
 		for _, fn := range values {
 			checkReflectBridges(t, fn, 0)
 			c := i.getMakeFuncVal(fn)
 			if c == nil || c.interp != i || c.pfn == nil || len(c.env) != 1 {
-				t.Fatalf("callback %T lost its interpreter, function or closure environment", fn)
+				t.Fatalf("function %T lost its interpreter, function or closure environment", fn)
 			}
 		}
 		add := values[0].(func(int))
@@ -310,7 +310,7 @@ func TestRegisterDirectFuncValidation(t *testing.T) {
 	t.Run("unregister", func(t *testing.T) {
 		isolateDirectFuncs(t)
 		RegisterDirectFuncFor(func(c DirectFuncVal) func() int {
-			return resultCallback[int]{c}.get
+			return resultFunc[int]{c}.get
 		})
 		typ := reflect.TypeFor[func() int]()
 		if _, ok := lookupDirectFunc(typ); !ok {
@@ -324,7 +324,7 @@ func TestRegisterDirectFuncValidation(t *testing.T) {
 	t.Run("unregister_for", func(t *testing.T) {
 		isolateDirectFuncs(t)
 		RegisterDirectFuncFor(func(c DirectFuncVal) func() int {
-			return resultCallback[int]{c}.get
+			return resultFunc[int]{c}.get
 		})
 		RegisterDirectFuncFor[func() int](nil)
 		if _, ok := lookupDirectFunc(reflect.TypeFor[func() int]()); ok {
@@ -379,7 +379,7 @@ func TestDirectFuncReceiverNil(t *testing.T) {
 }
 
 func TestDirectFuncExternalMakeFunc(t *testing.T) {
-	interp := loadCallbacks(t, EnableCachedReg, 0)
+	interp := loadDirectFuncs(t, EnableCachedReg, 0)
 	calls := 0
 	void := reflect.MakeFunc(reflect.TypeFor[func()](), func([]reflect.Value) []reflect.Value {
 		calls++
@@ -391,24 +391,24 @@ func TestDirectFuncExternalMakeFunc(t *testing.T) {
 	for i := 1; i <= 4; i++ {
 		runFunc(t, interp, "InvokeVoid", void)
 		if got := runFunc(t, interp, "InvokeBool", boolean).(bool); got != (i%2 == 0) {
-			t.Fatalf("reflected callback result = %v after %d calls", got, i)
+			t.Fatalf("reflected function result = %v after %d calls", got, i)
 		}
 	}
 	if calls != 4 {
-		t.Fatalf("reflected callback called %d times; want 4", calls)
+		t.Fatalf("reflected function called %d times; want 4", calls)
 	}
 }
 
 func TestDirectFuncsConcurrent(t *testing.T) {
 	const workers, calls = 8, 100
-	interp := loadCallbacks(t, EnableCachedReg, 0)
-	callbacks := make([]callbackSet, workers)
-	for worker := range callbacks {
-		callbacks[worker] = newCallbacks(t, interp, worker)
+	interp := loadDirectFuncs(t, EnableCachedReg, 0)
+	sets := make([]directFuncSet, workers)
+	for worker := range sets {
+		sets[worker] = newDirectFuncs(t, interp, worker)
 	}
 	var wg sync.WaitGroup
 	var failed [workers]bool
-	for worker, functions := range callbacks {
+	for worker, functions := range sets {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -422,7 +422,7 @@ func TestDirectFuncsConcurrent(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	for worker, functions := range callbacks {
+	for worker, functions := range sets {
 		if got := functions.count(); got != worker+calls || failed[worker] {
 			t.Errorf("worker %d: count = %d, incorrect predicate = %v", worker, got, failed[worker])
 		}
@@ -430,7 +430,7 @@ func TestDirectFuncsConcurrent(t *testing.T) {
 }
 
 func TestDirectFuncRecover(t *testing.T) {
-	interp := loadCallbacks(t, EnableCachedReg, 0)
+	interp := loadDirectFuncs(t, EnableCachedReg, 0)
 	for _, value := range []interface{}{"panic", nil} {
 		marks := 0
 		void := runFunc(t, interp, "RecoverVoid", value, func() { marks++ }).(func())
@@ -438,7 +438,7 @@ func TestDirectFuncRecover(t *testing.T) {
 		for i := 0; i < 3; i++ {
 			void()
 			if !boolean() {
-				t.Fatalf("bool callback failed to recover panic(%v)", value)
+				t.Fatalf("bool function failed to recover panic(%v)", value)
 			}
 		}
 		panicFunc := runFunc(t, interp, "Panic", value).(func())
@@ -446,12 +446,12 @@ func TestDirectFuncRecover(t *testing.T) {
 			t.Fatalf("script panic = %v; want PanicError carrying %v", got, value)
 		}
 		if marks != 3 {
-			t.Fatalf("void callback recovered %d times; want 3", marks)
+			t.Fatalf("void function recovered %d times; want 3", marks)
 		}
 	}
 	reentrant := runFunc(t, interp, "DeferredReentry", func(f func()) { f() }).(func() bool)
 	if !reentrant() {
-		t.Fatal("nested host callback changed deferred recover semantics")
+		t.Fatal("nested host function changed deferred recover semantics")
 	}
 	// The host consumes its own stop sentinel.
 	sentinel := new(int)
@@ -466,7 +466,7 @@ func TestDirectFuncRecover(t *testing.T) {
 	}
 }
 
-func TestCallbackAbort(t *testing.T) {
+func TestDirectFuncAbort(t *testing.T) {
 	for _, function := range []struct {
 		name       string
 		want, zero []interface{}
@@ -494,7 +494,7 @@ func TestCallbackAbort(t *testing.T) {
 				{name: "hot_during", warmup: 2, during: true},
 			} {
 				t.Run(function.name+"/"+pool.name+"/"+state.name, func(t *testing.T) {
-					interp := loadCallbacks(t, EnableCachedReg, pool.threshold)
+					interp := loadDirectFuncs(t, EnableCachedReg, pool.threshold)
 					hooks, bodies := 0, 0
 					abortInside := false
 					runFunc(t, interp, "SetHooks", func() {
@@ -505,7 +505,7 @@ func TestCallbackAbort(t *testing.T) {
 					}, func() { bodies++ })
 					fn, ok := interp.GetFunc(function.name)
 					if !ok {
-						t.Fatalf("missing callback %s", function.name)
+						t.Fatalf("missing function %s", function.name)
 					}
 					for i := 0; i < state.warmup; i++ {
 						checkAbortCall(t, fn, function.want)
@@ -532,8 +532,8 @@ func TestCallbackAbort(t *testing.T) {
 	}
 }
 
-func TestCallbackResults(t *testing.T) {
-	interp := loadCallbacks(t, EnableCachedReg, 0)
+func TestDirectFuncResults(t *testing.T) {
+	interp := loadDirectFuncs(t, EnableCachedReg, 0)
 	var retained Tuple
 	want := Tuple{42, true}
 	abort := false
@@ -549,7 +549,7 @@ func TestCallbackResults(t *testing.T) {
 	retained = runFunc(t, interp, "Multi").(Tuple)
 	fn, ok := interp.GetFunc("Multi")
 	if !ok {
-		t.Fatal("missing Multi callback")
+		t.Fatal("missing Multi function")
 	}
 	checkAbortCall(t, fn, []interface{}{42, true})
 	abort = true
@@ -565,44 +565,44 @@ func TestCallbackResults(t *testing.T) {
 func BenchmarkDirectFunc(b *testing.B) {
 	for _, name := range []string{"void", "bool", "create_void", "create_bool", "create_int", "dynamic_void_128", "dynamic_bool_128", "stop"} {
 		b.Run(name, func(b *testing.B) {
-			interp := loadCallbacks(b, EnableCachedReg, 0)
-			callbacks := newCallbacks(b, interp, 0)
-			var callback interface{} = callbacks.increment
+			interp := loadDirectFuncs(b, EnableCachedReg, 0)
+			sets := newDirectFuncs(b, interp, 0)
+			var function interface{} = sets.increment
 			switch name {
 			case "bool":
-				callback = callbacks.even
+				function = sets.even
 			case "create_void":
-				callback = runFunc(b, interp, "CreateAndCallVoid", func(f func()) { f() })
+				function = runFunc(b, interp, "CreateAndCallVoid", func(f func()) { f() })
 			case "create_bool":
-				callback = runFunc(b, interp, "CreateAndCallBool", func(f func() bool) bool { return f() })
+				function = runFunc(b, interp, "CreateAndCallBool", func(f func() bool) bool { return f() })
 			case "create_int":
-				callback = runFunc(b, interp, "CreateAndCallInt", func(f func() int) int { return f() })
+				function = runFunc(b, interp, "CreateAndCallInt", func(f func() int) int { return f() })
 			case "dynamic_void_128":
-				callback = runFunc(b, interp, "DynamicVoid", callbacks.increment)
+				function = runFunc(b, interp, "DynamicVoid", sets.increment)
 			case "dynamic_bool_128":
-				callback = runFunc(b, interp, "DynamicBool", callbacks.even)
+				function = runFunc(b, interp, "DynamicBool", sets.even)
 			case "stop":
 				sentinel := new(int)
-				callback = runFunc(b, interp, "Stop", func() { panic(sentinel) })
+				function = runFunc(b, interp, "Stop", func() { panic(sentinel) })
 			}
 			b.ReportAllocs()
-			switch callback := callback.(type) {
+			switch function := function.(type) {
 			case func() int:
 				for b.Loop() {
-					callback()
+					function()
 				}
 			case func() bool:
 				for b.Loop() {
-					callback()
+					function()
 				}
 			case func():
 				if name == "stop" {
 					for b.Loop() {
-						catchPanic(callback)
+						catchPanic(function)
 					}
 				} else {
 					for b.Loop() {
-						callback()
+						function()
 					}
 				}
 			}
@@ -610,21 +610,21 @@ func BenchmarkDirectFunc(b *testing.B) {
 	}
 }
 
-type callbackSet struct {
+type directFuncSet struct {
 	increment func()
 	even      func() bool
 	count     func() int
 }
 
-type argCallback struct {
+type argFunc struct {
 	DirectFuncVal
 }
 
-func (c argCallback) Int(n int) {
+func (c argFunc) Int(n int) {
 	c.CallDiscard(n)
 }
 
-func (c argCallback) IntRet(n int) int {
+func (c argFunc) IntRet(n int) int {
 	v := c.Call(n)
 	if v == nil {
 		return 0
@@ -632,16 +632,16 @@ func (c argCallback) IntRet(n int) int {
 	return v.(int)
 }
 
-func (c argCallback) IntBool(n int) bool {
+func (c argFunc) IntBool(n int) bool {
 	v := c.Call(n)
 	return v != nil && v.(bool)
 }
 
-type resultCallback[T any] struct {
+type resultFunc[T any] struct {
 	DirectFuncVal
 }
 
-func (c resultCallback[T]) get() T {
+func (c resultFunc[T]) get() T {
 	v := c.Call()
 	if v == nil {
 		var zero T
@@ -665,7 +665,7 @@ func checkReflectBridges(t *testing.T, fn interface{}, want int) {
 	}
 	_, n := funcval.Get(fn)
 	if n != want {
-		t.Errorf("callback %T uses %d reflection bridges; want %d", fn, n, want)
+		t.Errorf("function %T uses %d reflection bridges; want %d", fn, n, want)
 	}
 }
 
@@ -683,37 +683,37 @@ func isolateDirectFuncs(t testing.TB) {
 func enableDirectFuncResults(t testing.TB) {
 	t.Helper()
 	RegisterDirectFuncFor(func(c DirectFuncVal) func() bool {
-		return resultCallback[bool]{c}.get
+		return resultFunc[bool]{c}.get
 	})
 	RegisterDirectFuncFor(func(c DirectFuncVal) func() int {
-		return resultCallback[int]{c}.get
+		return resultFunc[int]{c}.get
 	})
 }
 
-func enableArgCallbacks(t testing.TB) {
+func enableArgFuncs(t testing.TB) {
 	t.Helper()
 	RegisterDirectFuncFor(func(c DirectFuncVal) func(int) {
-		return argCallback{c}.Int
+		return argFunc{c}.Int
 	})
 	RegisterDirectFuncFor(func(c DirectFuncVal) func(int) int {
-		return argCallback{c}.IntRet
+		return argFunc{c}.IntRet
 	})
 	RegisterDirectFuncFor(func(c DirectFuncVal) func(int) bool {
-		return argCallback{c}.IntBool
+		return argFunc{c}.IntBool
 	})
 }
 
-func loadCallbacks(t testing.TB, mode Mode, threshold int) *Interp {
+func loadDirectFuncs(t testing.TB, mode Mode, threshold int) *Interp {
 	t.Helper()
 	enableDirectFuncResults(t)
-	return newCallbackInterp(t, mode, threshold)
+	return newDirectFuncInterp(t, mode, threshold)
 }
 
-func newCallbackInterp(t testing.TB, mode Mode, threshold int) *Interp {
+func newDirectFuncInterp(t testing.TB, mode Mode, threshold int) *Interp {
 	t.Helper()
 	ctx := NewContext(mode | SupportMultipleInterp)
 	ctx.SetLeastCallForEnablePool(threshold)
-	interp, err := ctx.LoadInterp("callbacks.go", directFuncSource)
+	interp, err := ctx.LoadInterp("directfunc.go", directFuncSource)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -730,10 +730,10 @@ func runFunc(t testing.TB, interp *Interp, name string, args ...interface{}) int
 	return v
 }
 
-func newCallbacks(t testing.TB, interp *Interp, start int) callbackSet {
+func newDirectFuncs(t testing.TB, interp *Interp, start int) directFuncSet {
 	t.Helper()
-	v := runFunc(t, interp, "MakeCallbacks", start).([]interface{})
-	return callbackSet{v[0].(func()), v[1].(func() bool), v[2].(func() int)}
+	v := runFunc(t, interp, "MakeFuncs", start).([]interface{})
+	return directFuncSet{v[0].(func()), v[1].(func() bool), v[2].(func() int)}
 }
 
 func catchPanic(f func()) (value interface{}) {
@@ -756,10 +756,10 @@ func checkAbortCall(t *testing.T, fn interface{}, want []interface{}) {
 		n, ok := fn()
 		got = []interface{}{n, ok}
 	default:
-		t.Fatalf("unexpected callback type %T", fn)
+		t.Fatalf("unexpected function type %T", fn)
 	}
 	if !reflect.DeepEqual(got, want) {
-		t.Errorf("callback result = %v; want %v", got, want)
+		t.Errorf("function result = %v; want %v", got, want)
 	}
 }
 
@@ -770,7 +770,7 @@ import (
 	"runtime"
 )
 
-func MakeCallbacks(start int) []interface{} {
+func MakeFuncs(start int) []interface{} {
 	n := start
 	return []interface{}{
 		func() { n++ },
@@ -779,7 +779,7 @@ func MakeCallbacks(start int) []interface{} {
 	}
 }
 
-func MakeArgCallbacks(start int) []interface{} {
+func MakeArgFuncs(start int) []interface{} {
 	n := start
 	return []interface{}{
 		func(x int) { n += x },
