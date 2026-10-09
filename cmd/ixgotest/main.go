@@ -59,6 +59,10 @@ func init() {
 	if err != nil {
 		panic("version error")
 	}
+	if ver < 27 {
+		gorootTestSkips["fixedbugs/issue18149.go"] = "runtime.Caller macos //line not support c:/foo/bar.go:987"
+		gorootTestSkips["fixedbugs/issue22662.go"] = "runtime.Caller got $goroot/test/fixedbugs/foo.go:1; want foo.go:1"
+	}
 	switch {
 	case ver >= 17:
 		// gorootTestSkips["fixedbugs/issue45045.go"] = "runtime.SetFinalizer"
