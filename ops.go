@@ -9,6 +9,7 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"math"
 	"reflect"
 	"unsafe"
 
@@ -110,7 +111,9 @@ func staticToValue(i *Interp, value ssa.Value) (interface{}, bool) {
 }
 
 // asInt converts x, which must be an integer, to an int suitable for
-// use as a slice or array index or operand to make().
+// make, makechan, makemap, and unsafe length operands.
+// Slice and array indexes use asBound, which keeps signed negatives
+// distinct from unsigned overflow for panic text.
 func asInt(x value) int {
 	switch x := x.(type) {
 	case int:
@@ -145,6 +148,87 @@ func asInt(x value) int {
 		}
 	}
 	panic(fmt.Sprintf("cannot convert %T to int", x))
+}
+
+// boundIndex is an integer used as a slice or array index.
+// ok means n is a non-negative int that can be used as an index.
+// signedNeg means the original value was a negative signed integer.
+// disp is set only on the panic path so the success path does not box.
+type boundIndex struct {
+	n         int
+	disp      any
+	signedNeg bool
+	ok        bool
+}
+
+func boundFromSigned(i int64) boundIndex {
+	if i < 0 {
+		return boundIndex{n: int(i), disp: i, signedNeg: true}
+	}
+	if uint64(i) > uint64(math.MaxInt) {
+		return boundIndex{disp: i}
+	}
+	return boundIndex{n: int(i), ok: true}
+}
+
+func boundFromUnsigned(u uint64) boundIndex {
+	if u > uint64(math.MaxInt) {
+		return boundIndex{disp: u}
+	}
+	return boundIndex{n: int(u), ok: true}
+}
+
+func (b boundIndex) msg() any {
+	if b.ok {
+		return b.n
+	}
+	return b.disp
+}
+
+// asBound converts x, which must be an integer, to a boundIndex.
+// Unsigned values that do not fit in int are reported as !ok (not signedNeg),
+// so panic text prints the original unsigned value with length/capacity.
+func asBound(x value) boundIndex {
+	switch v := x.(type) {
+	case int:
+		return boundFromSigned(int64(v))
+	case int8:
+		return boundFromSigned(int64(v))
+	case int16:
+		return boundFromSigned(int64(v))
+	case int32:
+		return boundFromSigned(int64(v))
+	case int64:
+		return boundFromSigned(v)
+	case uint:
+		return boundFromUnsigned(uint64(v))
+	case uint8:
+		return boundFromUnsigned(uint64(v))
+	case uint16:
+		return boundFromUnsigned(uint64(v))
+	case uint32:
+		return boundFromUnsigned(uint64(v))
+	case uint64:
+		return boundFromUnsigned(v)
+	case uintptr:
+		return boundFromUnsigned(uint64(v))
+	default:
+		rv := reflect.ValueOf(x)
+		switch rv.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			return boundFromSigned(rv.Int())
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+			return boundFromUnsigned(rv.Uint())
+		}
+	}
+	panic(fmt.Sprintf("cannot convert %T to boundIndex", x))
+}
+
+func panicIndexBound(fr *frame, instr ssa.Instruction, idx boundIndex, length int) {
+	if idx.signedNeg {
+		panic(fr.runtimeError(instr, fmt.Sprintf("index out of range [%v]", idx.msg())))
+	}
+	panic(fr.runtimeError(instr, fmt.Sprintf("index out of range [%v] with length %v", idx.msg(), length)))
 }
 
 // asUint64 converts x, which must be an unsigned integer, to a uint64
@@ -220,74 +304,71 @@ func slice(fr *frame, instr *ssa.Slice, makesliceCheck bool, ix, ih, il, im regi
 		Cap = v.Cap()
 	}
 
-	lo := 0
-	hi := Len
-	max := Cap
+	lo := boundIndex{n: 0, ok: true}
+	hi := boundIndex{n: Len, ok: true}
+	max := boundIndex{n: Cap, ok: true}
 	var slice3 bool
 	if instr.Low != nil {
-		// lo = asInt(fr.get(instr.Low))
-		lo = asInt(fr.reg(il))
+		lo = asBound(fr.reg(il))
 	}
 	if instr.High != nil {
-		// hi = asInt(fr.get(instr.High))
-		hi = asInt(fr.reg(ih))
+		hi = asBound(fr.reg(ih))
 	}
 	if instr.Max != nil {
-		// max = asInt(fr.get(instr.Max))
-		max = asInt(fr.reg(im))
+		max = asBound(fr.reg(im))
 		slice3 = true
 	}
 
 	if makesliceCheck {
-		if hi < 0 {
+		if !hi.ok || hi.signedNeg {
 			panic(fr.runtimeError(instr, "makeslice: len out of range"))
-		} else if hi > max {
+		} else if !max.ok || max.signedNeg || hi.n > max.n {
 			panic(fr.runtimeError(instr, "makeslice: cap out of range"))
 		}
 	} else {
 		if slice3 {
-			if max < 0 {
-				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [::%v]", max)))
-			} else if max > Cap {
+			if max.signedNeg {
+				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [::%v]", max.msg())))
+			} else if !max.ok || max.n > Cap {
 				if kind == reflect.Slice {
-					panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [::%v] with capacity %v", max, Cap)))
+					panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [::%v] with capacity %v", max.msg(), Cap)))
 				} else {
-					panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [::%v] with length %v", max, Cap)))
+					panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [::%v] with length %v", max.msg(), Cap)))
 				}
-			} else if hi < 0 {
-				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [:%v:]", hi)))
-			} else if hi > max {
-				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [:%v:%v]", hi, max)))
-			} else if lo < 0 {
-				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [%v::]", lo)))
-			} else if lo > hi {
-				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [%v:%v:]", lo, hi)))
+			} else if hi.signedNeg {
+				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [:%v:]", hi.msg())))
+			} else if !hi.ok || hi.n > max.n {
+				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [:%v:%v]", hi.msg(), max.msg())))
+			} else if lo.signedNeg {
+				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [%v::]", lo.msg())))
+			} else if !lo.ok || lo.n > hi.n {
+				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [%v:%v:]", lo.msg(), hi.msg())))
 			}
 		} else {
-			if hi < 0 {
-				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [:%v]", hi)))
-			} else if hi > Cap {
+			if hi.signedNeg {
+				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [:%v]", hi.msg())))
+			} else if !hi.ok || hi.n > Cap {
 				if kind == reflect.Slice {
-					panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [:%v] with capacity %v", hi, Cap)))
+					panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [:%v] with capacity %v", hi.msg(), Cap)))
 				} else {
-					panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [:%v] with length %v", hi, Cap)))
+					panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [:%v] with length %v", hi.msg(), Cap)))
 				}
-			} else if lo < 0 {
-				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [%v:]", lo)))
-			} else if lo > hi {
-				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [%v:%v]", lo, hi)))
+			} else if lo.signedNeg {
+				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [%v:]", lo.msg())))
+			} else if !lo.ok || lo.n > hi.n {
+				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [%v:%v]", lo.msg(), hi.msg())))
 			}
 		}
 	}
 	switch kind {
 	case reflect.String:
 		// optimization x[len(x):], see $GOROOT/test/slicecap.go
-		if lo == hi {
+		if lo.n == hi.n {
 			return v.Slice(0, 0)
 		}
-		return v.Slice(lo, hi)
+		return v.Slice(lo.n, hi.n)
 	case reflect.Slice, reflect.Array:
-		return v.Slice3(lo, hi, max)
+		return v.Slice3(lo.n, hi.n, max.n)
 	}
 	panic(fmt.Sprintf("slice: unexpected X type: %T", x))
 }

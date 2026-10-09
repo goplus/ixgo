@@ -5,6 +5,7 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"math"
 	"reflect"
 	"testing"
 	"unsafe"
@@ -159,6 +160,62 @@ func TestAsIntAndUint64(t *testing.T) {
 	}
 	mustPanic(t, func() { asInt("x") })
 
+	for _, x := range []value{int(3), int8(3), int16(3), int32(3), int64(3)} {
+		b := asBound(x)
+		if !b.ok || b.n != 3 || b.signedNeg || b.disp != nil {
+			t.Fatalf("asBound(%T 3) = %+v", x, b)
+		}
+	}
+	for _, x := range []value{uint(3), uint8(3), uint16(3), uint32(3), uint64(3), uintptr(3)} {
+		b := asBound(x)
+		if !b.ok || b.n != 3 || b.signedNeg || b.disp != nil {
+			t.Fatalf("asBound(%T 3) = %+v", x, b)
+		}
+	}
+	for _, x := range []value{int(-1), int8(-1), int16(-1), int32(-1), int64(-1)} {
+		b := asBound(x)
+		if b.ok || !b.signedNeg {
+			t.Fatalf("asBound(%T -1) = %+v", x, b)
+		}
+	}
+	b := asBound(uint64(^uint64(0)))
+	if b.ok || b.signedNeg || b.disp != uint64(^uint64(0)) {
+		t.Fatalf("asBound uint64 max = %+v", b)
+	}
+	b = asBound(uint(^uint(0)))
+	if uint64(^uint(0)) > uint64(math.MaxInt) {
+		if b.ok || b.signedNeg {
+			t.Fatalf("asBound uint max = %+v", b)
+		}
+	} else if !b.ok || b.signedNeg {
+		t.Fatalf("asBound uint max = %+v", b)
+	}
+	b = asBound(uintptr(^uintptr(0)))
+	if uint64(^uintptr(0)) > uint64(math.MaxInt) {
+		if b.ok || b.signedNeg {
+			t.Fatalf("asBound uintptr max = %+v", b)
+		}
+	}
+	b = asBound(namedInt(-2))
+	if b.ok || !b.signedNeg || b.disp != int64(-2) {
+		t.Fatalf("asBound namedInt(-2) = %+v", b)
+	}
+	b = asBound(namedUint(5))
+	if !b.ok || b.n != 5 || b.signedNeg || b.disp != nil {
+		t.Fatalf("asBound namedUint(5) = %+v", b)
+	}
+	mustPanic(t, func() { asBound("x") })
+
+	allocs := testing.AllocsPerRun(1000, func() {
+		_ = asBound(int(256))
+		_ = asBound(int64(1000))
+		_ = asBound(uint64(256))
+		_ = asBound(uintptr(1024))
+	})
+	if allocs != 0 {
+		t.Fatalf("asBound success-path allocs = %v, want 0", allocs)
+	}
+
 	if asUint64(int(3)) != 3 || asUint64(int8(3)) != 3 || asUint64(int16(3)) != 3 ||
 		asUint64(int32(3)) != 3 || asUint64(int64(3)) != 3 || asUint64(uint(3)) != 3 ||
 		asUint64(uint8(3)) != 3 || asUint64(uint16(3)) != 3 || asUint64(uint32(3)) != 3 ||
@@ -171,6 +228,28 @@ func TestAsIntAndUint64(t *testing.T) {
 	mustPanic(t, func() { asUint64(int(-1)) })
 	mustPanic(t, func() { asUint64(namedInt(-1)) })
 	mustPanic(t, func() { asUint64("x") })
+}
+
+func TestIndexAndStringLookupBounds(t *testing.T) {
+	src := `package main
+var i int
+var u uint64
+func main() {
+	s := "123"
+	arr := [3]int{1, 2, 3}
+	i = 1
+	_ = s[i]
+	_ = arr[i]
+	u = ^uint64(0)
+	func() { defer func() { recover() }(); _ = s[u] }()
+	func() { defer func() { recover() }(); _ = arr[u] }()
+	_ = s[:2]
+	_ = s[3:]
+}
+`
+	if _, err := NewContext(0).RunFile("main.go", src, nil); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestLegacyBinops(t *testing.T) {
