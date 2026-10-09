@@ -30,7 +30,6 @@ func init() {
 	gorootTestSkips["gcgort.go"] = "slow, 2s"
 	gorootTestSkips["nilptr.go"] = "skip drawin"
 	gorootTestSkips["heapsampling.go"] = "runtime.MemProfileRecord"
-	gorootTestSkips["makeslice.go"] = "TODO, panic info, allocation size out of range"
 	// gorootTestSkips["stackobj.go"] = "skip gc"
 	// gorootTestSkips["stackobj3.go"] = "skip gc"
 	gorootTestSkips["nilptr_aix.go"] = "skip"
@@ -42,13 +41,8 @@ func init() {
 	gorootTestSkips["fixedbugs/issue13169.go"] = "slow, 5.9s"
 	gorootTestSkips["fixedbugs/issue11656.go"] = "ignore"
 	// gorootTestSkips["fixedbugs/issue15281.go"] = "runtime.ReadMemStats"
-	gorootTestSkips["fixedbugs/issue18149.go"] = "runtime.Caller macos //line not support c:/foo/bar.go:987"
-	gorootTestSkips["fixedbugs/issue22662.go"] = "runtime.Caller got $goroot/test/fixedbugs/foo.go:1; want foo.go:1"
 	// gorootTestSkips["fixedbugs/issue27518b.go"] = "BUG, runtime.SetFinalizer"
 	// gorootTestSkips["fixedbugs/issue32477.go"] = "BUG, runtime.SetFinalizer"
-	gorootTestSkips["fixedbugs/issue41239.go"] = "BUG, reflect.Append: different capacity on append"
-	// gorootTestSkips["fixedbugs/issue32477.go"] = "BUG, runtime.SetFinalizer"
-	gorootTestSkips["fixedbugs/issue45175.go"] = "BUG, ssa.Phi call order"
 	gorootTestSkips["fixedbugs/issue4618.go"] = "testing.AllocsPerRun"
 	gorootTestSkips["fixedbugs/issue4667.go"] = "testing.AllocsPerRun"
 	gorootTestSkips["fixedbugs/issue8606b.go"] = "BUG, optimization check"
@@ -64,6 +58,10 @@ func init() {
 	ver, err := strconv.Atoi(runtime.Version()[4:6])
 	if err != nil {
 		panic("version error")
+	}
+	if ver < 27 {
+		gorootTestSkips["fixedbugs/issue18149.go"] = "runtime.Caller macos //line not support c:/foo/bar.go:987"
+		gorootTestSkips["fixedbugs/issue22662.go"] = "runtime.Caller got $goroot/test/fixedbugs/foo.go:1; want foo.go:1"
 	}
 	switch {
 	case ver >= 17:
@@ -98,7 +96,6 @@ func init() {
 			gorootTestSkips["fixedbugs/issue10607.go"] = "skip command"
 			gorootTestSkips["fixedbugs/issue21317.go"] = "skip command"
 			gorootTestSkips["fixedbugs/issue38093.go"] = "skip js"
-			gorootTestSkips["fixedbugs/issue64565.go"] = "skip command"
 			gorootTestSkips["fixedbugs/issue9355.go"] = "skip command"
 			gorootTestSkips["fixedbugs/issue69110.go"] = "skip runtime link"
 			gorootTestSkips["linkmain_run.go"] = "skip link"
