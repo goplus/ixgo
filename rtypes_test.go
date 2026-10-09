@@ -161,13 +161,13 @@ func TestAsIntAndUint64(t *testing.T) {
 
 	for _, x := range []value{int(3), int8(3), int16(3), int32(3), int64(3)} {
 		b := asBound(x)
-		if !b.ok || b.n != 3 || b.signedNeg {
+		if !b.ok || b.n != 3 || b.signedNeg || b.disp != nil {
 			t.Fatalf("asBound(%T 3) = %+v", x, b)
 		}
 	}
 	for _, x := range []value{uint(3), uint8(3), uint16(3), uint32(3), uint64(3), uintptr(3)} {
 		b := asBound(x)
-		if !b.ok || b.n != 3 || b.signedNeg {
+		if !b.ok || b.n != 3 || b.signedNeg || b.disp != nil {
 			t.Fatalf("asBound(%T 3) = %+v", x, b)
 		}
 	}
@@ -200,10 +200,20 @@ func TestAsIntAndUint64(t *testing.T) {
 		t.Fatalf("asBound namedInt(-2) = %+v", b)
 	}
 	b = asBound(namedUint(5))
-	if !b.ok || b.n != 5 || b.signedNeg {
+	if !b.ok || b.n != 5 || b.signedNeg || b.disp != nil {
 		t.Fatalf("asBound namedUint(5) = %+v", b)
 	}
 	mustPanic(t, func() { asBound("x") })
+
+	allocs := testing.AllocsPerRun(1000, func() {
+		_ = asBound(int(256))
+		_ = asBound(int64(1000))
+		_ = asBound(uint64(256))
+		_ = asBound(uintptr(1024))
+	})
+	if allocs != 0 {
+		t.Fatalf("asBound success-path allocs = %v, want 0", allocs)
+	}
 
 	if asUint64(int(3)) != 3 || asUint64(int8(3)) != 3 || asUint64(int16(3)) != 3 ||
 		asUint64(int32(3)) != 3 || asUint64(int64(3)) != 3 || asUint64(uint(3)) != 3 ||

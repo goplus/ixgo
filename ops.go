@@ -152,7 +152,7 @@ const maxInt = int(^uint(0) >> 1)
 // boundIndex is an integer used as a slice or array index.
 // ok means n is a non-negative int that can be used as an index.
 // signedNeg means the original value was a negative signed integer.
-// disp is the original numeric value for panic messages.
+// disp is set only on the panic path so the success path does not box.
 type boundIndex struct {
 	n         int
 	disp      any
@@ -167,14 +167,21 @@ func boundFromSigned(i int64) boundIndex {
 	if uint64(i) > uint64(maxInt) {
 		return boundIndex{disp: i}
 	}
-	return boundIndex{n: int(i), disp: i, ok: true}
+	return boundIndex{n: int(i), ok: true}
 }
 
 func boundFromUnsigned(u uint64) boundIndex {
 	if u > uint64(maxInt) {
 		return boundIndex{disp: u}
 	}
-	return boundIndex{n: int(u), disp: u, ok: true}
+	return boundIndex{n: int(u), ok: true}
+}
+
+func (b boundIndex) msg() any {
+	if b.ok {
+		return b.n
+	}
+	return b.disp
 }
 
 // asBound converts x, which must be an integer, to a boundIndex.
@@ -218,9 +225,9 @@ func asBound(x value) boundIndex {
 
 func panicIndexBound(fr *frame, instr ssa.Instruction, idx boundIndex, length int) {
 	if idx.signedNeg {
-		panic(fr.runtimeError(instr, fmt.Sprintf("index out of range [%v]", idx.disp)))
+		panic(fr.runtimeError(instr, fmt.Sprintf("index out of range [%v]", idx.msg())))
 	}
-	panic(fr.runtimeError(instr, fmt.Sprintf("index out of range [%v] with length %v", idx.disp, length)))
+	panic(fr.runtimeError(instr, fmt.Sprintf("index out of range [%v] with length %v", idx.msg(), length)))
 }
 
 // asUint64 converts x, which must be an unsigned integer, to a uint64
@@ -296,9 +303,9 @@ func slice(fr *frame, instr *ssa.Slice, makesliceCheck bool, ix, ih, il, im regi
 		Cap = v.Cap()
 	}
 
-	lo := boundIndex{n: 0, disp: 0, ok: true}
-	hi := boundIndex{n: Len, disp: Len, ok: true}
-	max := boundIndex{n: Cap, disp: Cap, ok: true}
+	lo := boundIndex{n: 0, ok: true}
+	hi := boundIndex{n: Len, ok: true}
+	max := boundIndex{n: Cap, ok: true}
 	var slice3 bool
 	if instr.Low != nil {
 		lo = asBound(fr.reg(il))
@@ -320,35 +327,35 @@ func slice(fr *frame, instr *ssa.Slice, makesliceCheck bool, ix, ih, il, im regi
 	} else {
 		if slice3 {
 			if max.signedNeg {
-				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [::%v]", max.disp)))
+				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [::%v]", max.msg())))
 			} else if !max.ok || max.n > Cap {
 				if kind == reflect.Slice {
-					panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [::%v] with capacity %v", max.disp, Cap)))
+					panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [::%v] with capacity %v", max.msg(), Cap)))
 				} else {
-					panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [::%v] with length %v", max.disp, Cap)))
+					panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [::%v] with length %v", max.msg(), Cap)))
 				}
 			} else if hi.signedNeg {
-				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [:%v:]", hi.disp)))
+				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [:%v:]", hi.msg())))
 			} else if !hi.ok || hi.n > max.n {
-				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [:%v:%v]", hi.disp, max.disp)))
+				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [:%v:%v]", hi.msg(), max.msg())))
 			} else if lo.signedNeg {
-				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [%v::]", lo.disp)))
+				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [%v::]", lo.msg())))
 			} else if !lo.ok || lo.n > hi.n {
-				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [%v:%v:]", lo.disp, hi.disp)))
+				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [%v:%v:]", lo.msg(), hi.msg())))
 			}
 		} else {
 			if hi.signedNeg {
-				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [:%v]", hi.disp)))
+				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [:%v]", hi.msg())))
 			} else if !hi.ok || hi.n > Cap {
 				if kind == reflect.Slice {
-					panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [:%v] with capacity %v", hi.disp, Cap)))
+					panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [:%v] with capacity %v", hi.msg(), Cap)))
 				} else {
-					panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [:%v] with length %v", hi.disp, Cap)))
+					panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [:%v] with length %v", hi.msg(), Cap)))
 				}
 			} else if lo.signedNeg {
-				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [%v:]", lo.disp)))
+				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [%v:]", lo.msg())))
 			} else if !lo.ok || lo.n > hi.n {
-				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [%v:%v]", lo.disp, hi.disp)))
+				panic(fr.runtimeError(instr, fmt.Sprintf("slice bounds out of range [%v:%v]", lo.msg(), hi.msg())))
 			}
 		}
 	}
