@@ -9,6 +9,7 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"math"
 	"reflect"
 	"unsafe"
 
@@ -110,7 +111,9 @@ func staticToValue(i *Interp, value ssa.Value) (interface{}, bool) {
 }
 
 // asInt converts x, which must be an integer, to an int suitable for
-// use as a slice or array index or operand to make().
+// make, makechan, makemap, and unsafe length operands.
+// Slice and array indexes use asBound, which keeps signed negatives
+// distinct from unsigned overflow for panic text.
 func asInt(x value) int {
 	switch x := x.(type) {
 	case int:
@@ -147,8 +150,6 @@ func asInt(x value) int {
 	panic(fmt.Sprintf("cannot convert %T to int", x))
 }
 
-const maxInt = int(^uint(0) >> 1)
-
 // boundIndex is an integer used as a slice or array index.
 // ok means n is a non-negative int that can be used as an index.
 // signedNeg means the original value was a negative signed integer.
@@ -164,14 +165,14 @@ func boundFromSigned(i int64) boundIndex {
 	if i < 0 {
 		return boundIndex{n: int(i), disp: i, signedNeg: true}
 	}
-	if uint64(i) > uint64(maxInt) {
+	if uint64(i) > uint64(math.MaxInt) {
 		return boundIndex{disp: i}
 	}
 	return boundIndex{n: int(i), ok: true}
 }
 
 func boundFromUnsigned(u uint64) boundIndex {
-	if u > uint64(maxInt) {
+	if u > uint64(math.MaxInt) {
 		return boundIndex{disp: u}
 	}
 	return boundIndex{n: int(u), ok: true}
@@ -220,7 +221,7 @@ func asBound(x value) boundIndex {
 			return boundFromUnsigned(rv.Uint())
 		}
 	}
-	panic(fmt.Sprintf("cannot convert %T to int", x))
+	panic(fmt.Sprintf("cannot convert %T to boundIndex", x))
 }
 
 func panicIndexBound(fr *frame, instr ssa.Instruction, idx boundIndex, length int) {

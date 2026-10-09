@@ -5,6 +5,7 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"math"
 	"reflect"
 	"testing"
 	"unsafe"
@@ -182,7 +183,7 @@ func TestAsIntAndUint64(t *testing.T) {
 		t.Fatalf("asBound uint64 max = %+v", b)
 	}
 	b = asBound(uint(^uint(0)))
-	if uint64(^uint(0)) > uint64(maxInt) {
+	if uint64(^uint(0)) > uint64(math.MaxInt) {
 		if b.ok || b.signedNeg {
 			t.Fatalf("asBound uint max = %+v", b)
 		}
@@ -190,7 +191,7 @@ func TestAsIntAndUint64(t *testing.T) {
 		t.Fatalf("asBound uint max = %+v", b)
 	}
 	b = asBound(uintptr(^uintptr(0)))
-	if uint64(^uintptr(0)) > uint64(maxInt) {
+	if uint64(^uintptr(0)) > uint64(math.MaxInt) {
 		if b.ok || b.signedNeg {
 			t.Fatalf("asBound uintptr max = %+v", b)
 		}
