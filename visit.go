@@ -282,6 +282,7 @@ func (visit *visitor) function(fn *ssa.Function) {
 		pfn.regIndex(p)
 	}
 	var buf [32]*ssa.Value // avoid alloc in common case
+	var wrapReturn func(func(*frame)) func(*frame)
 	for _, b := range fn.Blocks {
 		extra := 0
 		if b != fn.Recover {
@@ -433,9 +434,10 @@ func (visit *visitor) function(fn *ssa.Function) {
 					}
 					ssaInstrs[index] = &ssa.RunDefers{}
 					index++
-					if wrap := wrapReturnReloadNamedResults(pfn); wrap != nil {
-						ifn = wrap(ifn)
+					if wrapReturn == nil {
+						wrapReturn = wrapReturnReloadNamedResults(pfn)
 					}
+					ifn = wrapReturn(ifn)
 				}
 			}
 			Instrs[index] = ifn
@@ -466,7 +468,7 @@ func loc(fset *token.FileSet, pos token.Pos) string {
 func wrapReturnReloadNamedResults(pfn *function) func(func(*frame)) func(*frame) {
 	regs := namedResultRegs(pfn)
 	if regs == nil {
-		return nil
+		return func(ret func(*frame)) func(*frame) { return ret }
 	}
 	return func(ret func(*frame)) func(*frame) {
 		return func(fr *frame) {

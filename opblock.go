@@ -115,7 +115,6 @@ type function struct {
 	gcRegs     [][]register                 // registers cleared at each runtime.GC call site
 	gcReady    []atomic.Bool                // gcRegs entries already computed
 	gcMu       sync.Mutex                   // protects lazy liveness computation
-	hasGCRegs  bool                         // function has dynamic GC-relevant registers
 	Instrs     []func(fr *frame)            // main instrs
 	Recover    []func(fr *frame)            // recover instrs
 	Blocks     []int                        // block offset
@@ -131,6 +130,7 @@ type function struct {
 	clearRanges []stackRange // slots cleared before pooling
 	localRefs   []register   // non-escaping locals holding references
 
+	hasGCRegs     bool // function has dynamic GC-relevant registers
 	hasRunDefers  bool // function SSA contains RunDefers
 	hasDeferStack bool // function emits ssa:deferstack
 	needInject    bool // yield pushed a Defer onto this function's deferstack
@@ -1569,9 +1569,6 @@ func markRangeFuncDeferOwner(pfn *function) {
 
 func makeDefer(interp *Interp, pfn *function, instr *ssa.Defer) func(fr *frame) {
 	iv, ia, ib := getCallIndex(pfn, &instr.Call)
-	if instr.DeferStack != nil {
-		markRangeFuncDeferOwner(pfn)
-	}
 	if instr.DeferStack == nil {
 		return func(fr *frame) {
 			fn, args := interp.prepareCall(fr, &instr.Call, iv, ia, ib)
@@ -1583,6 +1580,7 @@ func makeDefer(interp *Interp, pfn *function, instr *ssa.Defer) func(fr *frame) 
 			}
 		}
 	}
+	markRangeFuncDeferOwner(pfn)
 	id := pfn.regIndex(instr.DeferStack)
 	return func(fr *frame) {
 		fn, args := interp.prepareCall(fr, &instr.Call, iv, ia, ib)
