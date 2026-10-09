@@ -282,9 +282,14 @@ func (visit *visitor) function(fn *ssa.Function) {
 		pfn.regIndex(p)
 	}
 	var buf [32]*ssa.Value // avoid alloc in common case
+	needInject := functionNeedsInjectedRunDefers(fn)
 	for _, b := range fn.Blocks {
-		Instrs := make([]func(*frame), len(b.Instrs))
-		ssaInstrs := make([]ssa.Instruction, len(b.Instrs))
+		extra := 0
+		if needInject && b != fn.Recover {
+			extra = 1
+		}
+		Instrs := make([]func(*frame), len(b.Instrs)+extra)
+		ssaInstrs := make([]ssa.Instruction, len(b.Instrs)+extra)
 		var index int
 		n := len(b.Instrs)
 		for i := 0; i < n; i++ {
@@ -415,6 +420,20 @@ func (visit *visitor) function(fn *ssa.Function) {
 					}
 				}
 			}
+			if needInject && b != fn.Recover {
+				if _, ok := instr.(*ssa.Return); ok {
+					Instrs[index] = func(fr *frame) {
+						if fr._defer != nil {
+							fr.runDefers()
+						}
+					}
+					ssaInstrs[index] = &ssa.RunDefers{}
+					index++
+					if wrap := wrapReturnReloadNamedResults(pfn); wrap != nil {
+						ifn = wrap(ifn)
+					}
+				}
+			}
 			Instrs[index] = ifn
 			ssaInstrs[index] = instr
 			index++
@@ -438,4 +457,101 @@ func loc(fset *token.FileSet, pos token.Pos) string {
 		return ""
 	}
 	return " at " + fset.Position(pos).String()
+}
+
+func functionNeedsInjectedRunDefers(fn *ssa.Function) bool {
+	for _, b := range fn.Blocks {
+		for _, instr := range b.Instrs {
+			if _, ok := instr.(*ssa.RunDefers); ok {
+				return false
+			}
+		}
+	}
+	return functionHasExplicitStackDeferInAnon(fn)
+}
+
+func functionHasExplicitStackDeferInAnon(fn *ssa.Function) bool {
+	seen := make(map[*ssa.Function]bool)
+	for _, child := range fn.AnonFuncs {
+		if functionHasExplicitStackDefer(child, seen) {
+			return true
+		}
+	}
+	return false
+}
+
+func functionHasExplicitStackDefer(fn *ssa.Function, seen map[*ssa.Function]bool) bool {
+	if fn == nil || seen[fn] {
+		return false
+	}
+	seen[fn] = true
+	for _, b := range fn.Blocks {
+		for _, instr := range b.Instrs {
+			if d, ok := instr.(*ssa.Defer); ok && d.DeferStack != nil {
+				return true
+			}
+		}
+	}
+	for _, child := range fn.AnonFuncs {
+		if functionHasExplicitStackDefer(child, seen) {
+			return true
+		}
+	}
+	return false
+}
+
+func wrapReturnReloadNamedResults(pfn *function) func(func(*frame)) func(*frame) {
+	regs := namedResultRegs(pfn)
+	if regs == nil {
+		return nil
+	}
+	return func(ret func(*frame)) func(*frame) {
+		return func(fr *frame) {
+			ret(fr)
+			for i, reg := range regs {
+				if reg < 0 {
+					continue
+				}
+				if ptr := fr.reg(reg); ptr != nil {
+					fr.stack[i] = reflect.ValueOf(ptr).Elem().Interface()
+				}
+			}
+		}
+	}
+}
+
+func namedResultRegs(pfn *function) []register {
+	results := pfn.Fn.Signature.Results()
+	if results.Len() == 0 {
+		return nil
+	}
+	regs := make([]register, results.Len())
+	found := false
+	for i := 0; i < results.Len(); i++ {
+		regs[i] = -1
+		res := results.At(i)
+		if res.Name() == "" {
+			continue
+		}
+		if alloc := namedResultAlloc(pfn.Fn, res); alloc != nil {
+			regs[i] = pfn.regIndex(alloc)
+			found = true
+		}
+	}
+	if !found {
+		return nil
+	}
+	return regs
+}
+
+func namedResultAlloc(fn *ssa.Function, res *types.Var) *ssa.Alloc {
+	for _, b := range fn.Blocks {
+		for _, instr := range b.Instrs {
+			alloc, ok := instr.(*ssa.Alloc)
+			if ok && alloc.Comment == res.Name() && alloc.Pos() == res.Pos() {
+				return alloc
+			}
+		}
+	}
+	return nil
 }
