@@ -257,44 +257,88 @@ func main() {
 func TestIssue30116uBoundsMessages(t *testing.T) {
 	src := `package main
 
-func check(got any, want string) {
-	e, ok := got.(interface{ Error() string })
-	if !ok {
-		panic(got)
-	}
-	if e.Error() != want {
-		panic(e.Error())
-	}
+func want(name string, fn func(), msg string) {
+	defer func() {
+		got := recover()
+		if got == "no panic" {
+			panic(name + ": no panic")
+		}
+		e, ok := got.(interface{ Error() string })
+		if !ok {
+			panic(name)
+		}
+		if e.Error() != msg {
+			panic(name + ": " + e.Error())
+		}
+	}()
+	fn()
+	panic("no panic")
 }
+
+var ga = [3]int{1, 2, 3}
 
 func main() {
 	a := []int{1, 2, 3}
+	arr := [3]int{1, 2, 3}
+	s := "123"
+	_ = a[1]
+	_ = arr[1]
+	_ = s[1]
+	_ = s[:2]
+	_ = s[3:]
 	max := uint64(^uint64(0))
-	func() {
-		defer func() {
-			check(recover(), "runtime error: index out of range [18446744073709551615] with length 3")
-		}()
-		_ = a[max]
-	}()
-	func() {
-		defer func() {
-			check(recover(), "runtime error: slice bounds out of range [:18446744073709551615] with capacity 3")
-		}()
-		_ = a[:max]
-	}()
-	func() {
-		defer func() {
-			check(recover(), "runtime error: slice bounds out of range [18446744073709551615:0]")
-		}()
-		_ = a[max:0]
-	}()
-	i := -1
-	func() {
-		defer func() {
-			check(recover(), "runtime error: index out of range [-1]")
-		}()
-		_ = a[i]
-	}()
+	neg := -1
+
+	want("slice-index-u", func() { _ = a[max] }, "runtime error: index out of range [18446744073709551615] with length 3")
+	want("slice-index-neg", func() { _ = a[neg] }, "runtime error: index out of range [-1]")
+	want("array-index-u", func() { _ = arr[max] }, "runtime error: index out of range [18446744073709551615] with length 3")
+	want("array-index-neg", func() { _ = arr[neg] }, "runtime error: index out of range [-1]")
+	want("string-index-u", func() { _ = s[max] }, "runtime error: index out of range [18446744073709551615] with length 3")
+	want("string-index-neg", func() { _ = s[neg] }, "runtime error: index out of range [-1]")
+
+	want("slice2-hi-u", func() { _ = a[:max] }, "runtime error: slice bounds out of range [:18446744073709551615] with capacity 3")
+	want("slice2-lo-u", func() { _ = a[max:0] }, "runtime error: slice bounds out of range [18446744073709551615:0]")
+	want("slice2-hi-neg", func() { _ = a[:neg] }, "runtime error: slice bounds out of range [:-1]")
+	want("slice2-lo-neg", func() { _ = a[neg:] }, "runtime error: slice bounds out of range [-1:]")
+	want("string2-hi-u", func() { _ = s[:max] }, "runtime error: slice bounds out of range [:18446744073709551615] with length 3")
+	want("global-array2-hi-u", func() { _ = ga[:max] }, "runtime error: slice bounds out of range [:18446744073709551615] with length 3")
+
+	want("slice3-max-u", func() { _ = a[:0:max] }, "runtime error: slice bounds out of range [::18446744073709551615] with capacity 3")
+	want("slice3-max-neg", func() { _ = a[:0:neg] }, "runtime error: slice bounds out of range [::-1]")
+	want("slice3-hi-neg", func() { _ = a[:neg:3] }, "runtime error: slice bounds out of range [:-1:]")
+	want("slice3-hi-u", func() { _ = a[:max:3] }, "runtime error: slice bounds out of range [:18446744073709551615:3]")
+	want("slice3-lo-neg", func() { _ = a[neg:3:3] }, "runtime error: slice bounds out of range [-1::]")
+	want("slice3-lo-u", func() { _ = a[max:3:3] }, "runtime error: slice bounds out of range [18446744073709551615:3:]")
+	want("global-array3-max-u", func() { _ = ga[:0:max] }, "runtime error: slice bounds out of range [::18446744073709551615] with length 3")
+
+	want("alloc-hi-u", allocHiU, "runtime error: makeslice: len out of range")
+	want("alloc-max-u", allocMaxU, "runtime error: makeslice: cap out of range")
+	want("alloc-hi-neg", allocHiNeg, "runtime error: makeslice: len out of range")
+	want("alloc-max-neg", allocMaxNeg, "runtime error: makeslice: cap out of range")
+}
+
+func allocHiU() {
+	var loc [3]int
+	max := uint64(^uint64(0))
+	_ = loc[:max]
+}
+
+func allocMaxU() {
+	var loc [3]int
+	max := uint64(^uint64(0))
+	_ = loc[:0:max]
+}
+
+func allocHiNeg() {
+	var loc [3]int
+	neg := -1
+	_ = loc[:neg]
+}
+
+func allocMaxNeg() {
+	var loc [3]int
+	neg := -1
+	_ = loc[:0:neg]
 }
 `
 	_, err := ixgo.RunFile("main.go", src, nil, 0)

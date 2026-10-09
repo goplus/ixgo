@@ -816,12 +816,8 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 		case reflect.String:
 			return func(fr *frame) {
 				v := fr.reg(ix)
-				idxb := asBound(fr.reg(ii))
-				s := reflect.ValueOf(v).String()
-				if !idxb.ok || idxb.n >= len(s) {
-					panicIndexBound(fr, instr, idxb, len(s))
-				}
-				fr.setReg(ir, s[idxb.n])
+				idx := fr.reg(ii)
+				fr.setReg(ir, reflect.ValueOf(v).String()[asInt(idx)])
 			}
 		case reflect.Map:
 			return func(fr *frame) {
