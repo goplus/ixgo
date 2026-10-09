@@ -59,7 +59,8 @@ func (inter *Interp) callBuiltin(fr *frame, fn *ssa.Builtin, args []value, ssaAr
 		return nil
 
 	case "delete": // delete(map[K]value, K)
-		reflect.ValueOf(args[0]).SetMapIndex(reflect.ValueOf(args[1]), reflect.Value{})
+		m := reflect.ValueOf(args[0])
+		m.SetMapIndex(mapKeyValue(m, args[1]), reflect.Value{})
 		return nil
 
 	case "print", "println": // print(any, ...)
@@ -244,7 +245,8 @@ func (inter *Interp) callBuiltinDiscardsResult(fr *frame, fn *ssa.Builtin, args 
 		reflect.ValueOf(args[0]).Close()
 
 	case "delete": // delete(map[K]value, K)
-		reflect.ValueOf(args[0]).SetMapIndex(reflect.ValueOf(args[1]), reflect.Value{})
+		m := reflect.ValueOf(args[0])
+		m.SetMapIndex(mapKeyValue(m, args[1]), reflect.Value{})
 
 	case "print", "println": // print(any, ...)
 		ln := fn.Name() == "println"
@@ -374,7 +376,8 @@ func (interp *Interp) makeBuiltinByStack(pfn *function, fn *ssa.Builtin, ssaArgs
 		return func(fr *frame) {
 			arg0 := fr.reg(ia[0])
 			arg1 := fr.reg(ia[1])
-			reflect.ValueOf(arg0).SetMapIndex(reflect.ValueOf(arg1), reflect.Value{})
+			m := reflect.ValueOf(arg0)
+			m.SetMapIndex(mapKeyValue(m, arg1), reflect.Value{})
 		}
 
 	case "print", "println": // print(any, ...)

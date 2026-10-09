@@ -16,6 +16,25 @@ import (
 	"golang.org/x/tools/go/ssa"
 )
 
+// mapKeyValue preserves a nil interface as a valid key. An invalid
+// reflect.Value cannot represent that key in MapIndex or SetMapIndex.
+func mapKeyValue(m reflect.Value, key value) reflect.Value {
+	if key == nil {
+		return reflect.Zero(m.Type().Key())
+	}
+	return reflect.ValueOf(key)
+}
+
+// setMapIndex assigns elem under key, preserving nil interface elements as entries.
+func setMapIndex(m reflect.Value, key, elem value) {
+	v := reflect.ValueOf(elem)
+	if elem == nil {
+		// SetMapIndex interprets an invalid value as deletion, not assignment.
+		v = reflect.Zero(m.Type().Elem())
+	}
+	m.SetMapIndex(mapKeyValue(m, key), v)
+}
+
 func xtypeValue(c *ssa.Const, kind types.BasicKind) value {
 	switch kind {
 	case types.Bool, types.UntypedBool:
