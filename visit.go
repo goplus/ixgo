@@ -282,11 +282,15 @@ func (visit *visitor) function(fn *ssa.Function) {
 		pfn.regIndex(p)
 	}
 	var buf [32]*ssa.Value // avoid alloc in common case
-	needInject := functionNeedsInjectedRunDefers(fn)
 	for _, b := range fn.Blocks {
 		extra := 0
-		if needInject && b != fn.Recover {
-			extra = 1
+		if b != fn.Recover {
+			for _, instr := range b.Instrs {
+				if _, ok := instr.(*ssa.Return); ok {
+					extra = 1
+					break
+				}
+			}
 		}
 		Instrs := make([]func(*frame), len(b.Instrs)+extra)
 		ssaInstrs := make([]ssa.Instruction, len(b.Instrs)+extra)
@@ -420,7 +424,7 @@ func (visit *visitor) function(fn *ssa.Function) {
 					}
 				}
 			}
-			if needInject && b != fn.Recover {
+			if pfn.needInject && !pfn.hasRunDefers && b != fn.Recover {
 				if _, ok := instr.(*ssa.Return); ok {
 					Instrs[index] = func(fr *frame) {
 						if fr._defer != nil {
@@ -457,47 +461,6 @@ func loc(fset *token.FileSet, pos token.Pos) string {
 		return ""
 	}
 	return " at " + fset.Position(pos).String()
-}
-
-func functionNeedsInjectedRunDefers(fn *ssa.Function) bool {
-	for _, b := range fn.Blocks {
-		for _, instr := range b.Instrs {
-			if _, ok := instr.(*ssa.RunDefers); ok {
-				return false
-			}
-		}
-	}
-	return functionHasExplicitStackDeferInAnon(fn)
-}
-
-func functionHasExplicitStackDeferInAnon(fn *ssa.Function) bool {
-	seen := make(map[*ssa.Function]bool)
-	for _, child := range fn.AnonFuncs {
-		if functionHasExplicitStackDefer(child, seen) {
-			return true
-		}
-	}
-	return false
-}
-
-func functionHasExplicitStackDefer(fn *ssa.Function, seen map[*ssa.Function]bool) bool {
-	if fn == nil || seen[fn] {
-		return false
-	}
-	seen[fn] = true
-	for _, b := range fn.Blocks {
-		for _, instr := range b.Instrs {
-			if d, ok := instr.(*ssa.Defer); ok && d.DeferStack != nil {
-				return true
-			}
-		}
-	}
-	for _, child := range fn.AnonFuncs {
-		if functionHasExplicitStackDefer(child, seen) {
-			return true
-		}
-	}
-	return false
 }
 
 func wrapReturnReloadNamedResults(pfn *function) func(func(*frame)) func(*frame) {

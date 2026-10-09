@@ -333,7 +333,7 @@ func (inter *Interp) callBuiltinDiscardsResult(fr *frame, fn *ssa.Builtin, args 
 
 // makeBuiltinByStack interprets a call to builtin fn with arguments args,
 // returning its result.
-func (interp *Interp) makeBuiltinByStack(fn *ssa.Builtin, ssaArgs []ssa.Value, ir register, ia []register) func(fr *frame) {
+func (interp *Interp) makeBuiltinByStack(pfn *function, fn *ssa.Builtin, ssaArgs []ssa.Value, ir register, ia []register) func(fr *frame) {
 	switch fn.Name() {
 	case "append":
 		if len(ia) == 1 {
@@ -665,6 +665,7 @@ func (interp *Interp) makeBuiltinByStack(fn *ssa.Builtin, ssaArgs []ssa.Value, i
 			fr.setReg(ir, v.Interface())
 		}
 	case "ssa:deferstack":
+		pfn.hasDeferStack = true
 		return func(fr *frame) {
 			fr.setReg(ir, &fr._defer)
 		}
