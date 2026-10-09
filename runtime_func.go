@@ -130,10 +130,6 @@ func (*interpExt) getMakeFuncVal(fn interface{}) *DirectFuncVal {
 }
 
 func validateDirectFunc(typ reflect.Type, maker DirectFuncMaker) uintptr {
-	if !funcval.IsSupport {
-		checkDirectFuncType(typ, maker)
-		return 0
-	}
 	sentinel := new(Interp)
 	fn := new(function)
 	env := []value{sentinel}

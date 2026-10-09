@@ -293,6 +293,89 @@ func TestRegisterDirectFuncValidation(t *testing.T) {
 			return missingDirectFuncVal{}.call
 		})
 	})
+	t.Run("reflect_make_func", func(t *testing.T) {
+		if !funcval.IsSupport {
+			t.Skip("requires gc function values")
+		}
+		defer func() {
+			if recover() == nil {
+				t.Fatal("expected panic")
+			}
+		}()
+		typ := reflect.TypeFor[func()]()
+		RegisterDirectFunc(typ, func(DirectFuncVal) reflect.Value {
+			return reflect.MakeFunc(typ, func([]reflect.Value) []reflect.Value { return nil })
+		})
+	})
+	t.Run("unregister", func(t *testing.T) {
+		isolateDirectFuncs(t)
+		RegisterDirectFuncFor(func(c DirectFuncVal) func() int {
+			return resultCallback[int]{c}.get
+		})
+		typ := reflect.TypeFor[func() int]()
+		if _, ok := lookupDirectFunc(typ); !ok {
+			t.Fatal("expected registration")
+		}
+		RegisterDirectFunc(typ, nil)
+		if _, ok := lookupDirectFunc(typ); ok {
+			t.Fatal("expected RegisterDirectFunc nil maker to unregister")
+		}
+	})
+	t.Run("unregister_for", func(t *testing.T) {
+		isolateDirectFuncs(t)
+		RegisterDirectFuncFor(func(c DirectFuncVal) func() int {
+			return resultCallback[int]{c}.get
+		})
+		RegisterDirectFuncFor[func() int](nil)
+		if _, ok := lookupDirectFunc(reflect.TypeFor[func() int]()); ok {
+			t.Fatal("expected RegisterDirectFuncFor nil bind to unregister")
+		}
+	})
+}
+
+func TestCheckDirectFuncType(t *testing.T) {
+	typ := reflect.TypeFor[func()]()
+	t.Run("ok", func(t *testing.T) {
+		checkDirectFuncType(typ, func(DirectFuncVal) reflect.Value {
+			return reflect.ValueOf(voidFunc{}.call)
+		})
+	})
+	t.Run("invalid", func(t *testing.T) {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("expected panic")
+			}
+		}()
+		checkDirectFuncType(typ, func(DirectFuncVal) reflect.Value {
+			return reflect.Value{}
+		})
+	})
+	t.Run("wrong_type", func(t *testing.T) {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("expected panic")
+			}
+		}()
+		checkDirectFuncType(typ, func(DirectFuncVal) reflect.Value {
+			return reflect.ValueOf(func() bool { return false })
+		})
+	})
+	t.Run("nil_function", func(t *testing.T) {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("expected panic")
+			}
+		}()
+		checkDirectFuncType(typ, func(DirectFuncVal) reflect.Value {
+			return reflect.ValueOf((func())(nil))
+		})
+	})
+}
+
+func TestDirectFuncReceiverNil(t *testing.T) {
+	if got := directFuncReceiver(nil); got != nil {
+		t.Fatalf("directFuncReceiver(nil) = %v; want nil", got)
+	}
 }
 
 func TestDirectFuncExternalMakeFunc(t *testing.T) {
