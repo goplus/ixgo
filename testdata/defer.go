@@ -49,5 +49,39 @@ func init() {
 	}
 }
 
+func yield2(yield func(int) bool) {
+	_ = yield(1) && yield(2)
+}
+
+func yield3(yield func(int) bool) {
+	_ = yield(1) && yield(2) && yield(3)
+}
+
+var rangeDeferCount int
+
+func rangeFuncOnlyDefers() {
+	n := 0
+	for _ = range yield2 {
+		for _ = range yield3 {
+			n++
+			defer func() { rangeDeferCount++ }()
+		}
+	}
+}
+
+func rangeFuncNamedReturn() (r int) {
+	for range yield2 {
+		defer func() { r++ }()
+	}
+	return
+}
+
 func main() {
+	rangeFuncOnlyDefers()
+	if rangeDeferCount != 6 {
+		panic(rangeDeferCount)
+	}
+	if rangeFuncNamedReturn() != 2 {
+		panic("named return")
+	}
 }

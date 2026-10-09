@@ -115,7 +115,6 @@ type function struct {
 	gcRegs     [][]register                 // registers cleared at each runtime.GC call site
 	gcReady    []atomic.Bool                // gcRegs entries already computed
 	gcMu       sync.Mutex                   // protects lazy liveness computation
-	hasGCRegs  bool                         // function has dynamic GC-relevant registers
 	Instrs     []func(fr *frame)            // main instrs
 	Recover    []func(fr *frame)            // recover instrs
 	Blocks     []int                        // block offset
@@ -130,6 +129,11 @@ type function struct {
 
 	clearRanges []stackRange // slots cleared before pooling
 	localRefs   []register   // non-escaping locals holding references
+
+	hasGCRegs     bool // function has dynamic GC-relevant registers
+	hasRunDefers  bool // function SSA contains RunDefers
+	hasDeferStack bool // function emits ssa:deferstack
+	needInject    bool // yield pushed a Defer onto this function's deferstack
 }
 
 // stackRange is a half-open stack interval [start, end).
@@ -1069,6 +1073,7 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 			}
 		}
 	case *ssa.RunDefers:
+		pfn.hasRunDefers = true
 		return func(fr *frame) {
 			fr.runDefers()
 		}
@@ -1228,7 +1233,7 @@ func makeCallInstr(pfn *function, interp *Interp, instr ssa.Value, call *ssa.Cal
 	iv, ia, ib := getCallIndex(pfn, call)
 	switch fn := call.Value.(type) {
 	case *ssa.Builtin:
-		return interp.makeBuiltinByStack(fn, call.Args, ir, ia)
+		return interp.makeBuiltinByStack(pfn, fn, call.Args, ir, ia)
 	case *ssa.MakeClosure:
 		ifn := interp.loadFunction(fn.Fn.(*ssa.Function))
 		ia = append(ia, ib...)
@@ -1540,6 +1545,28 @@ retry:
 	return reflect.Invalid
 }
 
+const rangeOverFuncYieldSynthetic = "range-over-func yield"
+
+func markRangeFuncDeferOwner(pfn *function) {
+	var fallback *function
+	for p := pfn.Fn.Parent(); p != nil; p = p.Parent() {
+		parent := pfn.Interp.funcs[p]
+		if parent == nil {
+			continue
+		}
+		if parent.hasDeferStack {
+			parent.needInject = true
+			return
+		}
+		if fallback == nil && p.Synthetic != rangeOverFuncYieldSynthetic {
+			fallback = parent
+		}
+	}
+	if fallback != nil {
+		fallback.needInject = true
+	}
+}
+
 func makeDefer(interp *Interp, pfn *function, instr *ssa.Defer) func(fr *frame) {
 	iv, ia, ib := getCallIndex(pfn, &instr.Call)
 	if instr.DeferStack == nil {
@@ -1553,6 +1580,7 @@ func makeDefer(interp *Interp, pfn *function, instr *ssa.Defer) func(fr *frame) 
 			}
 		}
 	}
+	markRangeFuncDeferOwner(pfn)
 	id := pfn.regIndex(instr.DeferStack)
 	return func(fr *frame) {
 		fn, args := interp.prepareCall(fr, &instr.Call, iv, ia, ib)

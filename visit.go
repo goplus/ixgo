@@ -282,9 +282,19 @@ func (visit *visitor) function(fn *ssa.Function) {
 		pfn.regIndex(p)
 	}
 	var buf [32]*ssa.Value // avoid alloc in common case
+	var wrapReturn func(func(*frame)) func(*frame)
 	for _, b := range fn.Blocks {
-		Instrs := make([]func(*frame), len(b.Instrs))
-		ssaInstrs := make([]ssa.Instruction, len(b.Instrs))
+		extra := 0
+		if b != fn.Recover {
+			for _, instr := range b.Instrs {
+				if _, ok := instr.(*ssa.Return); ok {
+					extra = 1
+					break
+				}
+			}
+		}
+		Instrs := make([]func(*frame), len(b.Instrs)+extra)
+		ssaInstrs := make([]ssa.Instruction, len(b.Instrs)+extra)
 		var index int
 		n := len(b.Instrs)
 		for i := 0; i < n; i++ {
@@ -415,6 +425,21 @@ func (visit *visitor) function(fn *ssa.Function) {
 					}
 				}
 			}
+			if pfn.needInject && !pfn.hasRunDefers && b != fn.Recover {
+				if _, ok := instr.(*ssa.Return); ok {
+					Instrs[index] = func(fr *frame) {
+						if fr._defer != nil {
+							fr.runDefers()
+						}
+					}
+					ssaInstrs[index] = &ssa.RunDefers{}
+					index++
+					if wrapReturn == nil {
+						wrapReturn = wrapReturnReloadNamedResults(pfn)
+					}
+					ifn = wrapReturn(ifn)
+				}
+			}
 			Instrs[index] = ifn
 			ssaInstrs[index] = instr
 			index++
@@ -438,4 +463,60 @@ func loc(fset *token.FileSet, pos token.Pos) string {
 		return ""
 	}
 	return " at " + fset.Position(pos).String()
+}
+
+func wrapReturnReloadNamedResults(pfn *function) func(func(*frame)) func(*frame) {
+	regs := namedResultRegs(pfn)
+	if regs == nil {
+		return func(ret func(*frame)) func(*frame) { return ret }
+	}
+	return func(ret func(*frame)) func(*frame) {
+		return func(fr *frame) {
+			ret(fr)
+			for i, reg := range regs {
+				if reg < 0 {
+					continue
+				}
+				if ptr := fr.reg(reg); ptr != nil {
+					fr.stack[i] = reflect.ValueOf(ptr).Elem().Interface()
+				}
+			}
+		}
+	}
+}
+
+func namedResultRegs(pfn *function) []register {
+	results := pfn.Fn.Signature.Results()
+	if results.Len() == 0 {
+		return nil
+	}
+	regs := make([]register, results.Len())
+	found := false
+	for i := 0; i < results.Len(); i++ {
+		regs[i] = -1
+		res := results.At(i)
+		if res.Name() == "" {
+			continue
+		}
+		if alloc := namedResultAlloc(pfn.Fn, res); alloc != nil {
+			regs[i] = pfn.regIndex(alloc)
+			found = true
+		}
+	}
+	if !found {
+		return nil
+	}
+	return regs
+}
+
+func namedResultAlloc(fn *ssa.Function, res *types.Var) *ssa.Alloc {
+	for _, b := range fn.Blocks {
+		for _, instr := range b.Instrs {
+			alloc, ok := instr.(*ssa.Alloc)
+			if ok && alloc.Comment == res.Name() && alloc.Pos() == res.Pos() {
+				return alloc
+			}
+		}
+	}
+	return nil
 }

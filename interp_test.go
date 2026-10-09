@@ -254,6 +254,71 @@ func main() {
 	}
 }
 
+func TestRangeFuncYieldDefer(t *testing.T) {
+	src := `package main
+
+func yield2(yield func(int) bool) {
+	_ = yield(1) && yield(2)
+}
+
+func yield3(yield func(int) bool) {
+	_ = yield(1) && yield(2) && yield(3)
+}
+
+var saved []int
+
+func save(n int) { saved = append(saved, n) }
+
+func f() {
+	n := 0
+	for _ = range yield2 {
+		for _ = range yield3 {
+			n++
+			defer save(n)
+		}
+	}
+}
+
+func g() (r int) {
+	for range yield2 {
+		defer func() { r++ }()
+	}
+	return
+}
+
+func h() int {
+	n := 0
+	for range yield2 {
+		defer func() { n++ }()
+	}
+	return n
+}
+
+func noDefer() {
+	for range yield2 {
+	}
+}
+
+func main() {
+	noDefer()
+	saved = nil
+	f()
+	if len(saved) != 6 || saved[0] != 6 || saved[5] != 1 {
+		panic(saved)
+	}
+	if g() != 2 {
+		panic("named return")
+	}
+	if h() != 0 {
+		panic("unnamed return")
+	}
+}
+`
+	if _, err := ixgo.RunFile("main.go", src, nil, 0); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestIssue30116uBoundsMessages(t *testing.T) {
 	src := `package main
 
