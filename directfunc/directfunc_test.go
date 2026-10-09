@@ -14,17 +14,17 @@
  * limitations under the License.
  */
 
-package typed_test
+package directfunc_test
 
 import (
 	"testing"
 
 	"github.com/goplus/ixgo"
-	_ "github.com/goplus/ixgo/typed"
+	_ "github.com/goplus/ixgo/directfunc"
 	"github.com/visualfc/funcval"
 )
 
-func TestImportRegistersTypedCallbacks(t *testing.T) {
+func TestImportRegistersDirectFuncs(t *testing.T) {
 	ctx := ixgo.NewContext(0)
 	interp, err := ctx.LoadInterp("main.go", `package main
 type boom struct{}
@@ -57,7 +57,7 @@ func main() {}
 		for i, fn := range values {
 			_, n := funcval.Get(fn)
 			if n != wantBridges[i] {
-				t.Errorf("callback %d (%T) uses %d reflection bridges; want %d", i, fn, n, wantBridges[i])
+				t.Errorf("function %d (%T) uses %d reflection bridges; want %d", i, fn, n, wantBridges[i])
 			}
 		}
 	}
@@ -76,10 +76,10 @@ func main() {}
 		t.Fatalf("after increment: even = %v, count = %d, int64 = %d", boolean(), count(), i64())
 	}
 	if str() != "ok" {
-		t.Fatalf("string callback = %q; want ok", str())
+		t.Fatalf("string function = %q; want ok", str())
 	}
 	if got := errcb(); got == nil || got.Error() != "boom" {
-		t.Fatalf("error callback = %v; want boom", got)
+		t.Fatalf("error function = %v; want boom", got)
 	}
 	add(4)
 	if count() != 5 {

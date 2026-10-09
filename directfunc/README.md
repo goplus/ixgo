@@ -1,6 +1,6 @@
-# Typed callbacks
+# Direct funcs
 
-Register a signature by embedding `FuncVal` and binding a method. This example
+Register a signature by embedding `DirectFuncVal` and binding a method. This example
 makes interpreted `func(int) int` values ordinary Go functions:
 
 ```go
@@ -8,15 +8,15 @@ package myint
 
 import "github.com/goplus/ixgo"
 
-type callback struct{ ixgo.FuncVal }
+type fn struct{ ixgo.DirectFuncVal }
 
-func (c callback) Int(n int) int {
+func (c fn) Int(n int) int {
 	return c.Call(n).(int)
 }
 
 func init() {
-	ixgo.RegisterTypedCallbackFunc(func(c ixgo.FuncVal) func(int) int {
-		return callback{c}.Int
+	ixgo.RegisterDirectFuncFor(func(c ixgo.DirectFuncVal) func(int) int {
+		return fn{c}.Int
 	})
 }
 ```
@@ -34,7 +34,7 @@ ixgo.RunFile("main.go", src, nil, 0)
 `func()` is built into ixgo. Import this package for common `func() T` results.
 
 ```go
-import _ "github.com/goplus/ixgo/typed"
+import _ "github.com/goplus/ixgo/directfunc"
 ```
 
 Registered signatures:
@@ -50,6 +50,6 @@ Named types (for example `type Action func()`) stay on `reflect.MakeFunc`
 unless the host registers them.
 
 A later registration for the same signature replaces an earlier one. Passing a
-nil maker to `RegisterTypedCallback`, or a nil bind to
-`RegisterTypedCallbackFunc`, removes the registration. Do not unregister or
+nil maker to `RegisterDirectFunc`, or a nil bind to
+`RegisterDirectFuncFor`, removes the registration. Do not unregister or
 replace a signature while function values of that type are still in use.

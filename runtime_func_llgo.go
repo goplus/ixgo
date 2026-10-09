@@ -110,34 +110,34 @@ type llgoClosure struct {
 	env unsafe.Pointer
 }
 
-func (i *interpExt) getMakeFuncValue(v reflect.Value) *FuncVal {
+func (i *interpExt) getMakeFuncValue(v reflect.Value) *DirectFuncVal {
 	pv := (*reflectValue)(unsafe.Pointer(&v))
 	return i.loadMakeFunc(pv.ptr)
 }
 
-func (i *interpExt) getMakeFuncVal(v interface{}) *FuncVal {
+func (i *interpExt) getMakeFuncVal(v interface{}) *DirectFuncVal {
 	e := (*emptyInterface)(unsafe.Pointer(&v))
 	return i.loadMakeFunc(e.word)
 }
 
-func (i *interpExt) loadMakeFunc(ptr unsafe.Pointer) *FuncVal {
+func (i *interpExt) loadMakeFunc(ptr unsafe.Pointer) *DirectFuncVal {
 	if ptr == nil {
 		return nil
 	}
 	if r, ok := i.makeFuncs.Load(ptr); ok {
-		return r.(*FuncVal)
+		return r.(*DirectFuncVal)
 	}
 	r, ok := i.makeFuncs.Load((*llgoClosure)(ptr).fn)
 	if !ok {
 		return nil
 	}
-	return r.(*FuncVal)
+	return r.(*DirectFuncVal)
 }
 
 func (pfn *function) makeFunction(typ reflect.Type, env []value) reflect.Value {
 	interp := pfn.Interp
-	c := &FuncVal{interp: interp, pfn: pfn, typ: typ, env: env}
-	if v, ok := makeTypedFunction(*c, typ); ok {
+	c := &DirectFuncVal{interp: interp, pfn: pfn, typ: typ, env: env}
+	if v, ok := makeDirectFunction(*c, typ); ok {
 		interp.makeFuncs.Store((*reflectValue)(unsafe.Pointer(&v)).ptr, c)
 		return v
 	}
@@ -149,7 +149,7 @@ func (pfn *function) makeFunction(typ reflect.Type, env []value) reflect.Value {
 	return v
 }
 
-func validateTypedCallback(typ reflect.Type, maker TypedCallbackMaker) uintptr {
-	checkTypedCallbackType(typ, maker)
+func validateDirectFunc(typ reflect.Type, maker DirectFuncMaker) uintptr {
+	checkDirectFuncType(typ, maker)
 	return 0
 }
