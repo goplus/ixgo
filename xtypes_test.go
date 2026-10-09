@@ -88,8 +88,8 @@ func main() {
 	for _, m := range methods {
 		got[m.Obj().Id()]++
 	}
-	if got["test/a.m"] != 1 || got["test/b.m"] != 1 {
-		t.Fatalf("extractMethodSet identities = %v, want test/a.m and test/b.m once each", got)
+	if len(methods) != 2 || got["test/a.m"] != 1 || got["test/b.m"] != 1 {
+		t.Fatalf("extractMethodSet identities = %v (len=%d), want test/a.m and test/b.m once each", got, len(methods))
 	}
 
 	if err := interp.RunInit(); err != nil {
