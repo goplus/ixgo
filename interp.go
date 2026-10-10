@@ -606,6 +606,8 @@ func (fr *frame) runDefer(d *_defer) (ok bool) {
 // If there was no initial state of panic, or it was recovered from,
 // runDefers returns normally.
 func deferHead(p **_defer) *atomic.Pointer[_defer] {
+	// atomic.Pointer[T] is a single unsafe.Pointer; the runtime aliases
+	// it the same way. noCopy is bypassed, but the pointer is never copied.
 	return (*atomic.Pointer[_defer])(unsafe.Pointer(p))
 }
 

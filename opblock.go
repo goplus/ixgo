@@ -1563,11 +1563,12 @@ func makeDefer(interp *Interp, pfn *function, instr *ssa.Defer) func(fr *frame) 
 	if instr.DeferStack == nil {
 		return func(fr *frame) {
 			fn, args := interp.prepareCall(fr, &instr.Call, iv, ia, ib)
-			pushDeferAt(&fr._defer, &_defer{
+			fr._defer = &_defer{
 				fn:      fn,
 				args:    args,
 				ssaArgs: instr.Call.Args,
-			})
+				tail:    fr._defer,
+			}
 		}
 	}
 	ownerFn := deferStackOwner(pfn.Fn)
