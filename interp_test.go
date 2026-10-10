@@ -319,6 +319,157 @@ func main() {
 	}
 }
 
+func TestRangeOverNilArrayPointer(t *testing.T) {
+	src := `package main
+
+type holder struct {
+	data *[3]int
+}
+
+var calls int
+
+func nilPtrFunc() *[4]int {
+	calls++
+	return nil
+}
+
+var nilPtrVar *[4]int
+
+func shouldPanic(f func()) {
+	defer func() {
+		if recover() == nil {
+			panic("should have panicked")
+		}
+	}()
+	f()
+}
+
+func shouldNotPanic(f func()) { f() }
+
+func main() {
+	sum := 0
+	var p *[4]int
+	for i := range (*p) {
+		sum += i
+	}
+	if sum != 6 {
+		panic(sum)
+	}
+
+	n := 0
+	for i := range p {
+		n += i
+	}
+	if n != 6 {
+		panic(n)
+	}
+
+	shouldPanic(func() { _ = len(*nilPtrFunc()) })
+	shouldNotPanic(func() { _ = len(nilPtrFunc()) })
+	shouldNotPanic(func() { _ = len(*nilPtrVar) })
+	shouldNotPanic(func() { _ = len(nilPtrVar) })
+	shouldPanic(func() { _ = cap(*nilPtrFunc()) })
+	shouldNotPanic(func() { _ = cap(*nilPtrVar) })
+
+	calls = 0
+	shouldPanic(func() {
+		for range *nilPtrFunc() {
+		}
+	})
+	if calls != 1 {
+		panic(calls)
+	}
+	shouldNotPanic(func() {
+		for range nilPtrFunc() {
+		}
+	})
+	shouldNotPanic(func() {
+		for range *nilPtrVar {
+		}
+	})
+	shouldNotPanic(func() {
+		for range nilPtrVar {
+		}
+	})
+
+	calls = 0
+	p = nilPtrFunc()
+	sum = 0
+	for i := range *p {
+		sum += i
+	}
+	if calls != 1 || sum != 6 {
+		panic(sum)
+	}
+
+	shouldPanic(func() {
+		var q *[3]int
+		_ = *q
+	})
+	shouldPanic(func() {
+		f := func() [3]int {
+			var q *[3]int
+			return *q
+		}
+		_ = f()
+	})
+	shouldPanic(func() {
+		var ip *int
+		_ = *ip
+	})
+	shouldPanic(func() {
+		var q *[3]int
+		s := []int{1, 2}
+		_ = *q
+		for range s {
+		}
+	})
+	shouldPanic(func() {
+		var q *[3]int
+		_ = *q
+		for i := range *q {
+			_ = i
+		}
+	})
+	shouldPanic(func() {
+		var q *[3]int
+		for _, v := range *q {
+			_ = v
+		}
+	})
+	shouldPanic(func() {
+		ch := make(chan *[3]int, 1)
+		ch <- nil
+		for range *<-ch {
+		}
+	})
+
+	h := &holder{}
+	n = 0
+	for i := range *h.data {
+		n += i
+	}
+	if n != 3 {
+		panic(n)
+	}
+
+	shouldPanic(func() {
+		next := func() holder { return holder{} }
+		for range *next().data {
+		}
+	})
+}
+`
+	if _, err := ixgo.RunFile("main.go", src, nil, 0); err != nil {
+		t.Fatal(err)
+	}
+	ctx := ixgo.NewContext(0)
+	ctx.SetDebug(func(*ixgo.DebugInfo) {})
+	if _, err := ctx.RunFile("main.go", src, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestIssue30116uBoundsMessages(t *testing.T) {
 	src := `package main
 

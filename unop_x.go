@@ -53,6 +53,14 @@ func makeUnOpNOT(pfn *function, instr *ssa.UnOp) func(fr *frame) {
 }
 
 func makeUnOpMUL(pfn *function, instr *ssa.UnOp) func(fr *frame) {
+	// Range over *[N]T with only an index (or no variables) does not evaluate
+	// *p when len is constant. x/tools still emits an unused deref as the
+	// range operand; skip only that trailing load, unless the operand itself
+	// has a call or receive that must panic. The skipped instruction never
+	// writes a register, so debug inspection of the elided *p sees nil.
+	if skipUnusedArrayDeref(instr) && !arrayPointerOperandHasEffectAfter(instr.X, instr.Pos(), nil) {
+		return nil
+	}
 	ir := pfn.regIndex(instr)
 	ix, kx, vx := pfn.regIndex3(instr.X)
 	if kx == kindGlobal {
