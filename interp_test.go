@@ -575,7 +575,8 @@ func TestExpGCCapturedClosure(t *testing.T) {
 import "runtime"
 
 func check(f func(n int)) {
-	wrap := func(n int) { f(n) }
+	inner := func(n int) { f(n) }
+	wrap := func(n int) { inner(n) }
 	runtime.GC()
 	wrap(1)
 }

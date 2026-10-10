@@ -295,6 +295,7 @@ func (pfn *function) initGCLiveness() {
 	}
 	pfn.gcRegs = make([][]register, len(pfn.ssaInstrs))
 	pfn.gcReady = make([]atomic.Bool, len(pfn.ssaInstrs))
+	pfn.initClosureCaptures()
 	if len(pfn.ssaInstrs) > maxEagerGCLivenessPCs {
 		return
 	}
@@ -433,39 +434,71 @@ func (pfn *function) gcRegsAt(pc int) []register {
 	return regs
 }
 
-// keepLiveClosureBindings keeps Allocs captured by a still-live MakeClosure.
-// Those pointers are not operands of later uses of the closure, so the basic
-// operand scan would treat them as dead and nil the box while the closure
-// still points at it.
+// keepLiveClosureBindings keeps registers captured by a still-live MakeClosure.
+// Those bindings are not operands of later uses of the closure, so the operand
+// scan would treat them as dead while the closure still holds them. Nested
+// closures are handled transitively: reviving an inner MakeClosure register
+// enqueues that closure so its own bindings are kept. dead only flips
+// true→false, so the worklist finishes.
 func (pfn *function) keepLiveClosureBindings(dead map[int]bool) {
-	if pfn.Fn == nil {
+	pfn.initClosureCaptures()
+	caps := pfn.closureCaptures
+	if len(caps) == 0 {
 		return
 	}
-	changed := true
-	for changed {
-		changed = false
-		for _, block := range pfn.Fn.Blocks {
-			for _, instr := range block.Instrs {
-				mc, ok := instr.(*ssa.MakeClosure)
-				if !ok {
-					continue
-				}
-				if dead[int(pfn.regIndex(mc))] {
-					continue
-				}
-				for _, b := range mc.Bindings {
-					if b == nil {
-						continue
-					}
-					idx := int(pfn.regIndex(b))
-					if dead[idx] {
-						dead[idx] = false
-						changed = true
-					}
-				}
+	q := make([]int, 0, len(caps))
+	queued := make([]bool, len(caps))
+	for i, c := range caps {
+		if !dead[c.result] {
+			q = append(q, i)
+			queued[i] = true
+		}
+	}
+	for len(q) > 0 {
+		i := q[len(q)-1]
+		q = q[:len(q)-1]
+		for _, idx := range caps[i].binds {
+			if !dead[idx] {
+				continue
+			}
+			dead[idx] = false
+			if j, ok := pfn.closureByResult[idx]; ok && !queued[j] {
+				q = append(q, j)
+				queued[j] = true
 			}
 		}
 	}
+}
+
+func (pfn *function) initClosureCaptures() {
+	if pfn.closureCaptures != nil {
+		return
+	}
+	caps := make([]closureCapture, 0)
+	if pfn.Fn == nil {
+		pfn.closureCaptures = caps
+		return
+	}
+	byResult := make(map[int]int)
+	for _, block := range pfn.Fn.Blocks {
+		for _, instr := range block.Instrs {
+			mc, ok := instr.(*ssa.MakeClosure)
+			if !ok {
+				continue
+			}
+			c := closureCapture{result: int(pfn.regIndex(mc))}
+			for _, b := range mc.Bindings {
+				if b == nil {
+					continue
+				}
+				c.binds = append(c.binds, int(pfn.regIndex(b)))
+			}
+			byResult[c.result] = len(caps)
+			caps = append(caps, c)
+		}
+	}
+	pfn.closureCaptures = caps
+	pfn.closureByResult = byResult
 }
 
 func (fr *frame) valid() bool {
