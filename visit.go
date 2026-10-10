@@ -282,19 +282,9 @@ func (visit *visitor) function(fn *ssa.Function) {
 		pfn.regIndex(p)
 	}
 	var buf [32]*ssa.Value // avoid alloc in common case
-	var wrapReturn func(func(*frame)) func(*frame)
 	for _, b := range fn.Blocks {
-		extra := 0
-		if b != fn.Recover {
-			for _, instr := range b.Instrs {
-				if _, ok := instr.(*ssa.Return); ok {
-					extra = 1
-					break
-				}
-			}
-		}
-		Instrs := make([]func(*frame), len(b.Instrs)+extra)
-		ssaInstrs := make([]ssa.Instruction, len(b.Instrs)+extra)
+		Instrs := make([]func(*frame), len(b.Instrs))
+		ssaInstrs := make([]ssa.Instruction, len(b.Instrs))
 		var index int
 		n := len(b.Instrs)
 		for i := 0; i < n; i++ {
@@ -425,21 +415,6 @@ func (visit *visitor) function(fn *ssa.Function) {
 					}
 				}
 			}
-			if pfn.needInject && !pfn.hasRunDefers && b != fn.Recover {
-				if _, ok := instr.(*ssa.Return); ok {
-					Instrs[index] = func(fr *frame) {
-						if fr._defer != nil {
-							fr.runDefers()
-						}
-					}
-					ssaInstrs[index] = &ssa.RunDefers{}
-					index++
-					if wrapReturn == nil {
-						wrapReturn = wrapReturnReloadNamedResults(pfn)
-					}
-					ifn = wrapReturn(ifn)
-				}
-			}
 			Instrs[index] = ifn
 			ssaInstrs[index] = instr
 			index++
@@ -452,6 +427,7 @@ func (visit *visitor) function(fn *ssa.Function) {
 			pfn.Recover = pfn.Instrs[offset:]
 		}
 	}
+	injectRangeFuncRunDefers(pfn)
 	pfn.makeInstr = nil
 	pfn.base = visit.base
 	visit.base += len(pfn.ssaInstrs) + 2
@@ -463,6 +439,31 @@ func loc(fset *token.FileSet, pos token.Pos) string {
 		return ""
 	}
 	return " at " + fset.Position(pos).String()
+}
+
+// injectRangeFuncRunDefers runs after every block is compiled so yield
+// closures visited later in SSA order can still mark this function.
+// x/tools often omits RunDefers on the enclosing function when the only
+// defers live in range-over-func yield bodies.
+func injectRangeFuncRunDefers(pfn *function) {
+	if !pfn.needInject || pfn.hasRunDefers {
+		return
+	}
+	wrap := wrapReturnReloadNamedResults(pfn)
+	fn := pfn.Fn
+	for i, instr := range pfn.ssaInstrs {
+		ret, ok := instr.(*ssa.Return)
+		if !ok || ret.Parent() == nil || ret.Block() == fn.Recover {
+			continue
+		}
+		orig := pfn.Instrs[i]
+		pfn.Instrs[i] = wrap(func(fr *frame) {
+			if fr._defer != nil {
+				fr.runDefers()
+			}
+			orig(fr)
+		})
+	}
 }
 
 func wrapReturnReloadNamedResults(pfn *function) func(func(*frame)) func(*frame) {

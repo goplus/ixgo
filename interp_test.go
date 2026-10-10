@@ -299,6 +299,30 @@ func noDefer() {
 	}
 }
 
+func wrapped() {
+	saved = nil
+	for i := 0; i < 1; i++ {
+		for v := range yield2 {
+			defer save(v)
+		}
+	}
+}
+
+func nestedGoto() {
+	saved = nil
+	dfr := 0
+	goto L0
+L0:
+	for i0 := range yield2 {
+		dfr++
+		defer save(dfr)
+		for i1 := range yield2 {
+			_ = i1
+		}
+		_ = i0
+	}
+}
+
 func main() {
 	noDefer()
 	saved = nil
@@ -311,6 +335,14 @@ func main() {
 	}
 	if h() != 0 {
 		panic("unnamed return")
+	}
+	wrapped()
+	if len(saved) != 2 || saved[0] != 2 || saved[1] != 1 {
+		panic(saved)
+	}
+	nestedGoto()
+	if len(saved) != 2 || saved[0] != 2 || saved[1] != 1 {
+		panic(saved)
 	}
 }
 `

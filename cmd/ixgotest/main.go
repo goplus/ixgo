@@ -96,7 +96,7 @@ func init() {
 			gorootTestSkips["chanlinear.go"] = "skip -gc-exp"
 		}
 		if ver >= 26 {
-			gorootTestSkips["rangegen.go"] = "BUG, range"
+			gorootTestSkips["rangegen.go"] = "needs x/tools v0.50: goto to range-over-func label restarts the iterator"
 		}
 		if ver >= 27 {
 			gorootTestSkips["genmeth1.go"] = "buld ssa package error: assertion failed"

@@ -1548,24 +1548,33 @@ retry:
 
 const rangeOverFuncYieldSynthetic = "range-over-func yield"
 
+// deferStackOwner is the enclosing source function for a range-over-func
+// yield closure. Yields are transparent; generic instances keep their own
+// frames. Matches llgo/cl.deferStackOwner.
+func deferStackOwner(fn *ssa.Function) *ssa.Function {
+	for fn != nil && fn.Synthetic == rangeOverFuncYieldSynthetic {
+		fn = fn.Parent()
+	}
+	return fn
+}
+
 func markRangeFuncDeferOwner(pfn *function) {
-	var fallback *function
-	for p := pfn.Fn.Parent(); p != nil; p = p.Parent() {
-		parent := pfn.Interp.funcs[p]
-		if parent == nil {
-			continue
-		}
-		if parent.hasDeferStack {
-			parent.needInject = true
-			return
-		}
-		if fallback == nil && p.Synthetic != rangeOverFuncYieldSynthetic {
-			fallback = parent
+	owner := deferStackOwner(pfn.Fn)
+	if owner == nil {
+		return
+	}
+	if ofn := pfn.Interp.funcs[owner]; ofn != nil {
+		ofn.needInject = true
+	}
+}
+
+func findFrame(fr *frame, fn *ssa.Function) *frame {
+	for p := fr; p != nil; p = p.caller {
+		if p.pfn != nil && p.pfn.Fn == fn {
+			return p
 		}
 	}
-	if fallback != nil {
-		fallback.needInject = true
-	}
+	return nil
 }
 
 func makeDefer(interp *Interp, pfn *function, instr *ssa.Defer) func(fr *frame) {
@@ -1582,15 +1591,18 @@ func makeDefer(interp *Interp, pfn *function, instr *ssa.Defer) func(fr *frame) 
 		}
 	}
 	markRangeFuncDeferOwner(pfn)
-	id := pfn.regIndex(instr.DeferStack)
+	ownerFn := deferStackOwner(pfn.Fn)
 	return func(fr *frame) {
 		fn, args := interp.prepareCall(fr, &instr.Call, iv, ia, ib)
-		defers := fr.reg(id).(**_defer)
-		*defers = &_defer{
+		owner := findFrame(fr, ownerFn)
+		if owner == nil {
+			owner = fr
+		}
+		owner._defer = &_defer{
 			fn:      fn,
 			args:    args,
 			ssaArgs: instr.Call.Args,
-			tail:    *defers,
+			tail:    owner._defer,
 		}
 	}
 }
