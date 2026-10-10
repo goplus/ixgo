@@ -408,8 +408,7 @@ func (pfn *function) gcRegsAt(pc int) []register {
 			if *op == nil {
 				continue
 			}
-			reg := pfn.regIndex(*op)
-			dead[int(reg)] = false
+			dead[int(pfn.regIndex(*op))] = false
 		}
 	}
 	for liveBlock := range seen {
@@ -419,11 +418,11 @@ func (pfn *function) gcRegsAt(pc int) []register {
 				if *op == nil {
 					continue
 				}
-				reg := pfn.regIndex(*op)
-				dead[int(reg)] = false
+				dead[int(pfn.regIndex(*op))] = false
 			}
 		}
 	}
+	pfn.keepLiveClosureBindings(dead)
 	regs := make([]register, 0, len(dead))
 	for i, isDead := range dead {
 		if !isDead {
@@ -432,6 +431,41 @@ func (pfn *function) gcRegsAt(pc int) []register {
 		regs = append(regs, register(i))
 	}
 	return regs
+}
+
+// keepLiveClosureBindings keeps Allocs captured by a still-live MakeClosure.
+// Those pointers are not operands of later uses of the closure, so the basic
+// operand scan would treat them as dead and nil the box while the closure
+// still points at it.
+func (pfn *function) keepLiveClosureBindings(dead map[int]bool) {
+	if pfn.Fn == nil {
+		return
+	}
+	changed := true
+	for changed {
+		changed = false
+		for _, block := range pfn.Fn.Blocks {
+			for _, instr := range block.Instrs {
+				mc, ok := instr.(*ssa.MakeClosure)
+				if !ok {
+					continue
+				}
+				if dead[int(pfn.regIndex(mc))] {
+					continue
+				}
+				for _, b := range mc.Bindings {
+					if b == nil {
+						continue
+					}
+					idx := int(pfn.regIndex(b))
+					if dead[idx] {
+						dead[idx] = false
+						changed = true
+					}
+				}
+			}
+		}
+	}
 }
 
 func (fr *frame) valid() bool {
