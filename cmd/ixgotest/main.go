@@ -203,14 +203,14 @@ func getGorootTestRuns() (dir string, run []runfile, runoutput []string) {
 			switch n {
 			case "bench", "dwarf", "codegen":
 				return filepath.SkipDir
-			case "typeparam":
-				ver := runtime.Version()[:6]
-				switch ver {
-				case "go1.18", "go1.19", "go1.20":
-					return nil
-				default:
-					return filepath.SkipDir
-				}
+			// case "typeparam":
+			// 	ver := runtime.Version()[:6]
+			// 	switch ver {
+			// 	case "go1.18", "go1.19", "go1.20":
+			// 		return nil
+			// 	default:
+			// 		return filepath.SkipDir
+			// 	}
 			default:
 				if strings.Contains(n, ".dir") {
 					return filepath.SkipDir
