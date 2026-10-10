@@ -1558,15 +1558,6 @@ func deferStackOwner(fn *ssa.Function) *ssa.Function {
 	return fn
 }
 
-func findFrame(fr *frame, fn *ssa.Function) *frame {
-	for p := fr; p != nil; p = p.caller {
-		if p.pfn != nil && p.pfn.Fn == fn {
-			return p
-		}
-	}
-	return nil
-}
-
 func makeDefer(interp *Interp, pfn *function, instr *ssa.Defer) func(fr *frame) {
 	iv, ia, ib := getCallIndex(pfn, &instr.Call)
 	if instr.DeferStack == nil {
@@ -1597,14 +1588,10 @@ func makeDefer(interp *Interp, pfn *function, instr *ssa.Defer) func(fr *frame) 
 		// ssa:deferstack token is &owner._defer, captured by the yield
 		// closure. Writing through it matches gc's deferprocat and works
 		// when yield runs on another goroutine.
-		if head, ok := fr.reg(id).(**_defer); ok && head != nil {
-			pushDeferAt(head, d)
-			return
+		head, ok := fr.reg(id).(**_defer)
+		if !ok || head == nil {
+			panic("range-over-func defer: missing deferstack token")
 		}
-		owner := findFrame(fr, ownerFn)
-		if owner == nil {
-			panic("range-over-func defer: enclosing frame not on caller chain")
-		}
-		pushDeferAt(&owner._defer, d)
+		pushDeferAt(head, d)
 	}
 }

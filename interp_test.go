@@ -367,6 +367,17 @@ func otherGo() {
 	}
 }
 
+func rec() {
+	saved = nil
+	defer func() { recover() }()
+	for i := range yield2 {
+		defer save(i)
+		if i == 2 {
+			panic("boom")
+		}
+	}
+}
+
 func main() {
 	noDefer()
 	saved = nil
@@ -393,6 +404,10 @@ func main() {
 		panic(saved)
 	}
 	otherGo()
+	if len(saved) != 2 || saved[0] != 2 || saved[1] != 1 {
+		panic(saved)
+	}
+	rec()
 	if len(saved) != 2 || saved[0] != 2 || saved[1] != 1 {
 		panic(saved)
 	}
