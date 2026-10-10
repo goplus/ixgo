@@ -104,28 +104,30 @@ type closure struct {
 }
 
 type function struct {
-	Interp     *Interp
-	Fn         *ssa.Function                // ssa function
-	Main       *ssa.BasicBlock              // Fn.Blocks[0]
-	pool       *sync.Pool                   // create frame pool
-	makeInstr  ssa.Instruction              // make instr check
-	index      map[ssa.Value]uint32         // stack value index 32bit: kind(2) reflect.Kind(6) index(24)
-	instrIndex map[ssa.Instruction][]uint32 // instr -> index
-	cacheRegs  []register                   // cache registers invalidated before runtime.GC
-	gcRegs     [][]register                 // registers cleared at each runtime.GC call site
-	gcReady    []atomic.Bool                // gcRegs entries already computed
-	gcMu       sync.Mutex                   // protects lazy liveness computation
-	Instrs     []func(fr *frame)            // main instrs
-	Recover    []func(fr *frame)            // recover instrs
-	Blocks     []int                        // block offset
-	stack      []value                      // results args envs datas
-	ssaInstrs  []ssa.Instruction            // org ssa instr
-	base       int                          // base of interp
-	nres       int                          // results count
-	narg       int                          // arguments count
-	nenv       int                          // closure free vars count
-	used       int32                        // function used count
-	cached     int32                        // enable cached by pool
+	Interp          *Interp
+	Fn              *ssa.Function                // ssa function
+	Main            *ssa.BasicBlock              // Fn.Blocks[0]
+	pool            *sync.Pool                   // create frame pool
+	makeInstr       ssa.Instruction              // make instr check
+	index           map[ssa.Value]uint32         // stack value index 32bit: kind(2) reflect.Kind(6) index(24)
+	instrIndex      map[ssa.Instruction][]uint32 // instr -> index
+	cacheRegs       []register                   // cache registers invalidated before runtime.GC
+	gcRegs          [][]register                 // registers cleared at each runtime.GC call site
+	gcReady         []atomic.Bool                // gcRegs entries already computed
+	gcMu            sync.Mutex                   // protects lazy liveness computation
+	closureCaptures []closureCapture             // MakeClosure list, built once for GC liveness
+	closureByResult map[int]int                  // result register -> index in closureCaptures
+	Instrs          []func(fr *frame)            // main instrs
+	Recover         []func(fr *frame)            // recover instrs
+	Blocks          []int                        // block offset
+	stack           []value                      // results args envs datas
+	ssaInstrs       []ssa.Instruction            // org ssa instr
+	base            int                          // base of interp
+	nres            int                          // results count
+	narg            int                          // arguments count
+	nenv            int                          // closure free vars count
+	used            int32                        // function used count
+	cached          int32                        // enable cached by pool
 
 	clearRanges []stackRange // slots cleared before pooling
 	localRefs   []register   // non-escaping locals holding references
@@ -134,6 +136,13 @@ type function struct {
 	hasRunDefers  bool // function SSA contains RunDefers
 	hasDeferStack bool // function emits ssa:deferstack
 	needInject    bool // yield pushed a Defer onto this function's deferstack
+}
+
+// closureCapture is one MakeClosure: its result register and captured
+// binding registers (Allocs, inner closures, or other values).
+type closureCapture struct {
+	result int
+	binds  []int
 }
 
 // stackRange is a half-open stack interval [start, end).
@@ -148,6 +157,8 @@ func (p *function) UnsafeRelease() {
 	p.cacheRegs = nil
 	p.gcRegs = nil
 	p.gcReady = nil
+	p.closureCaptures = nil
+	p.closureByResult = nil
 	p.Instrs = nil
 	p.Recover = nil
 	p.Blocks = nil

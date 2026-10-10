@@ -408,8 +408,7 @@ func (pfn *function) gcRegsAt(pc int) []register {
 			if *op == nil {
 				continue
 			}
-			reg := pfn.regIndex(*op)
-			dead[int(reg)] = false
+			dead[int(pfn.regIndex(*op))] = false
 		}
 	}
 	for liveBlock := range seen {
@@ -419,11 +418,12 @@ func (pfn *function) gcRegsAt(pc int) []register {
 				if *op == nil {
 					continue
 				}
-				reg := pfn.regIndex(*op)
-				dead[int(reg)] = false
+				dead[int(pfn.regIndex(*op))] = false
 			}
 		}
 	}
+	// Captured registers are not operands of later closure calls.
+	pfn.keepLiveClosureBindings(dead)
 	regs := make([]register, 0, len(dead))
 	for i, isDead := range dead {
 		if !isDead {
@@ -432,6 +432,79 @@ func (pfn *function) gcRegsAt(pc int) []register {
 		regs = append(regs, register(i))
 	}
 	return regs
+}
+
+// keepLiveClosureBindings keeps registers captured by a still-live MakeClosure.
+// Bindings can be Allocs, another MakeClosure, or any other SSA value; they
+// are not operands of later uses of the closure, so the operand scan would
+// treat them as dead while the closure still holds them.
+//
+// Nested closures are propagated with a worklist: a live outer closure may
+// revive an inner MakeClosure register, which is then enqueued so its own
+// bindings are kept. dead only flips true→false, so the worklist finishes.
+// The MakeClosure list is built once in initClosureCaptures.
+func (pfn *function) keepLiveClosureBindings(dead map[int]bool) {
+	pfn.initClosureCaptures()
+	caps := pfn.closureCaptures
+	if len(caps) == 0 {
+		return
+	}
+	q := make([]int, 0, len(caps))
+	queued := make([]bool, len(caps))
+	for i, c := range caps {
+		if !dead[c.result] {
+			q = append(q, i)
+			queued[i] = true
+		}
+	}
+	for len(q) > 0 {
+		i := q[len(q)-1]
+		q = q[:len(q)-1]
+		for _, idx := range caps[i].binds {
+			if !dead[idx] {
+				continue
+			}
+			dead[idx] = false
+			if j, ok := pfn.closureByResult[idx]; ok && !queued[j] {
+				q = append(q, j)
+				queued[j] = true
+			}
+		}
+	}
+}
+
+// initClosureCaptures walks the function once and records each MakeClosure
+// and the registers it captures. keepLiveClosureBindings calls this; a non-nil
+// empty slice means "already scanned, no closures".
+func (pfn *function) initClosureCaptures() {
+	if pfn.closureCaptures != nil {
+		return
+	}
+	caps := make([]closureCapture, 0)
+	if pfn.Fn == nil {
+		pfn.closureCaptures = caps
+		return
+	}
+	byResult := make(map[int]int)
+	for _, block := range pfn.Fn.Blocks {
+		for _, instr := range block.Instrs {
+			mc, ok := instr.(*ssa.MakeClosure)
+			if !ok {
+				continue
+			}
+			c := closureCapture{result: int(pfn.regIndex(mc))}
+			for _, b := range mc.Bindings {
+				if b == nil {
+					continue
+				}
+				c.binds = append(c.binds, int(pfn.regIndex(b)))
+			}
+			byResult[c.result] = len(caps)
+			caps = append(caps, c)
+		}
+	}
+	pfn.closureCaptures = caps
+	pfn.closureByResult = byResult
 }
 
 func (fr *frame) valid() bool {

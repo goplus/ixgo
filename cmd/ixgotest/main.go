@@ -93,7 +93,6 @@ func init() {
 			gorootTestSkips["linkmain_run.go"] = "skip link"
 			gorootTestSkips["linkobj.go"] = "skip link"
 			gorootTestSkips["linkx_run.go"] = "skip link"
-			gorootTestSkips["chanlinear.go"] = "skip -gc-exp"
 		}
 		if ver >= 26 {
 			gorootTestSkips["rangegen.go"] = "needs x/tools v0.50: goto to range-over-func label restarts the iterator"

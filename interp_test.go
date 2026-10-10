@@ -569,6 +569,31 @@ func main() {
 	}
 }
 
+func TestExpGCCapturedClosure(t *testing.T) {
+	src := `package main
+
+import "runtime"
+
+func check(f func(n int)) {
+	inner := func(n int) { f(n) }
+	wrap := func(n int) { inner(n) }
+	runtime.GC()
+	wrap(1)
+}
+
+func main() {
+	got := 0
+	check(func(n int) { got = n })
+	if got != 1 {
+		panic(got)
+	}
+}
+`
+	if _, err := ixgo.RunFile("main.go", src, nil, ixgo.ExperimentalSupportGC); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestIssue30116uBoundsMessages(t *testing.T) {
 	src := `package main
 
