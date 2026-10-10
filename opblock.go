@@ -1558,16 +1558,6 @@ func deferStackOwner(fn *ssa.Function) *ssa.Function {
 	return fn
 }
 
-func markRangeFuncDeferOwner(pfn *function) {
-	owner := deferStackOwner(pfn.Fn)
-	if owner == nil {
-		return
-	}
-	if ofn := pfn.Interp.funcs[owner]; ofn != nil {
-		ofn.needInject = true
-	}
-}
-
 func findFrame(fr *frame, fn *ssa.Function) *frame {
 	for p := fr; p != nil; p = p.caller {
 		if p.pfn != nil && p.pfn.Fn == fn {
@@ -1582,27 +1572,39 @@ func makeDefer(interp *Interp, pfn *function, instr *ssa.Defer) func(fr *frame) 
 	if instr.DeferStack == nil {
 		return func(fr *frame) {
 			fn, args := interp.prepareCall(fr, &instr.Call, iv, ia, ib)
-			fr._defer = &_defer{
+			pushDeferAt(&fr._defer, &_defer{
 				fn:      fn,
 				args:    args,
 				ssaArgs: instr.Call.Args,
-				tail:    fr._defer,
-			}
+			})
 		}
 	}
-	markRangeFuncDeferOwner(pfn)
 	ownerFn := deferStackOwner(pfn.Fn)
+	if ownerFn == nil {
+		panic("range-over-func defer has no enclosing source function")
+	}
+	if ofn := interp.funcs[ownerFn]; ofn != nil {
+		ofn.needInject = true
+	}
+	id := pfn.regIndex(instr.DeferStack)
 	return func(fr *frame) {
 		fn, args := interp.prepareCall(fr, &instr.Call, iv, ia, ib)
-		owner := findFrame(fr, ownerFn)
-		if owner == nil {
-			owner = fr
-		}
-		owner._defer = &_defer{
+		d := &_defer{
 			fn:      fn,
 			args:    args,
 			ssaArgs: instr.Call.Args,
-			tail:    owner._defer,
 		}
+		// ssa:deferstack token is &owner._defer, captured by the yield
+		// closure. Writing through it matches gc's deferprocat and works
+		// when yield runs on another goroutine.
+		if head, ok := fr.reg(id).(**_defer); ok && head != nil {
+			pushDeferAt(head, d)
+			return
+		}
+		owner := findFrame(fr, ownerFn)
+		if owner == nil {
+			panic("range-over-func defer: enclosing frame not on caller chain")
+		}
+		pushDeferAt(&owner._defer, d)
 	}
 }

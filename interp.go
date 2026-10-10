@@ -605,18 +605,33 @@ func (fr *frame) runDefer(d *_defer) (ok bool) {
 //
 // If there was no initial state of panic, or it was recovered from,
 // runDefers returns normally.
+func deferHead(p **_defer) *atomic.Pointer[_defer] {
+	return (*atomic.Pointer[_defer])(unsafe.Pointer(p))
+}
+
+func pushDeferAt(head **_defer, d *_defer) {
+	p := deferHead(head)
+	for {
+		old := p.Load()
+		d.tail = old
+		if p.CompareAndSwap(old, d) {
+			return
+		}
+	}
+}
+
 func (fr *frame) runDefers() {
 	interp := fr.interp
 	atomic.AddInt32(&interp.deferCount, 1)
 	fr.deferid = goroutineID()
 	interp.deferMap.Store(fr.deferid, fr)
-	for d := fr._defer; d != nil; d = d.tail {
+	d := deferHead(&fr._defer).Swap(nil)
+	for ; d != nil; d = d.tail {
 		fr.runDefer(d)
 	}
 	interp.deferMap.Delete(fr.deferid)
 	atomic.AddInt32(&interp.deferCount, -1)
 	fr.deferid = 0
-	fr._defer = nil
 	// runtime.Goexit() fr.panic == nil
 	if !fr._panic.isNil() {
 		panic(fr._panic.arg) // new panic, or still panicking

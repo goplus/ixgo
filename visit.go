@@ -441,8 +441,9 @@ func loc(fset *token.FileSet, pos token.Pos) string {
 	return " at " + fset.Position(pos).String()
 }
 
-// injectRangeFuncRunDefers runs after every block is compiled so yield
-// closures visited later in SSA order can still mark this function.
+// injectRangeFuncRunDefers runs after all blocks are compiled. Yield
+// closures are visited recursively as *ssa.Function operands during the
+// block loop, so they have already marked needInject by this point.
 // x/tools often omits RunDefers on the enclosing function when the only
 // defers live in range-over-func yield bodies.
 func injectRangeFuncRunDefers(pfn *function) {
