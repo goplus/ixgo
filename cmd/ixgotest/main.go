@@ -95,10 +95,6 @@ func init() {
 			gorootTestSkips["linkx_run.go"] = "skip link"
 			gorootTestSkips["chanlinear.go"] = "skip -gc-exp"
 		}
-		if ver >= 25 {
-			gorootTestSkips["fixedbugs/issue72844.go"] = "BUG, range for nil *op[N]"
-			gorootTestSkips["fixedbugs/issue73476.go"] = "BUG, range for nil *op[N]"
-		}
 		if ver >= 26 {
 			gorootTestSkips["rangegen.go"] = "BUG, range"
 		}
