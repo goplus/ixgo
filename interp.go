@@ -295,7 +295,6 @@ func (pfn *function) initGCLiveness() {
 	}
 	pfn.gcRegs = make([][]register, len(pfn.ssaInstrs))
 	pfn.gcReady = make([]atomic.Bool, len(pfn.ssaInstrs))
-	pfn.initClosureCaptures()
 	if len(pfn.ssaInstrs) > maxEagerGCLivenessPCs {
 		return
 	}
@@ -423,6 +422,7 @@ func (pfn *function) gcRegsAt(pc int) []register {
 			}
 		}
 	}
+	// Captured registers are not operands of later closure calls.
 	pfn.keepLiveClosureBindings(dead)
 	regs := make([]register, 0, len(dead))
 	for i, isDead := range dead {
@@ -435,11 +435,14 @@ func (pfn *function) gcRegsAt(pc int) []register {
 }
 
 // keepLiveClosureBindings keeps registers captured by a still-live MakeClosure.
-// Those bindings are not operands of later uses of the closure, so the operand
-// scan would treat them as dead while the closure still holds them. Nested
-// closures are handled transitively: reviving an inner MakeClosure register
-// enqueues that closure so its own bindings are kept. dead only flips
-// true→false, so the worklist finishes.
+// Bindings can be Allocs, another MakeClosure, or any other SSA value; they
+// are not operands of later uses of the closure, so the operand scan would
+// treat them as dead while the closure still holds them.
+//
+// Nested closures are propagated with a worklist: a live outer closure may
+// revive an inner MakeClosure register, which is then enqueued so its own
+// bindings are kept. dead only flips true→false, so the worklist finishes.
+// The MakeClosure list is built once in initClosureCaptures.
 func (pfn *function) keepLiveClosureBindings(dead map[int]bool) {
 	pfn.initClosureCaptures()
 	caps := pfn.closureCaptures
@@ -470,6 +473,9 @@ func (pfn *function) keepLiveClosureBindings(dead map[int]bool) {
 	}
 }
 
+// initClosureCaptures walks the function once and records each MakeClosure
+// and the registers it captures. keepLiveClosureBindings calls this; a non-nil
+// empty slice means "already scanned, no closures".
 func (pfn *function) initClosureCaptures() {
 	if pfn.closureCaptures != nil {
 		return

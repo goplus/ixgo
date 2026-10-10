@@ -115,19 +115,19 @@ type function struct {
 	gcRegs          [][]register                 // registers cleared at each runtime.GC call site
 	gcReady         []atomic.Bool                // gcRegs entries already computed
 	gcMu            sync.Mutex                   // protects lazy liveness computation
-	closureCaptures []closureCapture
-	closureByResult map[int]int       // MakeClosure result register -> index in closureCaptures
-	Instrs          []func(fr *frame) // main instrs
-	Recover         []func(fr *frame) // recover instrs
-	Blocks          []int             // block offset
-	stack           []value           // results args envs datas
-	ssaInstrs       []ssa.Instruction // org ssa instr
-	base            int               // base of interp
-	nres            int               // results count
-	narg            int               // arguments count
-	nenv            int               // closure free vars count
-	used            int32             // function used count
-	cached          int32             // enable cached by pool
+	closureCaptures []closureCapture             // MakeClosure list, built once for GC liveness
+	closureByResult map[int]int                  // result register -> index in closureCaptures
+	Instrs          []func(fr *frame)            // main instrs
+	Recover         []func(fr *frame)            // recover instrs
+	Blocks          []int                        // block offset
+	stack           []value                      // results args envs datas
+	ssaInstrs       []ssa.Instruction            // org ssa instr
+	base            int                          // base of interp
+	nres            int                          // results count
+	narg            int                          // arguments count
+	nenv            int                          // closure free vars count
+	used            int32                        // function used count
+	cached          int32                        // enable cached by pool
 
 	clearRanges []stackRange // slots cleared before pooling
 	localRefs   []register   // non-escaping locals holding references
@@ -138,7 +138,8 @@ type function struct {
 	needInject    bool // yield pushed a Defer onto this function's deferstack
 }
 
-// closureCapture is a MakeClosure result and the registers it captures.
+// closureCapture is one MakeClosure: its result register and captured
+// binding registers (Allocs, inner closures, or other values).
 type closureCapture struct {
 	result int
 	binds  []int
