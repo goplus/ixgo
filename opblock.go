@@ -1548,24 +1548,14 @@ retry:
 
 const rangeOverFuncYieldSynthetic = "range-over-func yield"
 
-func markRangeFuncDeferOwner(pfn *function) {
-	var fallback *function
-	for p := pfn.Fn.Parent(); p != nil; p = p.Parent() {
-		parent := pfn.Interp.funcs[p]
-		if parent == nil {
-			continue
-		}
-		if parent.hasDeferStack {
-			parent.needInject = true
-			return
-		}
-		if fallback == nil && p.Synthetic != rangeOverFuncYieldSynthetic {
-			fallback = parent
-		}
+// deferStackOwner is the enclosing source function for a range-over-func
+// yield closure. Yields are transparent; generic instances keep their own
+// frames. Matches llgo/cl.deferStackOwner.
+func deferStackOwner(fn *ssa.Function) *ssa.Function {
+	for fn != nil && fn.Synthetic == rangeOverFuncYieldSynthetic {
+		fn = fn.Parent()
 	}
-	if fallback != nil {
-		fallback.needInject = true
-	}
+	return fn
 }
 
 func makeDefer(interp *Interp, pfn *function, instr *ssa.Defer) func(fr *frame) {
@@ -1581,16 +1571,28 @@ func makeDefer(interp *Interp, pfn *function, instr *ssa.Defer) func(fr *frame) 
 			}
 		}
 	}
-	markRangeFuncDeferOwner(pfn)
+	ownerFn := deferStackOwner(pfn.Fn)
+	if ownerFn == nil {
+		panic("range-over-func defer has no enclosing source function")
+	}
+	if ofn := interp.funcs[ownerFn]; ofn != nil {
+		ofn.needInject = true
+	}
 	id := pfn.regIndex(instr.DeferStack)
 	return func(fr *frame) {
 		fn, args := interp.prepareCall(fr, &instr.Call, iv, ia, ib)
-		defers := fr.reg(id).(**_defer)
-		*defers = &_defer{
+		d := &_defer{
 			fn:      fn,
 			args:    args,
 			ssaArgs: instr.Call.Args,
-			tail:    *defers,
 		}
+		// ssa:deferstack token is &owner._defer, captured by the yield
+		// closure. Writing through it matches gc's deferprocat and works
+		// when yield runs on another goroutine.
+		head, ok := fr.reg(id).(**_defer)
+		if !ok || head == nil {
+			panic("range-over-func defer: missing deferstack token")
+		}
+		pushDeferAt(head, d)
 	}
 }

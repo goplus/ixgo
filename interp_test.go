@@ -257,6 +257,11 @@ func main() {
 func TestRangeFuncYieldDefer(t *testing.T) {
 	src := `package main
 
+import (
+	"iter"
+	"sync"
+)
+
 func yield2(yield func(int) bool) {
 	_ = yield(1) && yield(2)
 }
@@ -299,6 +304,80 @@ func noDefer() {
 	}
 }
 
+func wrapped() {
+	saved = nil
+	for i := 0; i < 1; i++ {
+		for v := range yield2 {
+			defer save(v)
+		}
+	}
+}
+
+func nestedGoto() {
+	saved = nil
+	dfr := 0
+	goto L0
+L0:
+	for i0 := range yield2 {
+		dfr++
+		defer save(dfr)
+		for i1 := range yield2 {
+			_ = i1
+		}
+		_ = i0
+	}
+}
+
+func seq(yield func(int) bool) {
+	for i := range yield2 {
+		defer save(i)
+		if !yield(i) {
+			return
+		}
+	}
+}
+
+func pull() {
+	saved = nil
+	next, stop := iter.Pull(seq)
+	defer stop()
+	for {
+		_, ok := next()
+		if !ok {
+			break
+		}
+	}
+}
+
+func seqGo(yield func(int) bool) {
+	_ = yield(1)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		yield(2)
+	}()
+	wg.Wait()
+}
+
+func otherGo() {
+	saved = nil
+	for i := range seqGo {
+		defer save(i)
+	}
+}
+
+func rec() {
+	saved = nil
+	defer func() { recover() }()
+	for i := range yield2 {
+		defer save(i)
+		if i == 2 {
+			panic("boom")
+		}
+	}
+}
+
 func main() {
 	noDefer()
 	saved = nil
@@ -311,6 +390,26 @@ func main() {
 	}
 	if h() != 0 {
 		panic("unnamed return")
+	}
+	wrapped()
+	if len(saved) != 2 || saved[0] != 2 || saved[1] != 1 {
+		panic(saved)
+	}
+	nestedGoto()
+	if len(saved) != 2 || saved[0] != 2 || saved[1] != 1 {
+		panic(saved)
+	}
+	pull()
+	if len(saved) != 2 || saved[0] != 2 || saved[1] != 1 {
+		panic(saved)
+	}
+	otherGo()
+	if len(saved) != 2 || saved[0] != 2 || saved[1] != 1 {
+		panic(saved)
+	}
+	rec()
+	if len(saved) != 2 || saved[0] != 2 || saved[1] != 1 {
+		panic(saved)
 	}
 }
 `
