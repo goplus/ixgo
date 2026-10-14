@@ -3,6 +3,7 @@ package ixgo
 import (
 	"go/constant"
 	"go/token"
+	"go/types"
 	"math"
 	"os"
 	"reflect"
@@ -168,8 +169,9 @@ func many(a,b,c,d,e,f,g,h,i,j int) (int,bool) {return a+b+c+d+e+f+g+h+i+j,j>0}
 func pair(n int) (int,int) {return n+1,n-1}
 func void(n int,p *int) {*p=n}
 func predicate(n int) bool {return n>0}
+func scalarVoid(n int) {}
 func entry(tick func()) (int,bool,int,int) {
- tick();p:=0;void(4,&p);a,b:=pair(3);sum,ok:=many(1,2,3,4,5,6,7,8,9,10)
+ tick();scalarVoid(3);p:=0;void(4,&p);a,b:=pair(3);sum,ok:=many(1,2,3,4,5,6,7,8,9,10)
  if predicate(p) {sum+=p};return sum,ok,a,b
 }
 `)
@@ -1133,12 +1135,13 @@ func TestTypedScalarBooleanAndShiftPaths(t *testing.T) {
 	interp, err := NewContext(0).LoadInterp("scalar.go", `package main
 func equal(n int) int {a,b:=n>2,n>3;if !a==b {return n>>1};return -n}
 func unequal(n int) int {a,b:=n>2,n>3;if a!=b {return n>>2};return n}
+func numericUnequal(n int) int {if n!=2 {return n};return -n}
 `)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer interp.UnsafeRelease()
-	for _, name := range []string{"equal", "unequal"} {
+	for _, name := range []string{"equal", "unequal", "numericUnequal"} {
 		fn := interp.mainpkg.Func(name)
 		r, ok := makeTypedScalarRunnerOf[int](fn).(*typedRunner[int])
 		if !ok {
@@ -1245,4 +1248,128 @@ func exhausted(n int) int {
 	if makeTypedScalarRunnerOf[int](pkg.Func("pointerReturn")) != nil {
 		t.Fatal("scalar pointer return was accepted")
 	}
+}
+
+func TestTypedRejectedConstantAndOperators(t *testing.T) {
+	for _, value := range []constant.Value{
+		constant.MakeInt64(-129),
+		constant.MakeFromLiteral("18446744073709551616", token.INT, 0),
+		constant.MakeFromLiteral("0.5", token.FLOAT, 0),
+	} {
+		if _, ok := typedConstantValue[int8](value); ok {
+			t.Fatalf("int8 accepted %v", value)
+		}
+	}
+	if _, ok := typedConstantValue[uint8](constant.MakeUint64(1 << 63)); ok {
+		t.Fatal("uint8 accepted an overflowing unsigned constant")
+	}
+	if _, ok := typedConstantValue[float64](constant.MakeBool(true)); ok {
+		t.Fatal("float64 accepted a bool constant")
+	}
+	for _, c := range []*ssa.Const{
+		ssa.NewConst(nil, types.NewPointer(types.Typ[types.Int])),
+		ssa.NewConst(nil, types.Typ[types.Invalid]),
+		ssa.NewConst(constant.MakeString("text"), types.Typ[types.String]),
+	} {
+		if _, ok := typedConstOp[int](c, 0, false); ok {
+			t.Fatalf("scalar runner accepted %v", c)
+		}
+	}
+	if isTypedInteger(types.NewSlice(types.Typ[types.Int])) {
+		t.Fatal("slice accepted as an integer type")
+	}
+	if _, ok := typedBinaryOpKind(token.LAND); ok {
+		t.Fatal("logical AND accepted as a scalar binary operation")
+	}
+	if _, ok := typedUnaryOpKind[float64](token.XOR, types.Typ[types.Float64]); ok {
+		t.Fatal("float complement accepted")
+	}
+	if _, ok := typedValueBinaryOpKind[float64](token.REM, types.Typ[types.Float64], types.Typ[types.Float64]); ok {
+		t.Fatal("float remainder accepted")
+	}
+}
+
+// These are valid Go functions whose intermediate values cannot be represented
+// by the selected typed frame, even when their results have a supported type.
+func TestTypedIntermediateFallbacks(t *testing.T) {
+	pkg, err := NewContext(0).LoadFile("intermediates.go", `package main
+func stringPhi(n int) int {s:="a";if n>0 {s="bb"};return len(s)}
+func pointerConstant(n int,p *int) int {if p==nil {return n};return n+1}
+func unusedCondition(n int,b bool) int {if b {return n};return -n}
+func extraLeft(n,x int) int {return x+n}
+func extraRight(n,x int) int {return n+x}
+func extraUnary(n,x int) int {return -x}
+func extraReturn(n,x int) int {return x}
+func shift(n int,x uint) int {return n<<x}
+func constantShift(n int,x int) int {return (n+x)<<uint(1)}
+func badArray(n int) int {a:=[2]bool{true};if a[n] {return 1};return 0}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"stringPhi", "pointerConstant", "unusedCondition", "extraLeft", "extraRight", "extraUnary", "extraReturn", "shift"} {
+		if makeTypedScalarRunnerOf[int](pkg.Func(name)) != nil {
+			t.Fatalf("%s unexpectedly compiled to a scalar runner", name)
+		}
+	}
+	for _, name := range []string{"stringPhi", "shift", "badArray"} {
+		if makeTypedArgumentsRunnerOf[int](pkg.Func(name)) != nil {
+			t.Fatalf("%s unexpectedly compiled to an argument runner", name)
+		}
+	}
+	r := makeTypedArgumentsRunnerOf[int](pkg.Func("constantShift"))
+	if r == nil || r.(interface{ RunArgs([]Value) Value }).RunArgs([]Value{3, 4}) != 14 {
+		t.Fatal("representable constant shift count was rejected")
+	}
+}
+
+func TestTypedFrameCapacityFallbacks(t *testing.T) {
+	source := "package main\n"
+	source += "func params(" + strings.Repeat("_ int,", 65) + ") int {return 0}\n"
+	source += "func constants(n int) int {" + strings.Repeat("n=n+1;", 35) + "return n}\n"
+	source += "func phiConstants(n int) int {for i:=0;i<n;i++ {" + strings.Repeat("n=n+1;", 35) + "};return n}\n"
+	source += "func scratch(n int) int {a,b,c,d,e,f,g:=n,n,n,n,n,n,n;for n>0 {n--;a++;b++;c++;d++;e++;f++;g++};return a+b+c+d+e+f+g}\n"
+	source += "func many(n int)(int,int,int,int,int,int,int,int){return n,n,n,n,n,n,n,n}\n"
+	source += "func tuples(n int) int {" + strings.Repeat("n,_,_,_,_,_,_,_=many(n);", 9) + "return n}\n"
+	source += "func recursive(n int)(int,int,int,int,int,int,int,int){if n>0 {" + strings.Repeat("n=-n;", 25) + "return recursive(n-1)};return n,n,n,n,n,n,n,n}\n"
+	pkg, err := NewContext(0).LoadFile("capacity.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"params", "constants", "phiConstants", "tuples"} {
+		if makeTypedArgumentsRunnerOf[int](pkg.Func(name)) != nil {
+			t.Fatalf("%s exceeded frame capacity without falling back", name)
+		}
+	}
+	for _, name := range []string{"constants", "phiConstants", "recursive", "scratch"} {
+		if makeTypedScalarRunnerOf[int](pkg.Func(name)) != nil {
+			t.Fatalf("%s exceeded scalar capacity without falling back", name)
+		}
+	}
+}
+
+// A third-party factory can implement TypedRunner directly. Report malformed
+// tuple results at the call boundary instead of silently writing bad registers.
+type invalidTypedResultRunner struct{}
+
+func (invalidTypedResultRunner) Run(Value) Value { return nil }
+
+func TestTypedRunnerInvalidCallResult(t *testing.T) {
+	fn := &function{narg: 1, nres: 2, typedRunner: invalidTypedResultRunner{}}
+	if makeCallSpecializerInstr(nil, fn, []register{0}, []register{1}) != nil {
+		t.Fatal("mismatched result destinations were accepted")
+	}
+	if makeCallSpecializerInstr(nil, fn, []register{0}, []register{1, -1}) != nil {
+		t.Fatal("negative result destination was accepted")
+	}
+	call := makeCallSpecializerInstr(nil, fn, []register{0}, []register{1, 2})
+	if call == nil {
+		t.Fatal("missing typed call instruction")
+	}
+	defer func() {
+		if got := recover(); got != "ixgo: typed runner returned an invalid result" {
+			t.Fatalf("invalid result panic = %v", got)
+		}
+	}()
+	call(&frame{stack: []Value{1, nil, nil}})
 }
