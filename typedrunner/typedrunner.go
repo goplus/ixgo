@@ -21,8 +21,8 @@ func makeTypedRunner(fn *ssa.Function) ixgo.TypedRunner {
 	if fn == nil || fn.Signature == nil {
 		return nil
 	}
-	// Select T from any scalar parameter or result. The core validates the
-	// complete signature, body and call graph, including unsupported types.
+	// Select T from any integer or floating-point parameter or result. The core
+	// validates the complete signature, body and call graph.
 	kind := types.Int
 	found := false
 	selectKind := func(typ types.Type) {
@@ -65,6 +65,10 @@ func makeTypedRunner(fn *ssa.Function) ixgo.TypedRunner {
 		return ixgo.MakeTypedRunnerOf[uint64](fn)
 	case types.Uintptr:
 		return ixgo.MakeTypedRunnerOf[uintptr](fn)
+	case types.Float32:
+		return ixgo.MakeTypedRunnerOf[float32](fn)
+	case types.Float64:
+		return ixgo.MakeTypedRunnerOf[float64](fn)
 	default:
 		return nil
 	}
@@ -77,7 +81,8 @@ func scalarKind(typ types.Type) (types.BasicKind, bool) {
 	}
 	switch b.Kind() {
 	case types.Int, types.Int8, types.Int16, types.Int32, types.Int64,
-		types.Uint, types.Uint8, types.Uint16, types.Uint32, types.Uint64, types.Uintptr:
+		types.Uint, types.Uint8, types.Uint16, types.Uint32, types.Uint64, types.Uintptr,
+		types.Float32, types.Float64:
 		return b.Kind(), true
 	default:
 		return 0, false

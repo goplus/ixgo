@@ -2,8 +2,11 @@ package ixgo
 
 import (
 	"go/constant"
+	"go/token"
+	"math"
 	"os"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 
@@ -857,5 +860,269 @@ func bits(n Bits) Bits { return (n ^ 3) + 1 }
 	}
 	if runner := MakeTypedRunnerOf[MyBits](pkg.Func("bits")); runner == nil || runner.Run(MyBits(5)) != MyBits(7) {
 		t.Fatal("named ~uint8 type was not compiled")
+	}
+}
+
+func TestTypedRunnerFloats(t *testing.T) {
+	t.Run("float32", testTypedRunnerFloat[float32])
+	t.Run("float64", testTypedRunnerFloat[float64])
+}
+
+func testTypedRunnerFloat[T interface{ ~float32 | ~float64 }](t *testing.T) {
+	var zero T
+	typ := reflect.TypeOf(zero).Name()
+	source := strings.ReplaceAll(`package main
+func arithmetic(x FLOAT) FLOAT {return -((x+0.1)*1.25-0.5)/2}
+func neg(x FLOAT) FLOAT {return -x}
+func loop(n FLOAT) FLOAT {s:=FLOAT(0); for i:=FLOAT(0);i<n;i++ {s+=i/2};return s}
+func quotient(x,y FLOAT) FLOAT {return x/y}
+func compare(x,y FLOAT) (bool,bool,bool,bool,bool,bool) {return x<y,x<=y,x>y,x>=y,x==y,x!=y}
+func memory(x FLOAT,p *FLOAT) FLOAT {a:=[3]FLOAT{x,0.1,0.25};b:=a;a[0]=99;*p+=b[0];return b[1]+b[2]+*p}
+func mixed(x FLOAT,n int) FLOAT {for i:=0;i<n;i++ {x+=0.5};return x}
+func convert(x FLOAT) int {return int(x)}
+type Named FLOAT
+func named(x Named) Named {return -x}
+`, "FLOAT", typ)
+	interp, err := NewContext(0).LoadInterp("float.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer interp.UnsafeRelease()
+	values := []T{0, T(math.Copysign(0, -1)), 0.1, -2.5, T(math.Inf(1)), T(math.Inf(-1)), T(math.NaN())}
+	for _, name := range []string{"arithmetic", "neg", "loop"} {
+		fn := interp.mainpkg.Func(name)
+		for _, build := range []func(*ssa.Function) TypedRunner{makeTypedScalarRunnerOf[T], makeTypedArgumentsRunnerOf[T]} {
+			runner := build(fn)
+			if runner == nil {
+				t.Fatalf("%s did not compile", name)
+			}
+			inputs := values
+			if name == "loop" {
+				inputs = []T{-1, 0, 1, 5, 20}
+			}
+			for _, x := range inputs {
+				got := runner.Run(x).(T)
+				want, err := interp.RunFunc(name, x)
+				if err != nil {
+					t.Fatal(err)
+				}
+				checkTypedFloat(t, got, want.(T))
+			}
+		}
+	}
+	for _, name := range []string{"quotient", "compare"} {
+		runner, ok := MakeTypedRunnerOf[T](interp.mainpkg.Func(name)).(TypedArgumentsRunner)
+		if !ok {
+			t.Fatalf("%s did not compile", name)
+		}
+		for _, x := range values {
+			for _, y := range values {
+				got := runner.RunArgs([]Value{x, y})
+				want, err := interp.RunFunc(name, x, y)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if name == "quotient" {
+					checkTypedFloat(t, got.(T), want.(T))
+				} else if !reflect.DeepEqual(got, want) {
+					t.Fatalf("compare(%v,%v): %v != %v", x, y, got, want)
+				}
+			}
+		}
+	}
+	runner, ok := MakeTypedRunnerOf[T](interp.mainpkg.Func("memory")).(TypedArgumentsRunner)
+	if !ok {
+		t.Fatal("float memory did not compile")
+	}
+	p, q := T(2), T(2)
+	got := runner.RunArgs([]Value{T(3.5), &p})
+	want, err := interp.RunFunc("memory", T(3.5), &q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkTypedFloat(t, got.(T), want.(T))
+	checkTypedFloat(t, p, q)
+	for _, name := range []string{"mixed", "convert", "named"} {
+		if MakeTypedRunnerOf[T](interp.mainpkg.Func(name)) != nil {
+			t.Fatalf("%s must fall back", name)
+		}
+	}
+	// Test the actual standalone fixture, including recursive pair results.
+	data, err := os.ReadFile("testdata/fibish/fibish_" + typ + ".go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := NewContext(0).LoadFile("fibish.go", string(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, build := range []func(*ssa.Function) TypedRunner{makeTypedScalarRunnerOf[T], makeTypedArgumentsRunnerOf[T]} {
+		r := build(pkg.Func("f"))
+		if r == nil {
+			t.Fatal("float fibish did not compile")
+		}
+		if got := r.Run(T(20)); !reflect.DeepEqual(got, tuple{T(2584), T(8362)}) {
+			t.Fatal(got)
+		}
+	}
+}
+
+func checkTypedFloat[T TypedScalar](t *testing.T, got, want T) {
+	t.Helper()
+	g, w := float64(got), float64(want)
+	if math.IsNaN(g) && math.IsNaN(w) {
+		return
+	}
+	if math.Float64bits(g) != math.Float64bits(w) {
+		t.Fatalf("got %v (%x), want %v (%x)", got, math.Float64bits(g), want, math.Float64bits(w))
+	}
+}
+
+func TestTypedRunnerFloatConstants(t *testing.T) {
+	for _, literal := range []string{"0.1", "1e-45", "3.4028234663852886e38"} {
+		v := constant.MakeFromLiteral(literal, token.FLOAT, 0)
+		got, ok := typedConstantValue[float32](v)
+		want, _ := constant.Float32Val(v)
+		if !ok || got != want {
+			t.Fatalf("float32(%s): %v, %v", literal, got, ok)
+		}
+	}
+	if _, ok := typedConstantValue[float32](constant.MakeFromLiteral("1e39", token.FLOAT, 0)); ok {
+		t.Fatal("float32 overflow accepted")
+	}
+	if _, ok := typedConstantValue[float64](constant.MakeFromLiteral("1e309", token.FLOAT, 0)); ok {
+		t.Fatal("float64 overflow accepted")
+	}
+	if _, ok := typedConstantValue[float32](constant.MakeInt64(1<<24 + 1)); ok {
+		t.Fatal("rounded integer index accepted")
+	}
+	type MyFloat float32
+	pkg, err := NewContext(0).LoadFile("named.go", `package main;type F float32;func f(x F) F {return -x+0.5}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := MakeTypedRunnerOf[MyFloat](pkg.Func("f")); r == nil || r.Run(MyFloat(2)) != MyFloat(-1.5) {
+		t.Fatal("named float failed")
+	}
+}
+
+func BenchmarkTypedRunnerFloatFibish(b *testing.B) {
+	b.Run("float32", benchmarkTypedRunnerFloatFibish[float32])
+	b.Run("float64", benchmarkTypedRunnerFloatFibish[float64])
+}
+
+func benchmarkTypedRunnerFloatFibish[T interface{ ~float32 | ~float64 }](b *testing.B) {
+	var zero T
+	data, err := os.ReadFile("testdata/fibish/fibish_" + reflect.TypeOf(zero).Name() + ".go")
+	if err != nil {
+		b.Fatal(err)
+	}
+	pkg, err := NewContext(0).LoadFile("fibish.go", string(data))
+	if err != nil {
+		b.Fatal(err)
+	}
+	runner, ok := MakeTypedRunnerOf[T](pkg.Func("f")).(*typedRunner[T])
+	if !ok {
+		b.Fatal("scalar float runner missing")
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		got := runner.runTyped(T(20))
+		if got.n != 2 || got.values[0] != T(2584) || got.values[1] != T(8362) {
+			b.Fatal(got)
+		}
+	}
+}
+
+func TestTypedIntegerInstructionsAfterFloatSupport(t *testing.T) {
+	t.Run("int8", func(t *testing.T) { testTypedIntegerInstructions(t, []int8{-128, -7, -1, 0, 1, 7, 127}) })
+	t.Run("int64", func(t *testing.T) { testTypedIntegerInstructions(t, []int64{-1 << 63, -7, -1, 0, 1, 7, 1<<63 - 1}) })
+	t.Run("uint8", func(t *testing.T) { testTypedIntegerInstructions(t, []uint8{0, 1, 7, 127, 128, 255}) })
+	t.Run("uint64", func(t *testing.T) { testTypedIntegerInstructions(t, []uint64{0, 1, 7, 1 << 63, 1<<64 - 1}) })
+}
+
+func testTypedIntegerInstructions[T TypedScalar](t *testing.T, values []T) {
+	var zero T
+	typ := reflect.TypeOf(zero).Name()
+	source := strings.ReplaceAll(`package main
+func bits(x,y INT) (INT,INT,INT,INT,INT) {return x&y,x|y,x^y,x&^y,^x}
+func rem(x,y INT) INT {return x%y}
+func shl(x,y INT) INT {return x<<y}
+func shr(x,y INT) INT {return x>>y}
+`, "INT", typ)
+	interp, err := NewContext(0).LoadInterp("ints.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer interp.UnsafeRelease()
+	for _, name := range []string{"bits", "rem", "shl", "shr"} {
+		r, ok := MakeTypedRunnerOf[T](interp.mainpkg.Func(name)).(TypedArgumentsRunner)
+		if !ok {
+			t.Fatalf("%s did not compile", name)
+		}
+		for _, x := range values {
+			for _, y := range values {
+				if name == "rem" && y == 0 || (name == "shl" || name == "shr") && y < 0 {
+					continue
+				}
+				got := r.RunArgs([]Value{x, y})
+				want, err := interp.RunFunc(name, x, y)
+				if err != nil || !reflect.DeepEqual(got, want) {
+					t.Fatalf("%s(%v,%v): typed=%v boxed=%v err=%v", name, x, y, got, want, err)
+				}
+			}
+		}
+		if name == "rem" || name == "shl" || name == "shr" {
+			y := zero
+			if name != "rem" {
+				y = values[0]
+				if y >= 0 {
+					continue
+				}
+			}
+			func() {
+				defer func() {
+					if recover() == nil {
+						t.Errorf("%s did not panic", name)
+					}
+				}()
+				r.RunArgs([]Value{T(1), y})
+			}()
+		}
+	}
+}
+
+func BenchmarkTypedIntegerOperators(b *testing.B) {
+	b.Run("int", benchmarkTypedIntegerOperators[int])
+	b.Run("uint64", benchmarkTypedIntegerOperators[uint64])
+}
+
+func benchmarkTypedIntegerOperators[T TypedScalar](b *testing.B) {
+	var zero T
+	source := strings.ReplaceAll(`package main
+func rem(n INT) INT {s:=INT(0);for i:=INT(1);i<n;i++ {s+=i%7};return s}
+func bits(n INT) INT {s:=INT(0);for i:=INT(1);i<n;i++ {s+=(i&31)^(i|7)};return s}
+func shl(n INT) INT {s:=INT(0);for i:=INT(1);i<n;i++ {s+=i<<3};return s}
+func shr(n INT) INT {s:=INT(0);for i:=INT(1);i<n;i++ {s+=i>>3};return s}
+`, "INT", reflect.TypeOf(zero).Name())
+	pkg, err := NewContext(0).LoadFile("operators.go", source)
+	if err != nil {
+		b.Fatal(err)
+	}
+	for _, name := range []string{"rem", "bits", "shl", "shr"} {
+		b.Run(name, func(b *testing.B) {
+			runner, ok := MakeTypedRunnerOf[T](pkg.Func(name)).(*typedRunner[T])
+			if !ok {
+				b.Fatal("scalar integer runner missing")
+			}
+			n := 1000
+			want := runner.runTyped(T(n))
+			b.ReportAllocs()
+			for b.Loop() {
+				if got := runner.runTyped(T(n)); got != want {
+					b.Fatal(got)
+				}
+			}
+		})
 	}
 }

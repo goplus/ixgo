@@ -9,6 +9,7 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"math"
 	"reflect"
 
 	"golang.org/x/tools/go/ssa"
@@ -17,7 +18,8 @@ import (
 // TypedScalar is the scalar set supported by the generic typed runner.
 type TypedScalar interface {
 	~int | ~int8 | ~int16 | ~int32 | ~int64 |
-		~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr
+		~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr |
+		~float32 | ~float64
 }
 
 const maxTypedResults = 8
@@ -140,19 +142,19 @@ func (r *typedRunner[T]) runTyped(input T) typedResults[T] {
 		case typedQuo:
 			regs[op.dst] = regs[op.x] / regs[op.y]
 		case typedRem:
-			regs[op.dst] = regs[op.x] % regs[op.y]
+			regs[op.dst] = typedRemainder(regs[op.x], regs[op.y])
 		case typedAnd:
-			regs[op.dst] = regs[op.x] & regs[op.y]
+			regs[op.dst] = T(uint64(regs[op.x]) & uint64(regs[op.y]))
 		case typedOr:
-			regs[op.dst] = regs[op.x] | regs[op.y]
+			regs[op.dst] = T(uint64(regs[op.x]) | uint64(regs[op.y]))
 		case typedXor:
-			regs[op.dst] = regs[op.x] ^ regs[op.y]
+			regs[op.dst] = T(uint64(regs[op.x]) ^ uint64(regs[op.y]))
 		case typedAndNot:
-			regs[op.dst] = regs[op.x] &^ regs[op.y]
+			regs[op.dst] = T(uint64(regs[op.x]) &^ uint64(regs[op.y]))
 		case typedShl:
-			regs[op.dst] = regs[op.x] << regs[op.y]
+			regs[op.dst] = typedShiftLeft(regs[op.x], regs[op.y])
 		case typedShr:
-			regs[op.dst] = regs[op.x] >> regs[op.y]
+			regs[op.dst] = typedShiftRight(regs[op.x], regs[op.y])
 		case typedLess:
 			bools[op.dst] = regs[op.x] < regs[op.y]
 		case typedLessEqual:
@@ -168,7 +170,7 @@ func (r *typedRunner[T]) runTyped(input T) typedResults[T] {
 		case typedNegate:
 			regs[op.dst] = -regs[op.x]
 		case typedComplement:
-			regs[op.dst] = ^regs[op.x]
+			regs[op.dst] = T(^uint64(regs[op.x]))
 		case typedNot:
 			bools[op.dst] = !bools[op.x]
 		case typedBoolEqual:
@@ -532,6 +534,10 @@ func typedTypeIs[T TypedScalar](typ types.Type) bool {
 		return b.Kind() == types.Uint64
 	case reflect.Uintptr:
 		return b.Kind() == types.Uintptr
+	case reflect.Float32:
+		return b.Kind() == types.Float32
+	case reflect.Float64:
+		return b.Kind() == types.Float64
 	default:
 		return false
 	}
@@ -691,19 +697,19 @@ func (r *typedArgsRunner[T]) RunArgs(args []Value) Value {
 		case typedQuo:
 			fr.regs[op.dst] = fr.regs[op.x] / fr.regs[op.y]
 		case typedRem:
-			fr.regs[op.dst] = fr.regs[op.x] % fr.regs[op.y]
+			fr.regs[op.dst] = typedRemainder(fr.regs[op.x], fr.regs[op.y])
 		case typedAnd:
-			fr.regs[op.dst] = fr.regs[op.x] & fr.regs[op.y]
+			fr.regs[op.dst] = T(uint64(fr.regs[op.x]) & uint64(fr.regs[op.y]))
 		case typedOr:
-			fr.regs[op.dst] = fr.regs[op.x] | fr.regs[op.y]
+			fr.regs[op.dst] = T(uint64(fr.regs[op.x]) | uint64(fr.regs[op.y]))
 		case typedXor:
-			fr.regs[op.dst] = fr.regs[op.x] ^ fr.regs[op.y]
+			fr.regs[op.dst] = T(uint64(fr.regs[op.x]) ^ uint64(fr.regs[op.y]))
 		case typedAndNot:
-			fr.regs[op.dst] = fr.regs[op.x] &^ fr.regs[op.y]
+			fr.regs[op.dst] = T(uint64(fr.regs[op.x]) &^ uint64(fr.regs[op.y]))
 		case typedShl:
-			fr.regs[op.dst] = fr.regs[op.x] << fr.regs[op.y]
+			fr.regs[op.dst] = typedShiftLeft(fr.regs[op.x], fr.regs[op.y])
 		case typedShr:
-			fr.regs[op.dst] = fr.regs[op.x] >> fr.regs[op.y]
+			fr.regs[op.dst] = typedShiftRight(fr.regs[op.x], fr.regs[op.y])
 		case typedLess:
 			fr.bools[op.dst] = fr.regs[op.x] < fr.regs[op.y]
 		case typedLessEqual:
@@ -727,7 +733,7 @@ func (r *typedArgsRunner[T]) RunArgs(args []Value) Value {
 		case typedNegate:
 			fr.regs[op.dst] = -fr.regs[op.x]
 		case typedComplement:
-			fr.regs[op.dst] = ^fr.regs[op.x]
+			fr.regs[op.dst] = T(^uint64(fr.regs[op.x]))
 		case typedNot:
 			fr.bools[op.dst] = !fr.bools[op.x]
 		case typedAlloc:
@@ -735,8 +741,11 @@ func (r *typedArgsRunner[T]) RunArgs(args []Value) Value {
 			fr.ptrs[op.dst] = typedMemoryPointer(depth*typedArgsLimit + op.offset + 1)
 		case typedIndexAddr:
 			index := fr.regs[op.y]
-			if index < 0 || uint64(index) >= uint64(op.length) {
-				_ = fr.locals[:op.length][index] // Preserve a runtime bounds panic.
+			if index < 0 {
+				_ = fr.locals[:op.length][int64(index)] // Preserve a runtime bounds panic.
+			}
+			if uint64(index) >= uint64(op.length) {
+				_ = fr.locals[:op.length][uint64(index)]
 			}
 			fr.ptrs[op.dst] = fr.ptrs[op.x] + typedMemoryPointer(index)
 		case typedArrayLoad:
@@ -1351,7 +1360,7 @@ func typedConstOp[T TypedScalar](c *ssa.Const, dst uint8, allowNil bool) (typedO
 		}
 		return op, true
 	}
-	if c.Value.Kind() != constant.Int || !isTypedInteger(c.Type()) {
+	if !typedTypeIs[T](c.Type()) && (c.Value.Kind() != constant.Int || !isTypedInteger(c.Type())) {
 		return op, false
 	}
 	var ok bool
@@ -1361,6 +1370,25 @@ func typedConstOp[T TypedScalar](c *ssa.Const, dst uint8, allowNil bool) (typedO
 
 func typedConstantValue[T TypedScalar](v constant.Value) (T, bool) {
 	var zero T
+	kind := reflect.TypeOf(zero).Kind()
+	if kind == reflect.Float32 || kind == reflect.Float64 {
+		if v.Kind() != constant.Int && v.Kind() != constant.Float {
+			return zero, false
+		}
+		var n float64
+		var exact bool
+		if kind == reflect.Float32 {
+			f, ok := constant.Float32Val(v)
+			n, exact = float64(f), ok
+		} else {
+			n, exact = constant.Float64Val(v)
+		}
+		// Integer constants may also be array indices. Do not round them.
+		return T(n), !math.IsInf(n, 0) && (v.Kind() != constant.Int || exact)
+	}
+	if v.Kind() != constant.Int {
+		return zero, false
+	}
 	bits := reflect.TypeOf(zero).Bits()
 	if bits == 0 {
 		return zero, false
@@ -1402,7 +1430,9 @@ func typedUnaryOpKind[T TypedScalar](op token.Token, typ types.Type) (typedOpKin
 		case token.SUB:
 			return typedNegate, true
 		case token.XOR:
-			return typedComplement, true
+			if isTypedInteger(typ) {
+				return typedComplement, true
+			}
 		}
 	}
 	return 0, false
@@ -1410,6 +1440,13 @@ func typedUnaryOpKind[T TypedScalar](op token.Token, typ types.Type) (typedOpKin
 
 func typedValueBinaryOpKind[T TypedScalar](op token.Token, x, y types.Type) (typedOpKind, bool) {
 	if typedTypeIs[T](x) && typedTypeIs[T](y) {
+		if !isTypedInteger(x) {
+			switch op {
+			case token.ADD, token.SUB, token.MUL, token.QUO, token.LSS, token.LEQ, token.GTR, token.GEQ, token.EQL, token.NEQ:
+			default:
+				return 0, false
+			}
+		}
 		return typedBinaryOpKind(op)
 	}
 	if x == types.Typ[types.Bool] && y == types.Typ[types.Bool] {
@@ -1421,4 +1458,34 @@ func typedValueBinaryOpKind[T TypedScalar](op token.Token, x, y types.Type) (typ
 		}
 	}
 	return 0, false
+}
+
+// Integer-only instructions keep their low bits when narrowing back to T.
+// The SSA compiler never emits these instructions for floating-point operands.
+// Keeping conversions here allows the shared execution loops to accept floats
+// without per-instruction callbacks or a second copy of the control flow.
+func typedRemainder[T TypedScalar](x, y T) T {
+	var zero T
+	if zero-1 > zero {
+		return T(uint64(x) % uint64(y))
+	}
+	return T(int64(x) % int64(y))
+}
+
+func typedShiftLeft[T TypedScalar](x, y T) T {
+	if y < 0 {
+		return T(uint64(x) << int64(y)) // Preserve negative shift panics.
+	}
+	return T(uint64(x) << uint64(y))
+}
+
+func typedShiftRight[T TypedScalar](x, y T) T {
+	if y < 0 {
+		return T(int64(x) >> int64(y))
+	}
+	var zero T
+	if zero-1 > zero {
+		return T(uint64(x) >> uint64(y))
+	}
+	return T(int64(x) >> uint64(y))
 }

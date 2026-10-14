@@ -3,23 +3,29 @@
 Run each Go file separately:
 
 - `fibish.go`: the recursive Go ABI example.
+- `fibish_float32.go` and `fibish_float64.go`: the same recursive computation using floating-point parameters and results.
 - `fibish_closure.go`: the Go ABI example that forwards a function argument.
 - `fibish_loop.go`: the same recurrence evaluated with a loop and four scalar states.
 - `uglyfib.go`: the slower Go ABI example with pointers, arrays, and mutual recursion.
 
-All four use `x = 40`. The three fibish examples print:
+All Go examples use `x = 40`. The integer fibish examples and the float64
+version print:
 
 ```text
 f(40)=39088169,126491972
 ```
 
-`uglyfib.go` prints `Fib(40)=102334155`.
+The float32 version prints `f(40)=39088168,126491968`, matching native Go.
+The difference comes from float32 rounding once the results exceed its exact
+integer range. `uglyfib.go` prints `Fib(40)=102334155`.
 
 Build the CLI once, then measure each program:
 
 ```sh
 go build -o /tmp/ixgo-fibish ./cmd/ixgo
 /usr/bin/time -p /tmp/ixgo-fibish run testdata/fibish/fibish.go
+/usr/bin/time -p /tmp/ixgo-fibish run testdata/fibish/fibish_float32.go
+/usr/bin/time -p /tmp/ixgo-fibish run testdata/fibish/fibish_float64.go
 /usr/bin/time -p /tmp/ixgo-fibish run testdata/fibish/fibish_closure.go
 /usr/bin/time -p /tmp/ixgo-fibish run testdata/fibish/fibish_loop.go
 /usr/bin/time -p /tmp/ixgo-fibish run testdata/fibish/uglyfib.go
@@ -31,6 +37,81 @@ reflects the algorithms. Compare the same file between ixgo versions to measure
 an interpreter optimization. The library requires a blank import of
 `github.com/goplus/ixgo/typedrunner` to enable the optional typed runner; the CLI
 already imports it.
+
+## Floating-point runners
+
+Measured on the same Apple M5 with Go 1.27.1, `GOMAXPROCS=1`, and input 40.
+Each value is the median of three serial, alternating process runs, including
+startup and loading. The baseline is `0a45aa05`, whose typedrunner plugin falls
+back for floats; the float implementation is the current working tree based on
+that commit. Both binaries execute the same source. Every output was checked
+against the corresponding native Go binary.
+
+| Example | Before float support | With float support | Speedup |
+| --- | ---: | ---: | ---: |
+| `fibish_float32.go` | 8.881 s | 2.548 s | 3.49x |
+| `fibish_float64.go` | 9.428 s | 2.820 s | 3.34x |
+
+The generic core supports one numeric type per function and call graph, with
+separate bool registers. Float32 and float64 runners support arithmetic,
+comparisons, negation, Phi, recursion, pointers, and local arrays. Mixed numeric
+types and numeric conversions currently fall back to the ordinary interpreter.
+
+Integer regression checks use five alternating runs at `GOMAXPROCS=1` with a
+250 ms benchmark duration. Integer fibish(40) remains effectively unchanged
+(2.497 s before, 2.481 s after), as do the multiargument shallow/mixed/deep
+benchmarks (within 1.5%). Loop results vary: sum, branch, and nested improve;
+fibloop is unchanged; the Phi swap case regresses from 8.352 to 9.019 us
+(8.0%). These are measurements of the two default binary layouts. The layout
+investigation below limits how they can be attributed to the float changes.
+Raw timing JSON files are not checked in.
+
+Integer-only operator checks use three alternating runs, a 300 ms duration,
+and loops of 999 iterations. Each entry is the median, with zero allocations.
+
+| Type / operator | Before | After | Time change |
+| --- | ---: | ---: | ---: |
+| `int/rem` | 9.048 us | 9.363 us | +3.5% |
+| `int/bits` | 10.758 us | 9.279 us | -13.7% |
+| `int/shl` | 8.500 us | 8.549 us | +0.6% |
+| `int/shr` | 9.666 us | 10.391 us | +7.5% |
+| `uint64/rem` | 8.878 us | 8.691 us | -2.1% |
+| `uint64/bits` | 9.904 us | 10.734 us | +8.4% |
+| `uint64/shl` | 7.311 us | 7.911 us | +8.2% |
+| `uint64/shr` | 9.061 us | 8.933 us | -1.4% |
+
+The default binaries show mixed effects, including up to 8.4% slower cases.
+Further investigation identifies a substantial sensitivity to linked code and
+data layout rather than extra arithmetic instructions for int/uint64:
+
+- The int scalar execution loop remains 2752 bytes; uint64 remains 2720 bytes.
+  The remainder and shift helpers are inlined. After normalizing relocations,
+  the int loop changes only the generic dictionary offset used by recursive
+  calls. Its nonrecursive operator paths have the same instructions. The
+  uint64 remainder uses a different temporary register, with the same instruction
+  count; the other nonrecursive paths are unchanged.
+- A temporary diagnostic binary runs both the original integer loop and the
+  float-capable loop against the exact same compiled instruction slice. Three
+  alternating process runs at `GOMAXPROCS=1`, 200 ms per benchmark, show the
+  following median results when only linker alignment is changed:
+
+| Same-process swap diagnostic | Original loop | Float-capable loop | Time change |
+| --- | ---: | ---: | ---: |
+| Default function layout | 7.568 us | 8.579 us | +13.4% |
+| `-ldflags=-funcalign=64` | 8.524 us | 7.141 us | -16.2% |
+
+The separate original/new binaries with the same 64-byte function alignment
+also change the swap result to 8.216 vs 8.122 us (-1.1%). Other benchmarks can
+move in the opposite direction under this alignment, so it is a diagnostic
+control rather than a general performance fix. These tests establish layout
+sensitivity; they do not isolate instruction-cache effects from branch prediction
+or other hardware effects.
+
+Narrow integer code does have a separate implementation difference: uint8
+remainder changes from 32-bit to 64-bit division, and its shift-count comparisons
+also widen. The int/uint64 benchmarks above do not measure that cost. Supporting
+floats does not add a floating-point type check or an operation callback to each
+integer instruction.
 
 ## CLI and language comparison
 

@@ -2,6 +2,7 @@ package typedrunner
 
 import (
 	"github.com/goplus/ixgo"
+	"math"
 	"reflect"
 	"testing"
 )
@@ -208,5 +209,68 @@ func entry() int {consume(1);n:=Count(2);consumePointer(&n);return int(result(3)
 	got, err := interp.RunFunc("entry")
 	if err != nil || got != 1 {
 		t.Fatalf("got=%v err=%v", got, err)
+	}
+}
+
+func TestFloatSelection(t *testing.T) {
+	ctx := ixgo.NewContext(0)
+	pkg, err := ctx.LoadFile("floats.go", `package main
+func single(x float32) float32 {return -x+0.5}
+func double(x float64) float64 {s:=0.0;for i:=0.0;i<x;i++ {s+=i/2};return s}
+func memory(x float64,p *float64) (float64,bool) {*p+=x;return *p,*p>0}
+func constant() float32 {return 0.1}
+func mixed(x float32,y float64) float64 {return float64(x)+y}
+type F float64
+func named(x F) F {return x+1}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name        string
+		input, want ixgo.Value
+	}{
+		{"single", float32(2), float32(-1.5)}, {"double", float64(5), float64(5)},
+	} {
+		r := makeTypedRunner(pkg.Func(tc.name))
+		if r == nil || r.Run(tc.input) != tc.want {
+			t.Fatalf("%s selection or result failed", tc.name)
+		}
+	}
+	r, ok := makeTypedRunner(pkg.Func("constant")).(ixgo.TypedArgumentsRunner)
+	if !ok || r.RunArgs(nil) != float32(0.1) {
+		t.Fatal("float constant selection failed")
+	}
+	r, ok = makeTypedRunner(pkg.Func("memory")).(ixgo.TypedArgumentsRunner)
+	if !ok {
+		t.Fatal("float memory selection failed")
+	}
+	p := 2.0
+	r.RunArgs([]ixgo.Value{3.5, &p})
+	if p != 5.5 {
+		t.Fatal("float pointer update failed")
+	}
+	for _, name := range []string{"mixed", "named"} {
+		if makeTypedRunner(pkg.Func(name)) != nil {
+			t.Fatalf("%s must fall back", name)
+		}
+	}
+	interp, err := ctx.LoadInterp("entry.go", `package main
+func f(x float32) (float32,float32) {if x<3 {return 0,x};a,b:=f(x-2);c,d:=f(x-1);return a+d,b+c}
+func call(x float32) (float32,float32) {return f(x)}
+func divide(x,y float64) float64 {return x/y}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer interp.UnsafeRelease()
+	got, err := interp.RunFunc("call", float32(20))
+	result := reflect.ValueOf(got)
+	if err != nil || result.Kind() != reflect.Slice || result.Len() != 2 || result.Index(0).Interface() != float32(2584) || result.Index(1).Interface() != float32(8362) {
+		t.Fatalf("float integration: %v, %v", got, err)
+	}
+	got, err = interp.RunFunc("divide", 1.0, 0.0)
+	if err != nil || !math.IsInf(got.(float64), 1) {
+		t.Fatalf("float division by zero: %v, %v", got, err)
 	}
 }
