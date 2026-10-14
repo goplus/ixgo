@@ -460,6 +460,9 @@ func (visit *visitor) function(fn *ssa.Function) {
 			first(fr)
 		}
 	}
+	if entry == nil && leave == nil && visit.intp.ctx.Mode&EnableTracing == 0 && visit.intp.ctx.evalCallFn == nil && typedRunnerFactory != nil {
+		pfn.typedRunner = typedRunnerFactory(fn)
+	}
 	pfn.makeInstr = nil
 	pfn.base = visit.base
 	visit.base += len(pfn.ssaInstrs) + 2

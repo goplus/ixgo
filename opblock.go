@@ -140,6 +140,7 @@ type function struct {
 	childFrameReg  register                  // first unused tuple slot for a returned child; -1 if absent
 	elidedTuples   []register                // tuple slots bypassed by direct Extract writes
 	elidedExtract  map[*ssa.Extract]struct{} // Extracts skipped after dests write
+	typedRunner    TypedRunner               // optional boxed-free scalar runner
 }
 
 // closureCapture is one MakeClosure: its result register and captured
@@ -173,6 +174,7 @@ func (p *function) UnsafeRelease() {
 	p.Main = nil
 	p.clearRanges = nil
 	p.localRefs = nil
+	p.typedRunner = nil
 }
 
 func (p *function) initPool() {
@@ -1414,6 +1416,49 @@ func makeCallSpecializerInstr(interp *Interp, ifn *function, ia, dests []registe
 	for _, dest := range dests {
 		if dest < 0 {
 			return nil
+		}
+	}
+	if ifn.typedRunner != nil && len(ia) == ifn.narg {
+		if runner, ok := ifn.typedRunner.(TypedArgumentsRunner); ok {
+			return func(fr *frame) {
+				var small [8]Value
+				args := small[:]
+				if len(ia) > len(small) {
+					args = make([]Value, len(ia))
+				}
+				args = args[:len(ia)]
+				for j, reg := range ia {
+					args[j] = fr.reg(reg)
+				}
+				result := runner.RunArgs(args)
+				switch len(dests) {
+				case 0:
+				case 1:
+					fr.setReg(dests[0], result)
+				default:
+					values := result.(tuple)
+					for j, dest := range dests {
+						fr.setReg(dest, values[j])
+					}
+				}
+			}
+		}
+		return func(fr *frame) {
+			result := ifn.typedRunner.Run(fr.reg(ia[0]))
+			switch len(dests) {
+			case 0:
+				return
+			case 1:
+				fr.setReg(dests[0], result)
+			default:
+				values, ok := result.(tuple)
+				if !ok || len(values) != len(dests) {
+					panic("ixgo: typed runner returned an invalid result")
+				}
+				for i, dest := range dests {
+					fr.setReg(dest, values[i])
+				}
+			}
 		}
 	}
 	factory := callSpecializers[callSpecializerShape{len(ia), len(dests)}]
