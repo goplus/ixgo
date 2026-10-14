@@ -31,6 +31,7 @@ import (
 	_ "github.com/goplus/ixgo/directcall"
 	_ "github.com/goplus/ixgo/directfunc"
 	_ "github.com/goplus/ixgo/pkg"
+	_ "github.com/goplus/ixgo/typedrunner"
 )
 
 func mainUsage() {
