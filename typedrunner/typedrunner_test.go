@@ -1,10 +1,12 @@
 package typedrunner
 
 import (
-	"github.com/goplus/ixgo"
 	"math"
 	"reflect"
 	"testing"
+
+	"github.com/goplus/ixgo"
+	"golang.org/x/tools/go/ssa"
 )
 
 func TestLoopSelection(t *testing.T) {
@@ -272,5 +274,51 @@ func divide(x,y float64) float64 {return x/y}
 	got, err = interp.RunFunc("divide", 1.0, 0.0)
 	if err != nil || !math.IsInf(got.(float64), 1) {
 		t.Fatalf("float division by zero: %v, %v", got, err)
+	}
+}
+
+func TestScalarWidths(t *testing.T) {
+	for _, tc := range []struct{ input, want ixgo.Value }{
+		{int(7), int(22)}, {int8(7), int8(22)}, {int16(7), int16(22)},
+		{int32(7), int32(22)}, {int64(7), int64(22)},
+		{uint(7), uint(22)}, {uint8(7), uint8(22)}, {uint16(7), uint16(22)},
+		{uint32(7), uint32(22)}, {uint64(7), uint64(22)}, {uintptr(7), uintptr(22)},
+		{float32(7), float32(22)}, {float64(7), float64(22)},
+	} {
+		typ := reflect.TypeOf(tc.input).Name()
+		t.Run(typ, func(t *testing.T) {
+			pkg, err := ixgo.NewContext(0).LoadFile("width.go", "package main;func f(x "+typ+") "+typ+" {return x*3+1}")
+			if err != nil {
+				t.Fatal(err)
+			}
+			r := makeTypedRunner(pkg.Func("f"))
+			if r == nil {
+				t.Fatal("scalar type was not selected")
+			}
+			if got := r.Run(tc.input); got != tc.want {
+				t.Fatalf("got %v (%T), want %v (%T)", got, got, tc.want, tc.want)
+			}
+		})
+	}
+}
+
+func TestInvalidAndAggregateSignatures(t *testing.T) {
+	for _, fn := range []*ssa.Function{nil, {}} {
+		if makeTypedRunner(fn) != nil {
+			t.Fatal("invalid function was selected")
+		}
+	}
+	pkg, err := ixgo.NewContext(0).LoadFile("aggregate.go", `package main
+func slice(x []int) {}
+func array(x [2]int) {}
+func object(x struct{N int}) {}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"slice", "array", "object"} {
+		if makeTypedRunner(pkg.Func(name)) != nil {
+			t.Fatalf("%s must fall back", name)
+		}
 	}
 }

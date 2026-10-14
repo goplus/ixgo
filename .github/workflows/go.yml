@@ -24,6 +24,9 @@ jobs:
     - name: Test ixgo
       run: go test -race -v -coverprofile="coverage.txt" -covermode=atomic .
 
+    - name: Test typedrunner
+      run: go test -race -v -coverpkg=.,./typedrunner -coverprofile="coverage.typedrunner.txt" -covermode=atomic ./typedrunner
+
     - name: Test xgobuild
       run: go test -race -v -coverprofile="coverage.xgobuild.txt" -covermode=atomic ./xgobuild
 
@@ -34,7 +37,7 @@ jobs:
       uses: codecov/codecov-action@v7
       with:
         slug: goplus/ixgo
-        files: coverage.txt,coverage.xgobuild.txt,coverage.transform.txt
+        files: coverage.txt,coverage.typedrunner.txt,coverage.xgobuild.txt,coverage.transform.txt
 
     - name: Install ixgo
       run: go install -v ./cmd/ixgo
@@ -119,6 +122,7 @@ jobs:
         export GOROOT="$HOME/${{ matrix.go-tag }}"
         export PATH="$GOROOT/bin:$PATH"
         go test -v -race -tags goplus.ifacefuncval .
+        go test -v -race -tags goplus.ifacefuncval ./typedrunner
         go test -v -race -tags goplus.ifacefuncval ./xgobuild
         go test -v -race -tags goplus.ifacefuncval ./transform/...
         go install -tags goplus.ifacefuncval -v ./cmd/ixgo

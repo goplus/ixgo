@@ -239,9 +239,11 @@ func TestTypedRunnerFibish(t *testing.T) {
 			t.Fatalf("f(%d) = (%d, %d), want %v", n, got[0], got[1], want)
 		}
 	}
-	got := pairResult(runner, 40)
-	if got[0] != 39088169 || got[1] != 126491972 {
-		t.Fatalf("f(40) = (%d, %d)", got[0], got[1])
+	// Keep exponential workloads small under race/coverage instrumentation.
+	// Input 40 remains in BenchmarkTypedRunnerFibish.
+	got := pairResult(runner, 20)
+	if got[0] != 2584 || got[1] != 8362 {
+		t.Fatalf("f(20) = (%d, %d)", got[0], got[1])
 	}
 }
 
@@ -1124,5 +1126,123 @@ func shr(n INT) INT {s:=INT(0);for i:=INT(1);i<n;i++ {s+=i>>3};return s}
 				}
 			}
 		})
+	}
+}
+
+func TestTypedScalarBooleanAndShiftPaths(t *testing.T) {
+	interp, err := NewContext(0).LoadInterp("scalar.go", `package main
+func equal(n int) int {a,b:=n>2,n>3;if !a==b {return n>>1};return -n}
+func unequal(n int) int {a,b:=n>2,n>3;if a!=b {return n>>2};return n}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer interp.UnsafeRelease()
+	for _, name := range []string{"equal", "unequal"} {
+		fn := interp.mainpkg.Func(name)
+		r, ok := makeTypedScalarRunnerOf[int](fn).(*typedRunner[int])
+		if !ok {
+			t.Fatalf("%s did not compile to a scalar runner", name)
+		}
+		if r.Run("invalid argument") != nil {
+			t.Fatal("invalid scalar argument was accepted")
+		}
+		interp.funcs[fn].typedRunner = nil
+		for _, n := range []int{-8, 0, 1, 2, 3, 4, 8} {
+			got := r.Run(n)
+			want, err := interp.RunFunc(name, n)
+			if err != nil || !reflect.DeepEqual(got, want) {
+				t.Fatalf("%s(%d): typed=%v boxed=%v err=%v", name, n, got, want, err)
+			}
+		}
+	}
+}
+
+func TestTypedArgumentsBooleanAndNilPaths(t *testing.T) {
+	interp, err := NewContext(0).LoadInterp("boolargs.go", `package main
+func toggle(n int,b bool) bool {if n==0 {return b};return toggle(n-1,!b)}
+func entry(n int) bool {return toggle(n,true)}
+func different(a,b bool) bool {return a!=b}
+func pointers(p,q *int) (bool,bool) {return p!=nil,p!=q}
+func load(p *int) int {return *p}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer interp.UnsafeRelease()
+	// Compare against the ordinary interpreter, including nested bool arguments
+	// and results transferred between typed frames.
+	for _, fn := range interp.funcs {
+		fn.typedRunner = nil
+	}
+	p := 7
+	for _, tc := range []struct {
+		name string
+		args []Value
+	}{
+		{"entry", []Value{0}}, {"entry", []Value{1}}, {"entry", []Value{20}},
+		{"different", []Value{true, false}}, {"different", []Value{false, false}},
+		{"pointers", []Value{&p, &p}}, {"pointers", []Value{&p, (*int)(nil)}},
+		{"pointers", []Value{(*int)(nil), (*int)(nil)}},
+	} {
+		r, ok := makeTypedArgumentsRunnerOf[int](interp.mainpkg.Func(tc.name)).(TypedArgumentsRunner)
+		if !ok {
+			t.Fatalf("%s did not compile", tc.name)
+		}
+		got := r.RunArgs(tc.args)
+		want, err := interp.RunFunc(tc.name, tc.args...)
+		if err != nil || !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s: typed=%v boxed=%v err=%v", tc.name, got, want, err)
+		}
+	}
+	r := makeTypedArgumentsRunnerOf[int](interp.mainpkg.Func("load")).(TypedArgumentsRunner)
+	for _, tc := range []struct {
+		name string
+		args []Value
+	}{
+		{"nil dereference", []Value{(*int)(nil)}}, {"missing argument", nil},
+		{"extra argument", []Value{&p, &p}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("invalid call did not panic")
+				}
+			}()
+			r.RunArgs(tc.args)
+		})
+	}
+}
+
+func TestTypedRunnerFallbackLimits(t *testing.T) {
+	source := `package main
+type Count int
+func namedPointer(p *Count) int {return int(*p)}
+func slice(p []int) int {return len(p)}
+func large(n int) int {a:=[65]int{n};return a[0]}
+func copies(n int) int {a:=[40]int{n};b:=a;return b[0]}
+func booleanAllocation(n int) int {p:=new(bool);*p=n>0;return booleanLoad(p)}
+func booleanLoad(p *bool) int {if *p {return 1};return 0}
+func pointerReturn(n int) *int {return &n}
+func exhausted(n int) int {
+` + strings.Repeat("n=n*3+1\n", 40) + `return n}
+`
+	pkg, err := NewContext(0).LoadFile("limits.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"namedPointer", "slice", "large", "copies", "booleanAllocation", "exhausted"} {
+		t.Run(name, func(t *testing.T) {
+			if makeTypedScalarRunnerOf[int](pkg.Func(name)) != nil {
+				t.Fatal("scalar runner accepted unsupported function")
+			}
+			if makeTypedArgumentsRunnerOf[int](pkg.Func(name)) != nil {
+				t.Fatal("argument runner accepted unsupported function")
+			}
+		})
+	}
+	// Pointer results are rejected by the scalar path even when its input is T.
+	if makeTypedScalarRunnerOf[int](pkg.Func("pointerReturn")) != nil {
+		t.Fatal("scalar pointer return was accepted")
 	}
 }
