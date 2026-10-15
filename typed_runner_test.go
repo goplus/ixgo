@@ -1819,7 +1819,7 @@ func TestTypedRunnerDefaultOptimizations(t *testing.T) {
 				visit(op.callee)
 			}
 		}
-		for _, kind := range []typedOpKind{typedConstBlock, typedLessBranch, typedLoadAddStore} {
+		for _, kind := range []typedOpKind{typedConstBlock, typedLessBranch, typedLoadAddStore, typedArrayCopy} {
 			if !kinds[kind] {
 				t.Errorf("reachable runner missing optimized instruction %v", kind)
 			}

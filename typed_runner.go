@@ -329,6 +329,7 @@ func MakeTypedRunnerOf[T TypedScalar](fn *ssa.Function) TypedRunner {
 	if runner != nil {
 		r := runner.(*typedArgsRunner[T])
 		fuseTypedArguments(r)
+		fuseTypedArrayCopies(r)
 		batchTypedConstants(r)
 	}
 	return runner
@@ -741,6 +742,8 @@ const (
 	typedLessBranch
 	typedLoadAddStore
 	typedConstBlock
+	typedArrayCopy
+	typedNop
 )
 
 type typedArgsOp[T TypedScalar] struct {
@@ -847,6 +850,35 @@ func fuseTypedArguments[T TypedScalar](root *typedArgsRunner[T]) int {
 	return visit(root)
 }
 
+func fuseTypedArrayCopies[T TypedScalar](root *typedArgsRunner[T]) int {
+	seen := make(map[*typedArgsRunner[T]]bool)
+	var visit func(*typedArgsRunner[T]) int
+	visit = func(r *typedArgsRunner[T]) int {
+		if seen[r] {
+			return 0
+		}
+		seen[r] = true
+		n := 0
+		for i := 0; i < len(r.code); i++ {
+			op := &r.code[i]
+			if op.kind == typedCall {
+				n += visit(op.callee)
+			}
+			if i+1 >= len(r.code) {
+				continue
+			}
+			store := &r.code[i+1]
+			if op.kind == typedArrayLoad && store.kind == typedArrayStore && op.dst == store.y && op.length == store.length {
+				op.kind, op.y = typedArrayCopy, store.x
+				store.kind = typedNop
+				n++
+			}
+		}
+		return n
+	}
+	return visit(root)
+}
+
 func (r *typedArgsRunner[T]) Run(input Value) Value { return r.RunArgs([]Value{input}) }
 
 // Local addresses are frame/slot handles, not Go pointers into the frame slice.
@@ -860,7 +892,7 @@ func (r *typedArgsRunner[T]) RunArgs(args []Value) Value {
 	// functions with calls, keeping both initial allocations stack eligible.
 	var frames []typedArgsFrame[T]
 	if r.hasCalls {
-		frames = make([]typedArgsFrame[T], 1, 8)
+		frames = make([]typedArgsFrame[T], 1, 16)
 	} else {
 		frames = make([]typedArgsFrame[T], 1)
 	}
@@ -985,6 +1017,10 @@ func (r *typedArgsRunner[T]) RunArgs(args []Value) Value {
 		case typedArrayStore:
 			dst, src := int(fr.ptrs[op.x])-1, int(fr.ptrs[op.y])-1
 			copy(frames[dst/typedArgsLimit].locals[dst%typedArgsLimit:dst%typedArgsLimit+op.length], frames[src/typedArgsLimit].locals[src%typedArgsLimit:src%typedArgsLimit+op.length])
+		case typedArrayCopy:
+			dst, src := int(fr.ptrs[op.y])-1, int(fr.ptrs[op.x])-1
+			copy(frames[dst/typedArgsLimit].locals[dst%typedArgsLimit:dst%typedArgsLimit+op.length], frames[src/typedArgsLimit].locals[src%typedArgsLimit:src%typedArgsLimit+op.length])
+		case typedNop:
 		case typedLoad:
 			p := fr.ptrs[op.x]
 			if p > 0 {
