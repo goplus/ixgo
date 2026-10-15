@@ -896,7 +896,8 @@ func (r *typedArgsRunner[T]) RunArgs(args []Value) Value {
 	} else {
 		frames = make([]typedArgsFrame[T], 1)
 	}
-	external := make([]*T, 0, len(args))
+	var external [typedArgsLimit]*T
+	externalLen := 0
 	frames[0].runner = r
 	for i, arg := range args {
 		dst := r.params[i]
@@ -909,15 +910,17 @@ func (r *typedArgsRunner[T]) RunArgs(args []Value) Value {
 				continue
 			}
 			index := -1
-			for j, previous := range external {
+			for j := 0; j < externalLen; j++ {
+				previous := external[j]
 				if previous == p {
 					index = j
 					break
 				}
 			}
 			if index < 0 {
-				index = len(external)
-				external = append(external, p)
+				index = externalLen
+				external[externalLen] = p
+				externalLen++
 			}
 			frames[0].ptrs[dst] = typedMemoryPointer(-index - 1)
 		case typedArgBool:
