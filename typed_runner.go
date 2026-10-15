@@ -22,7 +22,10 @@ type TypedScalar interface {
 		~float32 | ~float64
 }
 
-const maxTypedResults = 8
+const (
+	maxTypedResults    = 8
+	maxTypedScalarRegs = 32
+)
 
 type typedResults[T TypedScalar] struct {
 	values [maxTypedResults]T
@@ -78,7 +81,8 @@ type typedOp[T TypedScalar] struct {
 // typedRunner owns immutable code for a scalar SSA subset. Registers are local
 // to each run, so recursive calls need no boxed interpreter frame.
 type typedRunner[T TypedScalar] struct {
-	code []typedOp[T]
+	code      []typedOp[T]
+	recursive bool
 }
 
 // TypedRunner executes a function compiled for the typed scalar subset.
@@ -104,7 +108,7 @@ func (r *typedRunner[T]) Run(input Value) Value {
 	if !ok {
 		return nil
 	}
-	result := r.runTyped(x)
+	result := r.runSelectedTyped(x)
 	if result.n == 0 {
 		return nil
 	}
@@ -118,9 +122,17 @@ func (r *typedRunner[T]) Run(input Value) Value {
 	return ret
 }
 
+func (r *typedRunner[T]) runSelectedTyped(input T) typedResults[T] {
+	// Select once per entry; keep the ordinary execution loop unchanged.
+	if r.recursive {
+		return r.runRecursiveTyped(input)
+	}
+	return r.runTyped(input)
+}
+
 func (r *typedRunner[T]) runTyped(input T) typedResults[T] {
-	var regs [32]T
-	var bools [32]bool
+	var regs [maxTypedScalarRegs]T
+	var bools [maxTypedScalarRegs]bool
 	regs[0] = input
 	for pc := 0; ; pc++ {
 		op := &r.code[pc]
@@ -201,6 +213,94 @@ func (r *typedRunner[T]) runTyped(input T) typedResults[T] {
 	}
 }
 
+func (r *typedRunner[T]) runRecursiveTyped(input T) typedResults[T] {
+	var result typedResults[T]
+	var output [maxTypedScalarRegs]T
+	result.n = r.runTypedInto(input, &output, 0)
+	copy(result.values[:], output[:result.n])
+	return result
+}
+
+// runTypedInto writes directly into its caller's result registers. Recursive
+// calls avoid returning and copying the maximum-size result structure.
+func (r *typedRunner[T]) runTypedInto(input T, output *[maxTypedScalarRegs]T, base uint8) uint8 {
+	var regs [maxTypedScalarRegs]T
+	var bools [maxTypedScalarRegs]bool
+	regs[0] = input
+	for pc := 0; ; pc++ {
+		op := &r.code[pc]
+		switch op.kind {
+		case typedConst:
+			regs[op.dst] = op.value
+		case typedBoolConst:
+			bools[op.dst] = op.value != 0
+		case typedMove:
+			regs[op.dst] = regs[op.x]
+		case typedBoolMove:
+			bools[op.dst] = bools[op.x]
+		case typedAdd:
+			regs[op.dst] = regs[op.x] + regs[op.y]
+		case typedSub:
+			regs[op.dst] = regs[op.x] - regs[op.y]
+		case typedMul:
+			regs[op.dst] = regs[op.x] * regs[op.y]
+		case typedQuo:
+			regs[op.dst] = regs[op.x] / regs[op.y]
+		case typedRem:
+			regs[op.dst] = typedRemainder(regs[op.x], regs[op.y])
+		case typedAnd:
+			regs[op.dst] = T(uint64(regs[op.x]) & uint64(regs[op.y]))
+		case typedOr:
+			regs[op.dst] = T(uint64(regs[op.x]) | uint64(regs[op.y]))
+		case typedXor:
+			regs[op.dst] = T(uint64(regs[op.x]) ^ uint64(regs[op.y]))
+		case typedAndNot:
+			regs[op.dst] = T(uint64(regs[op.x]) &^ uint64(regs[op.y]))
+		case typedShl:
+			regs[op.dst] = typedShiftLeft(regs[op.x], regs[op.y])
+		case typedShr:
+			regs[op.dst] = typedShiftRight(regs[op.x], regs[op.y])
+		case typedLess:
+			bools[op.dst] = regs[op.x] < regs[op.y]
+		case typedLessEqual:
+			bools[op.dst] = regs[op.x] <= regs[op.y]
+		case typedGreater:
+			bools[op.dst] = regs[op.x] > regs[op.y]
+		case typedGreaterEqual:
+			bools[op.dst] = regs[op.x] >= regs[op.y]
+		case typedEqual:
+			bools[op.dst] = regs[op.x] == regs[op.y]
+		case typedNotEqual:
+			bools[op.dst] = regs[op.x] != regs[op.y]
+		case typedNegate:
+			regs[op.dst] = -regs[op.x]
+		case typedComplement:
+			regs[op.dst] = T(^uint64(regs[op.x]))
+		case typedNot:
+			bools[op.dst] = !bools[op.x]
+		case typedBoolEqual:
+			bools[op.dst] = bools[op.x] == bools[op.y]
+		case typedBoolNotEqual:
+			bools[op.dst] = bools[op.x] != bools[op.y]
+		case typedCall:
+			r.runTypedInto(regs[op.x], &regs, op.dst)
+		case typedBranch:
+			if bools[op.x] {
+				pc = op.truePC - 1
+			} else {
+				pc = op.falsePC - 1
+			}
+		case typedJump:
+			pc = op.target - 1
+		case typedReturn:
+			for i, reg := range op.results {
+				output[int(base)+i] = regs[reg]
+			}
+			return op.nres
+		}
+	}
+}
+
 // MakeTypedRunnerOf compiles an SSA function for one scalar type. A plugin
 // chooses the concrete T after inspecting the function signature. The core
 // selects the scalar fast path first, then the argument and memory runner.
@@ -231,7 +331,6 @@ func makeTypedScalarRunnerOf[T TypedScalar](fn *ssa.Function) TypedRunner {
 			return nil
 		}
 	}
-	const maxTypedRegs = 32
 	regs := make(map[ssa.Value]uint8)
 	tupleRegs := make(map[ssa.Value]uint8)
 	regs[fn.Params[0]] = 0
@@ -246,7 +345,7 @@ func makeTypedScalarRunnerOf[T TypedScalar](fn *ssa.Function) TypedRunner {
 	nextReg := uint8(1)
 
 	allocReg := func() (uint8, bool) {
-		if nextReg >= maxTypedRegs {
+		if nextReg >= maxTypedScalarRegs {
 			return 0, false
 		}
 		r := nextReg
@@ -385,7 +484,7 @@ func makeTypedScalarRunnerOf[T TypedScalar](fn *ssa.Function) TypedRunner {
 				}
 				base, ok := allocReg()
 				nres := fn.Signature.Results().Len()
-				if !ok || nres > maxTypedResults || (nres > 0 && base+uint8(nres-1) >= maxTypedRegs) {
+				if !ok || nres > maxTypedResults || (nres > 0 && base+uint8(nres-1) >= maxTypedScalarRegs) {
 					return fail()
 				}
 				if nres > 0 {
@@ -509,7 +608,14 @@ func makeTypedScalarRunnerOf[T TypedScalar](fn *ssa.Function) TypedRunner {
 		}
 		code[p.pc].target = target
 	}
-	return &typedRunner[T]{code: code}
+	recursive := false
+	for _, op := range code {
+		if op.kind == typedCall {
+			recursive = true
+			break
+		}
+	}
+	return &typedRunner[T]{code: code, recursive: recursive}
 }
 
 func typedTypeIs[T TypedScalar](typ types.Type) bool {

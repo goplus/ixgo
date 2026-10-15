@@ -262,6 +262,69 @@ func TestTypedRunnerGenericScalar(t *testing.T) {
 	}
 }
 
+func TestTypedScalarLoopKeepsLocalResults(t *testing.T) {
+	pkg, err := NewContext(0).LoadFile("loops.go", typedLoopSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"sum", "swap", "fibloop", "branch", "nested"} {
+		runner, ok := MakeTypedRunnerOf[int](pkg.Func(name)).(*typedRunner[int])
+		if !ok || runner.recursive {
+			t.Fatalf("%s must use the ordinary scalar path", name)
+		}
+	}
+}
+
+func TestTypedScalarRecursiveResultRegisters(t *testing.T) {
+	pkg, err := NewContext(0).LoadFile("results.go", `package main
+func zero(n int) {if n>0 {zero(n-1)}}
+func one(n int) int {if n==0 {return 1};return one(n-1)+1}
+func eight(n int)(int,int,int,int,int,int,int,int) {
+ if n==0 {return 1,2,3,4,5,6,7,8}
+ a,b,c,d,e,f,g,h:=eight(n-1)
+ return b,c,d,e,f,g,h,a
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"zero", "one", "eight"} {
+		runner, ok := MakeTypedRunnerOf[int](pkg.Func(name)).(*typedRunner[int])
+		if !ok {
+			t.Fatalf("%s did not use the scalar runner", name)
+		}
+		if !runner.recursive {
+			t.Fatalf("%s did not enable recursive result registers", name)
+		}
+		check := func(n int) {
+			var want Value
+			switch name {
+			case "one":
+				want = n + 1
+			case "eight":
+				values := make(Tuple, 8)
+				for i := range values {
+					values[i] = (i+n)%8 + 1
+				}
+				want = values
+			}
+			if got := runner.Run(n); !reflect.DeepEqual(got, want) {
+				t.Errorf("%s(%d): got=%v want=%v", name, n, got, want)
+			}
+		}
+		// Force stack growth while every caller's output registers are live.
+		for _, n := range []int{0, 1, 2, 8, 1025} {
+			check(n)
+		}
+		var wg sync.WaitGroup
+		for worker := 0; worker < 8; worker++ {
+			wg.Add(1)
+			go func() { defer wg.Done(); check(100) }()
+		}
+		wg.Wait()
+	}
+}
+
 func TestTypedRunnerIntegration(t *testing.T) {
 	ctx := NewContext(0)
 	interp, err := ctx.LoadInterp("typed_runner_integration.go", `package main
