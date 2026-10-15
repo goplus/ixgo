@@ -341,6 +341,7 @@ func (pfn *function) gcRegsAt(pc int) []register {
 			}
 		}
 	}
+	// visit.function registers all parameters and free variables before the body.
 	for _, param := range pfn.Fn.Params {
 		checkRegs(pfn.index[param])
 	}

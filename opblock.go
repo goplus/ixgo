@@ -405,6 +405,7 @@ func (p *function) PositionForPC(pc int) token.Position {
 	return p.Fn.Prog.Fset.Position(pos)
 }
 
+// regIndex3 requires a non-nil SSA operand; use regIndex for optional operands.
 func (p *function) regIndex3(v ssa.Value) (register, kind, value) {
 	instr := p.regInstr(v)
 	index := int(instr & 0xffffff)

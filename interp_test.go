@@ -2988,6 +2988,8 @@ var list = newList(
 					value = strconv.Itoa(index)
 				case 2:
 					value = index%2 == 0
+				case 3:
+					value = nil // Untyped nil, distinct from the typed nil below.
 				case 4:
 					value = (*int)(nil)
 				}
