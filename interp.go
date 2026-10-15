@@ -867,6 +867,31 @@ func (i *Interp) prepareCall(fr *frame, call *ssa.CallCommon, iv register, ia []
 	return
 }
 
+// prepareGoCall transfers interpreted arguments and closure bindings to the
+// goroutine frame before starting it. Keeping a separate function/argument
+// slice on the host goroutine stack would retain dead bindings while it blocks.
+func (i *Interp) prepareGoCall(root *frame, fn value, args []value, ssaArgs []ssa.Value) func() {
+	var pfn *function
+	var env []value
+	switch f := fn.(type) {
+	case *ssa.Function:
+		pfn = i.funcs[f]
+	case *closure:
+		pfn, env = f.pfn, f.env
+	}
+	if pfn == nil {
+		return func() { i.callDiscardsResult(root, fn, args, ssaArgs) }
+	}
+	root.pfn = pfn
+	fr := pfn.allocFrame(root)
+	copy(fr.stack[pfn.nres:pfn.nres+pfn.narg], args)
+	copy(fr.stack[pfn.nres+pfn.narg:], env)
+	return func() {
+		fr.run()
+		pfn.deleteFrame(root, fr)
+	}
+}
+
 // call interprets a call to a function (function, builtin or closure)
 // fn with arguments args, returning its result.
 // callpos is the position of the callsite.
