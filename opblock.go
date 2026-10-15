@@ -1221,6 +1221,7 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 			run := interp.prepareGoCall(root, fn, args, instr.Call.Args)
 			atomic.AddInt32(&interp.goroutines, 1)
 			go func() {
+				defer atomic.AddInt32(&interp.goroutines, -1)
 				if interp.ctx.RunContext != nil {
 					defer func() {
 						if e := recover(); e != nil {
@@ -1229,7 +1230,6 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 					}()
 				}
 				run()
-				atomic.AddInt32(&interp.goroutines, -1)
 			}()
 		}
 	case *ssa.Defer:
