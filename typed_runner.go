@@ -81,8 +81,9 @@ type typedOp[T TypedScalar] struct {
 // typedRunner owns immutable code for a scalar SSA subset. Registers are local
 // to each run, so recursive calls need no boxed interpreter frame.
 type typedRunner[T TypedScalar] struct {
-	code      []typedOp[T]
-	recursive bool
+	code        []typedOp[T]
+	recursive   bool
+	resultCount uint8
 }
 
 // TypedRunner executes a function compiled for the typed scalar subset.
@@ -216,14 +217,15 @@ func (r *typedRunner[T]) runTyped(input T) typedResults[T] {
 func (r *typedRunner[T]) runRecursiveTyped(input T) typedResults[T] {
 	var result typedResults[T]
 	var output [maxTypedScalarRegs]T
-	result.n = r.runTypedInto(input, &output, 0)
+	r.runTypedInto(input, &output, 0)
+	result.n = r.resultCount
 	copy(result.values[:], output[:result.n])
 	return result
 }
 
 // runTypedInto writes directly into its caller's result registers. Recursive
 // calls avoid returning and copying the maximum-size result structure.
-func (r *typedRunner[T]) runTypedInto(input T, output *[maxTypedScalarRegs]T, base uint8) uint8 {
+func (r *typedRunner[T]) runTypedInto(input T, output *[maxTypedScalarRegs]T, base uint8) {
 	var regs [maxTypedScalarRegs]T
 	var bools [maxTypedScalarRegs]bool
 	regs[0] = input
@@ -293,10 +295,22 @@ func (r *typedRunner[T]) runTypedInto(input T, output *[maxTypedScalarRegs]T, ba
 		case typedJump:
 			pc = op.target - 1
 		case typedReturn:
-			for i, reg := range op.results {
-				output[int(base)+i] = regs[reg]
+			switch op.nres {
+			case 0:
+				return
+			case 1:
+				output[base] = regs[op.x]
+				return
+			case 2:
+				output[base] = regs[op.x]
+				output[base+1] = regs[op.y]
+				return
+			default:
+				for i, reg := range op.results {
+					output[int(base)+i] = regs[reg]
+				}
+				return
 			}
-			return op.nres
 		}
 	}
 }
@@ -527,7 +541,14 @@ func makeTypedScalarRunnerOf[T TypedScalar](fn *ssa.Function) TypedRunner {
 					}
 					results[i] = reg
 				}
-				code = append(code, typedOp[T]{kind: typedReturn, nres: uint8(len(results)), results: results})
+				op := typedOp[T]{kind: typedReturn, nres: uint8(len(results)), results: results}
+				if len(results) > 0 {
+					op.x = results[0]
+				}
+				if len(results) > 1 {
+					op.y = results[1]
+				}
+				code = append(code, op)
 			default:
 				return fail()
 			}
@@ -615,7 +636,7 @@ func makeTypedScalarRunnerOf[T TypedScalar](fn *ssa.Function) TypedRunner {
 			break
 		}
 	}
-	return &typedRunner[T]{code: code, recursive: recursive}
+	return &typedRunner[T]{code: code, recursive: recursive, resultCount: uint8(fn.Signature.Results().Len())}
 }
 
 func typedTypeIs[T TypedScalar](typ types.Type) bool {

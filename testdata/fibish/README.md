@@ -62,8 +62,9 @@ intermediate registers, float behavior, and pointer aliases. They match generic
 instruction patterns without hardcoded function names or Fibonacci call shapes.
 The default factory prefers the scalar runner where supported.
 
-Scalar functions use the original scalar instruction path. Fusion is limited
-to the argument/memory runner.
+Recursive scalar functions use the result-register fast path. Non-recursive scalar
+functions keep the original scalar instruction path. Fusion is limited to the
+argument/memory runner.
 
 ## Comparison with main
 
@@ -81,11 +82,11 @@ ran concurrently.
 
 | Example | main `5c99c936` | PR `f3b1d418` | main / PR |
 | --- | ---: | ---: | ---: |
-| `fibish` | 3.901 s | 2.242 s | 1.74x |
-| `fibish_closure` | 6.367 s | 2.241 s | 2.84x |
+| `fibish` | 3.901 s | 1.995 s | 1.96x |
+| `fibish_closure` | 6.367 s | 1.910 s | 3.33x |
 | `fibish_loop` | 52.882 ms | 52.657 ms | 1.00x |
-| `fibish_float32` | 8.868 s | 1.892 s | 4.69x |
-| `fibish_float64` | 9.429 s | 2.380 s | 3.96x |
+| `fibish_float32` | 8.868 s | 1.717 s | 5.17x |
+| `fibish_float64` | 9.429 s | 2.019 s | 4.67x |
 | `uglyfib` | 114.467 s | 19.415 s | 5.90x |
 
 The recursive fixtures spend most of their time in execution. The loop at
@@ -99,10 +100,10 @@ Three runs do not establish statistical significance for small differences.
 | Example | main rounds (s) | PR rounds (s) |
 | --- | --- | --- |
 | `fibish` | 4.067613, 3.901037, 3.876147 | 3.319925, 2.197261, 2.242073 |
-| `fibish_closure` | 6.374504, 6.349313, 6.367240 | 2.159013, 2.240693, 2.265239 |
+| `fibish_closure` | 6.374504, 6.349313, 6.367240 | 2.084920, 1.987784, 1.909700 |
 | `fibish_loop` | 0.054167, 0.052882, 0.052831 | 0.053662, 0.052202, 0.052657 |
-| `fibish_float32` | 8.867665, 8.843980, 8.870807 | 1.883144, 1.900261, 1.891633 |
-| `fibish_float64` | 9.428808, 9.422065, 9.441496 | 2.296484, 2.379577, 2.416122 |
+| `fibish_float32` | 8.867665, 8.843980, 8.870807 | 1.875711, 1.729107, 1.716619 |
+| `fibish_float64` | 9.428808, 9.422065, 9.441496 | 2.268138, 2.134130, 2.019422 |
 | `uglyfib` | 114.467070, 114.270771, 115.469531 | 19.363909, 19.415228, 19.505525 |
 
 </details>
@@ -125,6 +126,10 @@ above. Building is excluded from the timings. The measurements use wall-clock
 time for the entire CLI process; they do not isolate runner execution from
 loading. Compiler changes, linked code layout, and machine load can affect
 results. Generated timing JSON files are not checked in.
+
+The recursive return fast path was also checked against uglyfib. Its `n=20`
+benchmark was 1.325 ms before and 1.337 ms after (about +0.9%, within noise),
+with identical allocations, so uglyfib receives no additional scalar benefit.
 
 ## Validation
 
