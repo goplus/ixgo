@@ -1217,31 +1217,20 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 		iv, ia, ib := getCallIndex(pfn, &instr.Call)
 		return func(fr *frame) {
 			fn, args := interp.prepareCall(fr, &instr.Call, iv, ia, ib)
+			root := &frame{interp: interp}
+			run := interp.prepareGoCall(root, fn, args, instr.Call.Args)
 			atomic.AddInt32(&interp.goroutines, 1)
-			if interp.ctx.RunContext != nil {
-				go func() {
-					root := &frame{interp: interp}
-					switch f := fn.(type) {
-					case *ssa.Function:
-						root.pfn = interp.funcs[f]
-					case *closure:
-						root.pfn = f.pfn
-					}
+			go func() {
+				if interp.ctx.RunContext != nil {
 					defer func() {
-						e := recover()
-						if e != nil {
+						if e := recover(); e != nil {
 							interp.cherror <- PanicError{stack: debugStack(root), Value: e}
 						}
 					}()
-					interp.callDiscardsResult(root, fn, args, instr.Call.Args)
-					atomic.AddInt32(&interp.goroutines, -1)
-				}()
-			} else {
-				go func() {
-					interp.callDiscardsResult(&frame{}, fn, args, instr.Call.Args)
-					atomic.AddInt32(&interp.goroutines, -1)
-				}()
-			}
+				}
+				run()
+				atomic.AddInt32(&interp.goroutines, -1)
+			}()
 		}
 	case *ssa.Defer:
 		return makeDefer(interp, pfn, instr)
