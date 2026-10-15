@@ -2,9 +2,12 @@ package ixgo
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
+
+	"golang.org/x/tools/go/ssa"
 )
 
 const gcLivenessSource = `package main
@@ -87,20 +90,39 @@ func work() { collect() }
 }
 
 func TestGCLivenessLargeFunctionIsLazy(t *testing.T) {
+	const additions = maxEagerGCLivenessPCs + 100
 	var source strings.Builder
-	source.WriteString("package main\nimport \"runtime\"\nfunc work(n int) int {\np := new(int)\n*p = n\nruntime.GC()\n")
-	for i := 0; i < maxEagerGCLivenessPCs+100; i++ {
+	source.WriteString(`package main
+
+import "runtime"
+
+func newWork(captured *int) func(*int, int) int {
+	return func(parameter *int, n int) int {
+		runtime.GC()
+`)
+	for i := 0; i < additions; i++ {
 		fmt.Fprintf(&source, "n += %d\n", i)
 	}
-	source.WriteString("return n + *p\n}\n")
+	source.WriteString(`
+		n += *parameter + *captured
+		runtime.GC()
+		return n
+	}
+}
 
-	ctx := NewContext(ExperimentalSupportGC)
-	interp, err := ctx.LoadInterp("main.go", source.String())
+func Work(n int) int {
+	parameter, captured := new(int), new(int)
+	*parameter, *captured = n, n + 1
+	return newWork(captured)(parameter, n)
+}
+`)
+	interp, err := NewContext(ExperimentalSupportGC).LoadInterp("main.go", source.String())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer interp.UnsafeRelease()
-	pfn := interp.funcs[interp.mainpkg.Func("work")]
+	fn := interp.mainpkg.Func("newWork").AnonFuncs[0]
+	pfn := interp.funcs[fn]
 	if len(pfn.ssaInstrs) <= maxEagerGCLivenessPCs {
 		t.Fatalf("instructions = %d, want more than %d", len(pfn.ssaInstrs), maxEagerGCLivenessPCs)
 	}
@@ -118,6 +140,32 @@ func TestGCLivenessLargeFunctionIsLazy(t *testing.T) {
 	wg.Wait()
 	if !pfn.gcReady[0].Load() {
 		t.Fatal("liveness was not cached after first GC")
+	}
+
+	// Both parameter and captured references must survive the first GC. The
+	// second GC must release them, including on repeated calls using cached
+	// liveness information for this large function.
+	for _, n := range []int{3, 11, 42} {
+		got, err := interp.RunFunc("Work", n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := 3*n + 1 + additions*(additions-1)/2; got != want {
+			t.Fatalf("Work(%d) = %v, want %d", n, got, want)
+		}
+	}
+	lastGC := len(pfn.gcReady) - 1
+	for lastGC > 0 && !pfn.gcReady[lastGC].Load() {
+		lastGC--
+	}
+	if lastGC == 0 {
+		t.Fatal("large function liveness was not computed during GC")
+	}
+	for _, value := range []ssa.Value{fn.Params[0], fn.FreeVars[0]} {
+		reg := pfn.regIndex(value)
+		if !slices.Contains(pfn.gcRegsForPC(lastGC), reg) {
+			t.Errorf("dead %s register was retained after the second GC", value.Name())
+		}
 	}
 }
 

@@ -333,25 +333,24 @@ func (pfn *function) gcRegsAt(pc int) []register {
 		return nil
 	}
 	dead := make(map[int]bool)
-	checkAlloc := func(instr ssa.Instruction) {
-		for _, v := range pfn.instrIndex[instr] {
-			vk := kind(v >> 30)
-			if vk.isStatic() {
-				continue
+	checkRegs := func(regs ...uint32) {
+		for _, v := range regs {
+			vk, rk := kind(v>>30), reflect.Kind(v>>24&0x3f)
+			if !vk.isStatic() && isGCRegisterKind(rk) {
+				dead[int(v&0xffffff)] = true
 			}
-			rk := reflect.Kind(v >> 24 & 0x3f)
-			switch rk {
-			case reflect.String, reflect.Func, reflect.Ptr, reflect.Array, reflect.Slice, reflect.Map, reflect.Struct, reflect.Interface:
-			default:
-				continue
-			}
-			dead[int(v&0xffffff)] = true
 		}
 	}
-	checkAlloc(nil)
+	// visit.function registers all parameters and free variables before the body.
+	for _, param := range pfn.Fn.Params {
+		checkRegs(pfn.index[param])
+	}
+	for _, free := range pfn.Fn.FreeVars {
+		checkRegs(pfn.index[free])
+	}
 	var remain int
 	for i, instr := range block.Instrs {
-		checkAlloc(instr)
+		checkRegs(pfn.instrIndex[instr]...)
 		if cur == instr {
 			remain = i
 			break
@@ -395,7 +394,7 @@ func (pfn *function) gcRegsAt(pc int) []register {
 			}
 		}
 		for _, instr := range idom.Instrs {
-			checkAlloc(instr)
+			checkRegs(pfn.instrIndex[instr]...)
 		}
 		parent = idom
 	}

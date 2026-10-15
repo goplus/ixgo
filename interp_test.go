@@ -791,6 +791,46 @@ func main() {
 	_ = s[1]
 	_ = s[:2]
 	_ = s[3:]
+
+	backing := [5]int{1, 2, 3, 4, 5}
+	b := backing[:3]
+	type numbers []int
+	named := numbers(b)
+	for _, test := range []struct {
+		name string
+		got []int
+		first, length, capacity int
+	}{
+		{"all", b[:], 1, 3, 5},
+		{"prefix", b[:2], 1, 2, 5},
+		{"suffix", b[1:], 2, 2, 4},
+		{"explicit", b[1:2], 2, 1, 4},
+		{"zero", b[0:0], 1, 0, 5},
+		{"full-prefix", b[:2:2], 1, 2, 2},
+		{"full-explicit", b[1:2:2], 2, 1, 1},
+		{"array", arr[:], 1, 3, 3},
+		{"global-array", ga[1:], 2, 2, 2},
+		{"named", named[1:], 2, 2, 4},
+	} {
+		if len(test.got) != test.length || cap(test.got) != test.capacity {
+			panic(test.name + ": length or capacity")
+		}
+		for i, value := range test.got {
+			if value != test.first + i {
+				panic(test.name + ": contents")
+			}
+		}
+	}
+	if _, ok := interface{}(named[:]).(numbers); !ok {
+		panic("named slice lost its type")
+	}
+	var empty []int
+	if empty[:] != nil || empty[:0:0] != nil {
+		panic("nil slice became non-nil")
+	}
+	if s[:] != "123" || s[:2] != "12" || s[1:] != "23" || s[1:2] != "2" || s[3:] != "" {
+		panic("string slice contents")
+	}
 	max := uint64(^uint64(0))
 	neg := -1
 
@@ -2923,6 +2963,61 @@ func main() {
 	_, err := ixgo.RunFile("main.go", src, nil, 0)
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLargeVariadicInitializer(t *testing.T) {
+	// Large variadic initializers previously corrupted memory while building
+	// instructions on js/wasm, before the initializer itself could execute.
+	for _, count := range []int{0, 1, 216, 224, 238, 239, 512, 1024} {
+		t.Run(strconv.Itoa(count), func(t *testing.T) {
+			var source strings.Builder
+			source.WriteString(`package main
+
+func newList(values ...interface{}) []interface{} { return values }
+
+var list = newList(
+`)
+			var want []interface{}
+			for index := 0; index < count; index++ {
+				var value interface{}
+				switch index % 5 {
+				case 0:
+					value = index
+				case 1:
+					value = strconv.Itoa(index)
+				case 2:
+					value = index%2 == 0
+				case 3:
+					value = nil // Untyped nil, distinct from the typed nil below.
+				case 4:
+					value = (*int)(nil)
+				}
+				want = append(want, value)
+				if value == nil {
+					source.WriteString("nil,\n")
+				} else {
+					fmt.Fprintf(&source, "%#v,\n", value)
+				}
+			}
+			source.WriteString(")\nfunc Values() []interface{} { return list }\n")
+
+			interp, err := ixgo.NewContext(0).LoadInterp("main.go", source.String())
+			if err != nil {
+				t.Fatalf("build: %v", err)
+			}
+			defer interp.UnsafeRelease()
+			if err := interp.RunInit(); err != nil {
+				t.Fatalf("initialize: %v", err)
+			}
+			got, err := interp.RunFunc("Values")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("Values() = %#v, want %#v", got, want)
+			}
+		})
 	}
 }
 
