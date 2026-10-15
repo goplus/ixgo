@@ -109,7 +109,7 @@ type function struct {
 	Main            *ssa.BasicBlock              // Fn.Blocks[0]
 	pool            *sync.Pool                   // create frame pool
 	makeInstr       ssa.Instruction              // make instr check
-	index           map[ssa.Value]uint32         // stack value index 32bit: kind(2) reflect.Kind(6) index(24)
+	index           map[ssa.Value]uint32         // non-nil value -> kind(2), reflect.Kind(6), index(24)
 	instrIndex      map[ssa.Instruction][]uint32 // instr -> index
 	cacheRegs       []register                   // cache registers invalidated before runtime.GC
 	gcRegs          [][]register                 // registers cleared at each runtime.GC call site
@@ -300,9 +300,6 @@ func (p *function) planCleanup() {
 	}
 	for v, encoded := range p.index {
 		reg := register(encoded & 0xffffff)
-		if v == nil {
-			continue
-		}
 		if kind(encoded >> 30).isStatic() {
 			keep[reg] = true
 			continue
@@ -415,6 +412,11 @@ func (p *function) regIndex3(v ssa.Value) (register, kind, value) {
 }
 
 func (p *function) regIndex(v ssa.Value) register {
+	if v == nil {
+		// Omitted slice bounds are never read and need no register. Keeping nil
+		// out of interface-keyed maps also avoids Go 1.26 wasm's hashing bug.
+		return -1
+	}
 	instr := p.regInstr(v)
 	return register(instr & 0xffffff)
 }
@@ -449,10 +451,7 @@ func (p *function) regInstr(v ssa.Value) uint32 {
 			}
 		}
 	}
-	var kind reflect.Kind
-	if v != nil {
-		kind = toKind(v.Type())
-	}
+	kind := toKind(v.Type())
 	if p.Interp.ctx.Mode&ExperimentalSupportGC != 0 &&
 		!p.hasGCRegs && !vk.isStatic() && isGCRegisterKind(kind) {
 		p.hasGCRegs = true
@@ -460,7 +459,9 @@ func (p *function) regInstr(v ssa.Value) uint32 {
 	i := uint32(len(p.stack) | int(vk<<30) | int(kind<<24))
 	p.stack = append(p.stack, vs)
 	p.index[v] = i
-	p.instrIndex[p.makeInstr] = append(p.instrIndex[p.makeInstr], i)
+	if p.makeInstr != nil {
+		p.instrIndex[p.makeInstr] = append(p.instrIndex[p.makeInstr], i)
+	}
 	return i
 }
 
