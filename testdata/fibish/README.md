@@ -71,7 +71,7 @@ argument/memory runner.
 Measured 2026-10-15 on Apple M5, macOS arm64, Go 1.27.1, `GOWORK=off`,
 `GOMAXPROCS=1`, input 40.
 Upstream main was verified as `5c99c936`; the final PR implementation is
-`f3b1d418`. Both CLIs were built with the same toolchain and execute the same
+`e9ee8a93`. Both CLIs were built with the same toolchain and execute the same
 checked-in fixture sources from this PR.
 
 Each entry is the median of three serial alternating main/PR process runs,
@@ -80,7 +80,7 @@ The order is main/PR in rounds 1 and 3, PR/main in round 2. All 36 outputs were
 checked against the documented expected values. No other benchmark or build
 ran concurrently.
 
-| Example | main `5c99c936` | PR `f3b1d418` | main / PR |
+| Example | main `5c99c936` | PR `e9ee8a93` | main / PR |
 | --- | ---: | ---: | ---: |
 | `fibish` | 3.901 s | 1.995 s | 1.96x |
 | `fibish_closure` | 6.367 s | 1.910 s | 3.33x |
@@ -107,6 +107,45 @@ Three runs do not establish statistical significance for small differences.
 | `uglyfib` | 114.467070, 114.270771, 115.469531 | 19.363909, 19.415228, 19.505525 |
 
 </details>
+
+## Lua, LuaJIT, Python and Ruby comparison
+
+Apple M5, macOS arm64, input 40. All entries are medians of three serial
+process runs, including startup and loading, without a separate warmup; all
+outputs were checked. The Go rows use the latest main/PR measurements above,
+with Go 1.27.1 and `GOMAXPROCS=1`. The language rows retain the previously
+measured results from separate batches on the same machine with their default
+runtime settings; they have not been rerun for this update or interleaved with
+the latest Go measurements. The table is a descriptive cross-language
+comparison, rather than a controlled test of interpreter implementation alone.
+
+| Implementation | fibish | fibish_closure | uglyfib |
+| --- | ---: | ---: | ---: |
+| ixgo main `5c99c936` | 3.901 s | 6.367 s | 114.467 s |
+| ixgo typed runner `e9ee8a93` | 1.995 s | 1.910 s | 19.415 s |
+| Lua 5.5.1 | 2.412 s | 2.542 s | 26.266 s |
+| LuaJIT 2.1.1791890110 | 0.197 s | 0.228 s | 8.987 s |
+| Python 3.9.6 | 11.804 s | 12.290 s | 31.057 s |
+| Ruby 2.6.10p210 | 6.335 s | 6.591 s | 21.004 s |
+
+Standard Lua uses its bytecode interpreter. LuaJIT runs the same `.lua` files
+with its default JIT enabled (`jit.status()` returned true), without tuning
+flags. Python and Ruby use their default interpreter settings. The results
+apply to the listed runtime versions.
+
+The scripts preserve the recursive branches and normal multiple-result
+mechanisms. `fibish_closure` forwards the function argument unchanged; it does
+not invoke that argument or allocate a capturing closure per call. Uglyfib
+preserves the four mutually recursive functions and local array sizes, using
+shared mutable list/table/array slots for pointer aliases. Allocation and GC
+behavior therefore differ from Go's pointer/array representation.
+
+The recursive return fast path was also checked against uglyfib. Its `n=20` benchmark was 1.325 ms before and 1.337 ms after (about +0.9%, within noise), with identical allocations, so uglyfib receives no additional scalar benefit.
+
+Scripts and repetition helpers are checked in under `testdata/fibish`.
+Run `python3 bench_languages.py python ruby lua luajit` and
+`python3 bench_uglyfib.py python ruby lua luajit` there to verify small inputs
+and repeat input 40. Generated timing JSON files remain outside version control.
 
 ## Reproducing the comparison
 

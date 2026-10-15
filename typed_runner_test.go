@@ -262,6 +262,24 @@ func TestTypedRunnerGenericScalar(t *testing.T) {
 	}
 }
 
+func TestTypedRunnerScalarDispatchRemainderAndComparisons(t *testing.T) {
+	runner := &typedRunner[int]{code: []typedOp[int]{
+		{kind: typedConst, dst: 1, value: 3},
+		{kind: typedConst, dst: 2, value: 2},
+		{kind: typedRem, dst: 3, x: 0, y: 1},
+		{kind: typedOr, dst: 4, x: 3, y: 2},
+		{kind: typedAndNot, dst: 5, x: 4, y: 1},
+		{kind: typedShl, dst: 6, x: 5, y: 2},
+		{kind: typedShr, dst: 7, x: 6, y: 1},
+		{kind: typedLessEqual, dst: 8, x: 6, y: 0},
+		{kind: typedGreaterEqual, dst: 9, x: 6, y: 0},
+		{kind: typedReturn, nres: 1, results: []uint8{7}},
+	}}
+	if got := runner.Run(5); got != 0 {
+		t.Fatalf("got=%v, want=0", got)
+	}
+}
+
 func TestTypedScalarLoopKeepsLocalResults(t *testing.T) {
 	pkg, err := NewContext(0).LoadFile("loops.go", typedLoopSource)
 	if err != nil {
@@ -322,6 +340,60 @@ func eight(n int)(int,int,int,int,int,int,int,int) {
 			go func() { defer wg.Done(); check(100) }()
 		}
 		wg.Wait()
+	}
+}
+
+func TestTypedScalarRecursiveOperations(t *testing.T) {
+	interp, err := NewContext(0).LoadInterp("recursive_ops.go", `package main
+func add(n int) int {if n==0{return 1};return add(n-1)+2}
+func sub(n int) int {if n==0{return 9};return sub(n-1)-2}
+func mul(n int) int {if n==0{return 1};return mul(n-1)*2}
+func quo(n int) int {if n==0{return 64};return quo(n-1)/2}
+func rem(n int) int {if n==0{return 17};return rem(n-1)%5}
+func and(n int) int {if n==0{return 7};return and(n-1)&3}
+func or(n int) int {if n==0{return 0};return or(n-1)|2}
+func xor(n int) int {if n==0{return 7};return xor(n-1)^3}
+func andnot(n int) int {if n==0{return 7};return andnot(n-1)&^3}
+func shl(n int) int {if n==0{return 1};return shl(n-1)<<1}
+func shr(n int) int {if n==0{return 64};return shr(n-1)>>1}
+func less(n int) int {if n==0{return 1};x:=less(n-1);if x<100{return x+1};return x}
+func leq(n int) int {if n==0{return 1};x:=leq(n-1);if x<=100{return x+1};return x}
+func greater(n int) int {if n==0{return 1};x:=greater(n-1);if x>-100{return x+1};return x}
+func geq(n int) int {if n==0{return 1};x:=geq(n-1);if x>=-100{return x+1};return x}
+func equal(n int) int {if n==0{return 1};x:=equal(n-1);if x==x{return x+1};return x}
+func notequal(n int) int {if n==0{return 1};x:=notequal(n-1);if x!=x-1{return x+1};return x}
+func negate(n int) int {if n==0{return 1};return -negate(n-1)}
+func complement(n int) int {if n==0{return 1};return ^complement(n-1)}
+func boolops(n int) int {
+ if n==0 {return 1}
+ x:=boolops(n-1)
+ a:=true
+ b:=false
+ if x<0 {a=b}
+ if !a {x++}
+ if a==b {x++}
+ if a!=b {x++}
+ return x
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer interp.UnsafeRelease()
+	for _, name := range []string{"add", "sub", "mul", "quo", "rem", "and", "or", "xor", "andnot", "shl", "shr", "less", "leq", "greater", "geq", "equal", "notequal", "negate", "complement", "boolops"} {
+		fn := interp.mainpkg.Func(name)
+		runner, ok := MakeTypedRunnerOf[int](fn).(*typedRunner[int])
+		if !ok || !runner.recursive {
+			t.Fatalf("%s: recursive scalar runner missing", name)
+		}
+		interp.funcs[fn].typedRunner = nil
+		want, err := interp.RunFunc(name, 3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := runner.Run(3); !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s: got=%v want=%v", name, got, want)
+		}
 	}
 }
 
