@@ -2,12 +2,48 @@ package typedrunner
 
 import (
 	"math"
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/goplus/ixgo"
 	"golang.org/x/tools/go/ssa"
 )
+
+func TestFibFixturesWithDefaultRunners(t *testing.T) {
+	for _, name := range []string{"fibish", "fibish_closure", "uglyfib"} {
+		t.Run(name, func(t *testing.T) {
+			source, err := os.ReadFile("../testdata/fibish/" + name + ".go")
+			if err != nil {
+				t.Fatal(err)
+			}
+			entry := "\nfunc entry(n int)(int,int) {return f(n)}\n"
+			var want ixgo.Value = ixgo.Tuple{2584, 8362}
+			if name == "fibish_closure" {
+				entry = "\nfunc entry(n int)(int,int) {return f(n,f)}\n"
+			} else if name == "uglyfib" {
+				entry = "\nfunc entry(n int)int {a,b,p:=n-1,n-2,0;f(n,&a,&b,&p);return p}\n"
+				want = 6765
+			}
+			// Exercise the fixture's computation without loading fmt and its
+			// method wrappers into this standalone plugin test process.
+			program, _, found := strings.Cut(string(source), "\nfunc main()")
+			if !found {
+				t.Fatal("fixture main not found")
+			}
+			program = strings.Replace(program, "import \"fmt\"", "", 1)
+			i, err := ixgo.NewContext(0).LoadInterp(name+".go", program+entry)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			if got, err := i.RunFunc("entry", 20); err != nil || !reflect.DeepEqual(got, want) {
+				t.Fatalf("default plugin: got=%v want=%v err=%v", got, want, err)
+			}
+		})
+	}
+}
 
 func TestLoopSelection(t *testing.T) {
 	ctx := ixgo.NewContext(0)

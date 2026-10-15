@@ -4,6 +4,8 @@
  */
 
 // Package typedrunner enables optional scalar and memory typed runners.
+// Supported argument and memory runners use instruction fusion and batched
+// constant initialization by default.
 //
 // Import it for applications that want the optimization:
 //

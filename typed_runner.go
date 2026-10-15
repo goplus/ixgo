@@ -204,12 +204,20 @@ func (r *typedRunner[T]) runTyped(input T) typedResults[T] {
 // MakeTypedRunnerOf compiles an SSA function for one scalar type. A plugin
 // chooses the concrete T after inspecting the function signature. The core
 // selects the scalar fast path first, then the argument and memory runner.
+// The argument and memory runner applies instruction fusion and batched constant
+// initialization throughout supported recursive call graphs before publication.
 // Unsupported functions return nil for ordinary interpreter execution.
 func MakeTypedRunnerOf[T TypedScalar](fn *ssa.Function) TypedRunner {
 	if runner := makeTypedScalarRunnerOf[T](fn); runner != nil {
 		return runner
 	}
-	return makeTypedArgumentsRunnerOf[T](fn)
+	runner := makeTypedArgumentsRunnerOf[T](fn)
+	if runner != nil {
+		r := runner.(*typedArgsRunner[T])
+		fuseTypedArguments(r)
+		batchTypedConstants(r)
+	}
+	return runner
 }
 
 func makeTypedScalarRunnerOf[T TypedScalar](fn *ssa.Function) TypedRunner {
@@ -602,6 +610,10 @@ const (
 	typedPointerNotEqual
 	typedArrayLoad
 	typedArrayStore
+	// Superinstructions emitted by the optimization passes.
+	typedLessBranch
+	typedLoadAddStore
+	typedConstBlock
 )
 
 type typedArgsOp[T TypedScalar] struct {
@@ -625,6 +637,85 @@ type typedArgsRunner[T TypedScalar] struct {
 	kinds       []typedArgKind
 	resultKinds []typedArgKind
 	hasCalls    bool
+	constants   []T // batched constant initialization
+}
+
+// batchTypedConstants collapses a dense numeric constant prologue to one
+// dispatch and copy. Keep the old instructions for any existing PC references.
+// All optimization passes mutate code and must run before execution starts.
+func batchTypedConstants[T TypedScalar](root *typedArgsRunner[T]) int {
+	seen := make(map[*typedArgsRunner[T]]bool)
+	var visit func(*typedArgsRunner[T]) int
+	visit = func(r *typedArgsRunner[T]) int {
+		if seen[r] {
+			return 0
+		}
+		seen[r] = true
+		n := 0
+		end := 0
+		for end < len(r.code) && r.code[end].kind == typedConst && int(r.code[end].dst) == int(r.code[0].dst)+end {
+			end++
+		}
+		if end > 1 {
+			r.constants = make([]T, end)
+			for j := 0; j < end; j++ {
+				r.constants[j] = r.code[j].value
+			}
+			op := &r.code[0]
+			op.kind, op.offset, op.length, op.target = typedConstBlock, int(op.dst), end, end
+			n++
+		}
+		for _, op := range r.code {
+			if op.kind == typedCall {
+				n += visit(op.callee)
+			}
+		}
+		return n
+	}
+	return visit(root)
+}
+
+// fuseTypedArguments combines common instruction sequences. Preserve instruction
+// positions and intermediate results so branch targets and later uses remain
+// valid. A visited set handles mutually recursive call graphs.
+func fuseTypedArguments[T TypedScalar](root *typedArgsRunner[T]) int {
+	seen := make(map[*typedArgsRunner[T]]bool)
+	var visit func(*typedArgsRunner[T]) int
+	visit = func(r *typedArgsRunner[T]) int {
+		if seen[r] {
+			return 0
+		}
+		seen[r] = true
+		n := 0
+		for i := range r.code {
+			op := &r.code[i]
+			if op.kind == typedCall {
+				n += visit(op.callee)
+			}
+			if op.kind == typedLess && i+1 < len(r.code) {
+				next := &r.code[i+1]
+				if next.kind == typedBranch && next.x == op.dst {
+					op.kind = typedLessBranch
+					op.truePC, op.falsePC = next.truePC, next.falsePC
+					n++
+				}
+			}
+			if op.kind == typedLoad && i+2 < len(r.code) {
+				add, store := &r.code[i+1], &r.code[i+2]
+				if add.kind == typedAdd && store.kind == typedStore && store.x == op.x && store.y == add.dst && (add.x == op.dst || add.y == op.dst) {
+					op.kind, op.offset, op.target = typedLoadAddStore, int(add.dst), i+3
+					if add.x == op.dst {
+						op.y = add.y
+					} else {
+						op.y, op.length = add.x, 1
+					}
+					n++
+				}
+			}
+		}
+		return n
+	}
+	return visit(root)
 }
 
 func (r *typedArgsRunner[T]) Run(input Value) Value { return r.RunArgs([]Value{input}) }
@@ -680,6 +771,9 @@ func (r *typedArgsRunner[T]) RunArgs(args []Value) Value {
 		switch op.kind {
 		case typedConst:
 			fr.regs[op.dst] = op.value
+		case typedConstBlock:
+			copy(fr.regs[op.offset:op.offset+op.length], fr.runner.constants)
+			fr.pc = op.target
 		case typedBoolConst:
 			fr.bools[op.dst] = op.value != 0
 		case typedPointerConst:
@@ -712,6 +806,13 @@ func (r *typedArgsRunner[T]) RunArgs(args []Value) Value {
 			fr.regs[op.dst] = typedShiftRight(fr.regs[op.x], fr.regs[op.y])
 		case typedLess:
 			fr.bools[op.dst] = fr.regs[op.x] < fr.regs[op.y]
+		case typedLessBranch:
+			fr.bools[op.dst] = fr.regs[op.x] < fr.regs[op.y]
+			if fr.bools[op.dst] {
+				fr.pc = op.truePC
+			} else {
+				fr.pc = op.falsePC
+			}
 		case typedLessEqual:
 			fr.bools[op.dst] = fr.regs[op.x] <= fr.regs[op.y]
 		case typedGreater:
@@ -777,6 +878,23 @@ func (r *typedArgsRunner[T]) RunArgs(args []Value) Value {
 				var nilPointer *T
 				*nilPointer = fr.regs[op.y]
 			}
+		case typedLoadAddStore:
+			handle := fr.ptrs[op.x]
+			var p *T
+			if handle > 0 {
+				slot := int(handle) - 1
+				p = &frames[slot/typedArgsLimit].locals[slot%typedArgsLimit]
+			} else if handle < 0 {
+				p = external[-int(handle)-1]
+			}
+			fr.regs[op.dst] = *p
+			if op.length == 0 {
+				fr.regs[op.offset] = fr.regs[op.dst] + fr.regs[op.y]
+			} else {
+				fr.regs[op.offset] = fr.regs[op.y] + fr.regs[op.dst]
+			}
+			*p = fr.regs[op.offset]
+			fr.pc = op.target
 		case typedCall:
 			if depth+1 == len(frames) {
 				frames = append(frames, typedArgsFrame[T]{})

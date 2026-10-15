@@ -763,7 +763,7 @@ func deep(n int,p *int) int {if n==0 {return *p};return deep(n-1,p)+1}
 	}
 	for _, name := range []string{"shallow", "mixed", "deep"} {
 		b.Run(name, func(b *testing.B) {
-			runner := makeTypedArgumentsRunnerOf[int](pkg.Func(name)).(TypedArgumentsRunner)
+			runner := MakeTypedRunnerOf[int](pkg.Func(name)).(TypedArgumentsRunner)
 			p := 1
 			args := []Value{100, &p}
 			var want Value = 101
@@ -1419,4 +1419,319 @@ func TestTypedRunnerInvalidCallResult(t *testing.T) {
 		}
 	}()
 	call(&frame{stack: []Value{1, nil, nil}})
+}
+
+func TestTypedArgumentsFusionUglyFib(t *testing.T) {
+	source, err := os.ReadFile("testdata/fibish/uglyfib.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := NewContext(0).LoadFile("uglyfib.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"f", "g", "h", "k"} {
+		before := makeTypedArgumentsRunnerOf[int](pkg.Func(name)).(*typedArgsRunner[int])
+		after := makeTypedArgumentsRunnerOf[int](pkg.Func(name)).(*typedArgsRunner[int])
+		if n := fuseTypedArguments(after); n != 8 {
+			t.Fatalf("%s: got %d fusions, want 8", name, n)
+		}
+		if n := batchTypedConstants(after); n != 4 {
+			t.Fatalf("%s: got %d constant batches, want 4", name, n)
+		}
+		for n := 0; n <= 20; n++ {
+			for _, alias := range []bool{false, true} {
+				run := func(r *typedArgsRunner[int]) int {
+					a, b, result := n-1, n-2, 0
+					pa, pb := &a, &b
+					if alias {
+						pa, pb = &result, &result
+					}
+					r.RunArgs([]Value{n, pa, pb, &result})
+					return result
+				}
+				if want, got := run(before), run(after); want != got {
+					t.Fatalf("%s(%d) alias=%v: fused=%d original=%d", name, n, alias, got, want)
+				}
+			}
+		}
+	}
+}
+
+func TestTypedArgumentsConstantBatches(t *testing.T) {
+	pkg, err := NewContext(0).LoadFile("args.go", typedArgsSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"calls", "memory", "pointerPhi", "unary", "index", "alias", "deep"} {
+		before := makeTypedArgumentsRunnerOf[int](pkg.Func(name)).(*typedArgsRunner[int])
+		after := makeTypedArgumentsRunnerOf[int](pkg.Func(name)).(*typedArgsRunner[int])
+		fuseTypedArguments(after)
+		batchTypedConstants(after)
+		for _, n := range []int{0, 1, 2, 7, 100} {
+			run := func(r *typedArgsRunner[int]) (Value, int, int) {
+				a, b := 7, 11
+				var args []Value
+				switch name {
+				case "calls":
+					args = []Value{n, 5}
+				case "memory", "pointerPhi":
+					args = []Value{n, &a, &b}
+				case "alias":
+					args = []Value{&a, &a}
+				case "index":
+					args = []Value{n % 3, &a}
+				default:
+					args = []Value{n, &a}
+				}
+				return r.RunArgs(args), a, b
+			}
+			want, wa, wb := run(before)
+			got, ga, gb := run(after)
+			if !reflect.DeepEqual(got, want) || ga != wa || gb != wb {
+				t.Fatalf("%s(%d): optimized=%v (%d,%d), original=%v (%d,%d)", name, n, got, ga, gb, want, wa, wb)
+			}
+		}
+	}
+	pkg, err = NewContext(0).LoadFile("constants.go", `package main
+func floats(n float64)float64 {return n*2.5+1.25}
+func narrow(n uint8)uint8 {return (n*3+7)^13}
+func flags(n int)(int,bool) {b:=false;s:=2;for i:=0;i<n;i++ {b=!b;s+=3};return s+5,b}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	floatRunner := makeTypedArgumentsRunnerOf[float64](pkg.Func("floats")).(*typedArgsRunner[float64])
+	if batchTypedConstants(floatRunner) != 1 {
+		t.Fatal("float constants not batched")
+	}
+	for _, n := range []float64{-2.25, 0, 1.5} {
+		if got := floatRunner.RunArgs([]Value{n}); got != n*2.5+1.25 {
+			t.Fatal("incorrect float result", got)
+		}
+	}
+	narrow := makeTypedArgumentsRunnerOf[uint8](pkg.Func("narrow")).(*typedArgsRunner[uint8])
+	if batchTypedConstants(narrow) != 1 {
+		t.Fatal("narrow constants not batched")
+	}
+	for _, n := range []uint8{0, 1, 250, 255} {
+		if got := narrow.RunArgs([]Value{n}); got != (n*3+7)^13 {
+			t.Fatal("incorrect overflow result", got)
+		}
+	}
+	flags := makeTypedArgumentsRunnerOf[int](pkg.Func("flags")).(*typedArgsRunner[int])
+	batchTypedConstants(flags)
+	for _, n := range []int{0, 1, 2, 7, 100} {
+		want := Tuple{7 + 3*n, n%2 != 0}
+		if got := flags.RunArgs([]Value{n}); !reflect.DeepEqual(got, want) {
+			t.Fatalf("numeric/bool constants: got=%v want=%v", got, want)
+		}
+	}
+}
+
+func BenchmarkTypedArgumentsFusionUglyFib(b *testing.B) {
+	source, err := os.ReadFile("testdata/fibish/uglyfib.go")
+	if err != nil {
+		b.Fatal(err)
+	}
+	pkg, err := NewContext(0).LoadFile("uglyfib.go", source)
+	if err != nil {
+		b.Fatal(err)
+	}
+	input, expected := 20, 6765
+	if os.Getenv("IXGO_FIB40") == "1" {
+		input, expected = 40, 102334155
+	}
+	for _, mode := range []string{"original", "fused", "constants", "default"} {
+		b.Run(mode, func(b *testing.B) {
+			r := makeTypedArgumentsRunnerOf[int](pkg.Func("f")).(*typedArgsRunner[int])
+			if mode == "default" {
+				r = MakeTypedRunnerOf[int](pkg.Func("f")).(*typedArgsRunner[int])
+			}
+			if (mode == "fused" || mode == "fused_constants") && fuseTypedArguments(r) != 8 {
+				b.Fatal("expected 8 fusions across f/g/h/k")
+			}
+			if (mode == "constants" || mode == "fused_constants") && batchTypedConstants(r) != 4 {
+				b.Fatal("expected 4 batched constant prologues")
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for j := 0; j < b.N; j++ {
+				a, c, result := input-1, input-2, 0
+				r.RunArgs([]Value{input, &a, &c, &result})
+				if result != expected {
+					b.Fatal(result)
+				}
+			}
+		})
+	}
+}
+
+func TestTypedArgumentsFusionValues(t *testing.T) {
+	pkg, err := NewContext(0).LoadFile("fusion.go", `package main
+func update(n int,p *int)(int,int) {a:=*p;b:=a+n;*p=b;return a,b}
+func reversed(n int,p *int)(int,int) {a:=*p;b:=n+a;*p=b;return a,b}
+func twice(p *int)(int,int) {a:=*p;b:=a+a;*p=b;return a,b}
+func compare(n int)(int,bool) {b:=n<5;if b{return n+1,b};return n-1,b}
+func floats(n float64,p *float64)(float64,float64) {a:=*p;b:=a+n;*p=b;return a,b}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"update", "reversed", "twice", "compare"} {
+		r := makeTypedArgumentsRunnerOf[int](pkg.Func(name)).(*typedArgsRunner[int])
+		if fuseTypedArguments(r) != 1 {
+			t.Fatalf("%s: expected one fusion", name)
+		}
+		for _, n := range []int{-3, 0, 9} {
+			p := 7
+			args, want := []Value{n, &p}, Tuple{7, 7 + n}
+			if name == "twice" {
+				args, want = []Value{&p}, Tuple{7, 14}
+			} else if name == "compare" {
+				args, want = []Value{n}, Tuple{n - 1, false}
+				if n < 5 {
+					want = Tuple{n + 1, true}
+				}
+			}
+			if got := r.RunArgs(args); !reflect.DeepEqual(got, want) {
+				t.Fatalf("%s: got=%v want=%v", name, got, want)
+			}
+			if name != "compare" && p != want[1] {
+				t.Fatalf("%s: pointer write got=%v want=%v", name, p, want[1])
+			}
+		}
+		if name != "compare" {
+			func() {
+				defer func() {
+					if recover() == nil {
+						t.Fatalf("%s: nil pointer did not panic", name)
+					}
+				}()
+				args := []Value{1, (*int)(nil)}
+				if name == "twice" {
+					args = args[1:]
+				}
+				r.RunArgs(args)
+			}()
+		}
+	}
+	r := makeTypedArgumentsRunnerOf[float64](pkg.Func("floats")).(*typedArgsRunner[float64])
+	if fuseTypedArguments(r) != 1 {
+		t.Fatal("float fusion missing")
+	}
+	p := 1.5
+	if got := r.RunArgs([]Value{2.25, &p}); !reflect.DeepEqual(got, Tuple{1.5, 3.75}) || p != 3.75 {
+		t.Fatalf("float result=%v pointer=%v", got, p)
+	}
+}
+
+func TestTypedRunnerDefaultOptimizations(t *testing.T) {
+	source, err := os.ReadFile("testdata/fibish/uglyfib.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pkg, err := NewContext(0).LoadFile("uglyfib.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := MakeTypedRunnerOf[int](pkg.Func("f")).(*typedArgsRunner[int])
+	seen := make(map[*typedArgsRunner[int]]bool)
+	var visit func(*typedArgsRunner[int])
+	visit = func(r *typedArgsRunner[int]) {
+		if seen[r] {
+			return
+		}
+		seen[r] = true
+		kinds := make(map[typedOpKind]bool)
+		for _, op := range r.code {
+			kinds[op.kind] = true
+			if op.kind == typedCall {
+				visit(op.callee)
+			}
+		}
+		for _, kind := range []typedOpKind{typedConstBlock, typedLessBranch, typedLoadAddStore} {
+			if !kinds[kind] {
+				t.Errorf("reachable runner missing optimized instruction %v", kind)
+			}
+		}
+	}
+	visit(runner)
+	if len(seen) != 4 {
+		t.Fatalf("optimized %d functions, want 4", len(seen))
+	}
+	a, b, result := 19, 18, 0
+	runner.RunArgs([]Value{20, &a, &b, &result})
+	if result != 6765 {
+		t.Fatal("incorrect optimized uglyfib result", result)
+	}
+}
+
+func TestTypedOptimizationsOrderAndConcurrency(t *testing.T) {
+	pkg, err := NewContext(0).LoadFile("args.go", typedArgsSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, constantsFirst := range []bool{false, true} {
+		r := makeTypedArgumentsRunnerOf[int](pkg.Func("deep")).(*typedArgsRunner[int])
+		if constantsFirst {
+			batchTypedConstants(r)
+			fuseTypedArguments(r)
+		} else {
+			fuseTypedArguments(r)
+			batchTypedConstants(r)
+		}
+		if fuseTypedArguments(r) != 0 || batchTypedConstants(r) != 0 {
+			t.Fatal("reapplying optimization changed already optimized code")
+		}
+		var wg sync.WaitGroup
+		for worker := 0; worker < 8; worker++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for _, n := range []int{0, 1, 20, 100} {
+					p := 7
+					r.RunArgs([]Value{n, &p})
+					if want := 7 + n*(n+3)/2; p != want {
+						t.Errorf("deep(%d): got=%d want=%d", n, p, want)
+					}
+				}
+			}()
+		}
+		wg.Wait()
+	}
+}
+
+func TestTypedFusionFloatBoundaries(t *testing.T) {
+	pkg, err := NewContext(0).LoadFile("float_fusion.go", `package main
+func compare(n float64)float64 {if n<0 {return -1};return 1}
+func add(n float64,p *float64)(float64,float64) {a:=*p;b:=a+n;*p=b;return a,b}
+func reverse(n float64,p *float64)(float64,float64) {a:=*p;b:=n+a;*p=b;return a,b}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := []float64{0, math.Copysign(0, -1), 1, -1, math.Inf(1), math.Inf(-1), math.Float64frombits(0x7ff8000000000001)}
+	for _, name := range []string{"compare", "add", "reverse"} {
+		before := makeTypedArgumentsRunnerOf[float64](pkg.Func(name))
+		after := makeTypedArgumentsRunnerOf[float64](pkg.Func(name))
+		if fuseTypedArguments(after.(*typedArgsRunner[float64])) != 1 {
+			t.Fatal("float instruction sequence not fused")
+		}
+		for _, x := range values {
+			for _, y := range values {
+				run := func(r TypedRunner) []uint64 {
+					if name == "compare" {
+						return []uint64{math.Float64bits(r.Run(x).(float64))}
+					}
+					p := y
+					result := r.(TypedArgumentsRunner).RunArgs([]Value{x, &p}).(Tuple)
+					return []uint64{math.Float64bits(result[0].(float64)), math.Float64bits(result[1].(float64)), math.Float64bits(p)}
+				}
+				if want, got := run(before), run(after); !reflect.DeepEqual(got, want) {
+					t.Fatalf("%s(%v,%v): fused bits=%x original bits=%x", name, x, y, got, want)
+				}
+			}
+		}
+	}
 }
