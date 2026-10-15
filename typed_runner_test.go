@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	pkg "github.com/goplus/ixgo/testdata/namedpkg"
 	"golang.org/x/tools/go/ssa"
 )
 
@@ -848,22 +849,68 @@ func f(n int,a,b bool) int {if !a == b {return n};return -n}
 
 func TestTypedRunnerNamedIntegers(t *testing.T) {
 	ctx := NewContext(0)
-	pkg, err := ctx.LoadFile("named.go", `package main
-type Count int
-type Bits uint8
-func count(n Count) Count { if n < 1 { return n }; return count(n-1)+1 }
-func bits(n Bits) Bits { return (n ^ 3) + 1 }
+	spkg, err := ctx.LoadFile("named.go", `package main
+import "github.com/goplus/ixgo/testdata/namedpkg"
+func count(n pkg.Count) pkg.Count { if n < 1 { return n }; return count(n-1)+1 }
+func bits(n pkg.Bits) pkg.Bits { return (n ^ 3) + 1 }
+func add(a, b pkg.Count) pkg.Count { return a + b }
 `)
 	if err != nil {
 		t.Fatal(err)
 	}
-	type MyInt int
-	type MyBits uint8
-	if runner := MakeTypedRunnerOf[MyInt](pkg.Func("count")); runner == nil || runner.Run(MyInt(9)) != MyInt(9) {
-		t.Fatal("named ~int type was not compiled")
+	runner, ok := MakeTypedRunnerOf[pkg.Count](spkg.Func("count")).(*typedRunner[pkg.Count])
+	if !ok {
+		t.Fatal("named ~int did not select the scalar typed runner")
 	}
-	if runner := MakeTypedRunnerOf[MyBits](pkg.Func("bits")); runner == nil || runner.Run(MyBits(5)) != MyBits(7) {
-		t.Fatal("named ~uint8 type was not compiled")
+	for _, input := range []pkg.Count{-2, 0, 1, 9} {
+		if got := runner.Run(input); got != input {
+			t.Fatalf("count(%d) = %d, want %d", input, got, input)
+		}
+	}
+	bits, ok := MakeTypedRunnerOf[pkg.Bits](spkg.Func("bits")).(*typedRunner[pkg.Bits])
+	if !ok {
+		t.Fatal("named ~uint8 did not select the scalar typed runner")
+	}
+	for input, want := range map[pkg.Bits]pkg.Bits{0: 4, 1: 3, 5: 7, 255: 253} {
+		if got := bits.Run(input); got != want {
+			t.Fatalf("bits(%d) = %d, want %d", input, got, want)
+		}
+	}
+	args, ok := MakeTypedRunnerOf[pkg.Count](spkg.Func("add")).(*typedArgsRunner[pkg.Count])
+	if !ok {
+		t.Fatal("named ~int did not select the argument typed runner")
+	}
+	for _, tc := range []struct {
+		a, b, want pkg.Count
+	}{{2, 3, 5}, {-4, 9, 5}, {0, -7, -7}} {
+		if got := args.RunArgs([]Value{tc.a, tc.b}); got != tc.want {
+			t.Fatalf("add(%d,%d) = %d, want %d", tc.a, tc.b, got, tc.want)
+		}
+	}
+	saved := typedRunnerFactory
+	RegisterTypedRunnerFactory(MakeTypedRunnerOf[pkg.Count])
+	t.Cleanup(func() { RegisterTypedRunnerFactory(saved) })
+	interp, err := ctx.LoadInterp("named.go", `package main
+import "github.com/goplus/ixgo/testdata/namedpkg"
+func count(n pkg.Count) pkg.Count { if n < 1 { return n }; return count(n-1)+1 }
+func add(a, b pkg.Count) pkg.Count { return a + b }
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer interp.UnsafeRelease()
+	for _, tc := range []struct {
+		name string
+		args []Value
+		want Value
+	}{
+		{"count", []Value{pkg.Count(9)}, pkg.Count(9)},
+		{"add", []Value{pkg.Count(-4), pkg.Count(9)}, pkg.Count(5)},
+	} {
+		got, err := interp.RunFunc(tc.name, tc.args...)
+		if err != nil || got != tc.want {
+			t.Fatalf("interpreted %s = %v, want %v (err=%v)", tc.name, got, tc.want, err)
+		}
 	}
 }
 
