@@ -55,7 +55,7 @@ bool. Mixed numeric types and conversions, pointer results, external calls,
 defer, and allocations inside loops are unsupported. Each frame is limited to
 64 registers and 64 local scalar slots; recursion grows the arena as needed.
 
-The argument/memory runner enables dense numeric constant batching,
+The argument/memory runner groups typed call argument moves by scalar, pointer, and bool kind, and enables dense numeric constant batching,
 comparison/branch fusion, and eligible load/add/store fusion. These passes
 process the complete call graph before publication and preserve branch targets,
 intermediate registers, float behavior, and pointer aliases. They match generic
@@ -70,7 +70,7 @@ to the argument/memory runner.
 Measured 2026-10-15 on Apple M5, macOS arm64, Go 1.27.1, `GOWORK=off`,
 `GOMAXPROCS=1`, input 40.
 Upstream main was verified as `5c99c936`; the final PR implementation is
-`74d4c9b9`. Both CLIs were built with the same toolchain and execute the same
+`f3b1d418`. Both CLIs were built with the same toolchain and execute the same
 checked-in fixture sources from this PR.
 
 Each entry is the median of three serial alternating main/PR process runs,
@@ -79,14 +79,14 @@ The order is main/PR in rounds 1 and 3, PR/main in round 2. All 36 outputs were
 checked against the documented expected values. No other benchmark or build
 ran concurrently.
 
-| Example | main `5c99c936` | PR `74d4c9b9` | main / PR |
+| Example | main `5c99c936` | PR `f3b1d418` | main / PR |
 | --- | ---: | ---: | ---: |
-| `fibish` | 3.913 s | 2.595 s | 1.51x |
-| `fibish_closure` | 6.424 s | 2.579 s | 2.49x |
-| `fibish_loop` | 54.311 ms | 53.988 ms | 1.01x |
-| `fibish_float32` | 8.869 s | 2.321 s | 3.82x |
-| `fibish_float64` | 9.453 s | 2.844 s | 3.32x |
-| `uglyfib` | 116.118 s | 20.580 s | 5.64x |
+| `fibish` | 3.901 s | 2.242 s | 1.74x |
+| `fibish_closure` | 6.367 s | 2.241 s | 2.84x |
+| `fibish_loop` | 52.882 ms | 52.657 ms | 1.00x |
+| `fibish_float32` | 8.868 s | 1.892 s | 4.69x |
+| `fibish_float64` | 9.429 s | 2.380 s | 3.96x |
+| `uglyfib` | 114.467 s | 19.415 s | 5.90x |
 
 The recursive fixtures spend most of their time in execution. The loop at
 input 40 performs little work, so loading dominates; its small timing difference
@@ -98,12 +98,12 @@ Three runs do not establish statistical significance for small differences.
 
 | Example | main rounds (s) | PR rounds (s) |
 | --- | --- | --- |
-| `fibish` | 4.935499, 3.870352, 3.913027 | 2.587990, 2.594680, 2.619519 |
-| `fibish_closure` | 6.354863, 6.425541, 6.424394 | 2.573154, 2.579693, 2.578876 |
-| `fibish_loop` | 0.054311, 0.053673, 0.054479 | 0.054396, 0.053988, 0.053614 |
-| `fibish_float32` | 8.849967, 8.881089, 8.868933 | 2.320534, 2.359288, 2.315592 |
-| `fibish_float64` | 9.454436, 9.452878, 9.444687 | 2.843995, 2.825510, 2.847199 |
-| `uglyfib` | 115.639235, 116.117676, 116.761133 | 20.579689, 20.562500, 20.634061 |
+| `fibish` | 4.067613, 3.901037, 3.876147 | 3.319925, 2.197261, 2.242073 |
+| `fibish_closure` | 6.374504, 6.349313, 6.367240 | 2.159013, 2.240693, 2.265239 |
+| `fibish_loop` | 0.054167, 0.052882, 0.052831 | 0.053662, 0.052202, 0.052657 |
+| `fibish_float32` | 8.867665, 8.843980, 8.870807 | 1.883144, 1.900261, 1.891633 |
+| `fibish_float64` | 9.428808, 9.422065, 9.441496 | 2.296484, 2.379577, 2.416122 |
+| `uglyfib` | 114.467070, 114.270771, 115.469531 | 19.363909, 19.415228, 19.505525 |
 
 </details>
 

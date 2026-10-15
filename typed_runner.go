@@ -724,6 +724,8 @@ const (
 
 type typedArgsOp[T TypedScalar] struct {
 	typedOp[T]
+	// Calls store (source, destination) register pairs, grouped by argument kind.
+	// offset ends the scalar group; length ends the pointer group; bool follows.
 	args           []uint8
 	callee         *typedArgsRunner[T]
 	offset, length int
@@ -1008,16 +1010,15 @@ func (r *typedArgsRunner[T]) RunArgs(args []Value) Value {
 			}
 			next := &frames[depth+1]
 			next.runner, next.pc = op.callee, 0
-			for i, src := range op.args {
-				dst := op.callee.params[i]
-				switch op.callee.kinds[i] {
-				case typedArgScalar:
-					next.regs[dst] = fr.regs[src]
-				case typedArgPointer:
-					next.ptrs[dst] = fr.ptrs[src]
-				case typedArgBool:
-					next.bools[dst] = fr.bools[src]
-				}
+			// Argument register moves are grouped by kind at compile time.
+			for i := 0; i < op.offset; i += 2 {
+				next.regs[op.args[i+1]] = fr.regs[op.args[i]]
+			}
+			for i := op.offset; i < op.length; i += 2 {
+				next.ptrs[op.args[i+1]] = fr.ptrs[op.args[i]]
+			}
+			for i := op.length; i < len(op.args); i += 2 {
+				next.bools[op.args[i+1]] = fr.bools[op.args[i]]
 			}
 			depth++
 		case typedBranch:
@@ -1050,13 +1051,15 @@ func (r *typedArgsRunner[T]) RunArgs(args []Value) Value {
 					return result
 				}
 			}
-			caller := &frames[depth-1]
-			call := &caller.runner.code[caller.pc-1]
-			for i, src := range op.results {
-				if fr.runner.resultKinds[i] == typedArgBool {
-					caller.bools[call.results[i]] = fr.bools[src]
-				} else {
-					caller.regs[call.results[i]] = fr.regs[src]
+			if len(op.results) != 0 {
+				caller := &frames[depth-1]
+				call := &caller.runner.code[caller.pc-1]
+				for i, src := range op.results {
+					if fr.runner.resultKinds[i] == typedArgBool {
+						caller.bools[call.results[i]] = fr.bools[src]
+					} else {
+						caller.regs[call.results[i]] = fr.regs[src]
+					}
 				}
 			}
 			depth--
@@ -1393,6 +1396,22 @@ func (c *typedArgsCompiler[T]) build(fn *ssa.Function) (runner *typedArgsRunner[
 					op.results = []uint8{regs[i]}
 				} else {
 					op.results = tuples[i]
+				}
+				// Store (source, destination) pairs in scalar/pointer/bool groups.
+				// Different frames make reordering these copies safe.
+				sources := op.args
+				op.args = make([]uint8, 0, 2*len(sources))
+				for _, kind := range []typedArgKind{typedArgScalar, typedArgPointer, typedArgBool} {
+					for j, src := range sources {
+						if op.callee.kinds[j] == kind {
+							op.args = append(op.args, src, op.callee.params[j])
+						}
+					}
+					if kind == typedArgScalar {
+						op.offset = len(op.args)
+					} else if kind == typedArgPointer {
+						op.length = len(op.args)
+					}
 				}
 				op.kind = typedCall
 			case *ssa.If:

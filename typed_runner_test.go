@@ -230,7 +230,7 @@ func f(x int) (int,int) {
 }
 
 func pairResult[T TypedScalar](runner *typedRunner[T], input T) [2]T {
-	result := runner.runTyped(input)
+	result := runner.runSelectedTyped(input)
 	return [2]T{result.values[0], result.values[1]}
 }
 
@@ -812,6 +812,40 @@ func BenchmarkTypedArgumentsUglyFib(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+func TestTypedArgumentsGroupedCallRegisters(t *testing.T) {
+	pkg, err := NewContext(0).LoadFile("grouped.go", `package main
+func mixed(b bool, p *int, n int, q *int, c bool) (int,bool) {
+ *p += n
+ *q += 2
+ return *p+*q,b!=c
+}
+func run(n int,p *int)(int,bool) {
+ a,b:=mixed(true,p,n,p,false)
+ if n>0 {x,c:=run(n-1,p);return a+x,b!=c}
+ return a,b
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, ok := MakeTypedRunnerOf[int](pkg.Func("run")).(TypedArgumentsRunner)
+	if !ok {
+		t.Fatal("argument runner missing")
+	}
+	for _, n := range []int{0, 1, 5, 20} {
+		value, wantValue, wantSum := 1, 1, 0
+		for i := n; i >= 0; i-- {
+			wantValue += i + 2
+			wantSum += 2 * wantValue
+		}
+		want := Tuple{wantSum, n%2 == 0}
+		got := runner.RunArgs([]Value{n, &value})
+		if !reflect.DeepEqual(got, want) || value != wantValue {
+			t.Fatalf("n=%d: got=%v value=%d want=%v value=%d", n, got, value, want, wantValue)
+		}
 	}
 }
 
