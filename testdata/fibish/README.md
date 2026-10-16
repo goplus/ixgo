@@ -32,8 +32,7 @@ go build -o /tmp/ixgo-fibish ./cmd/ixgo
 ```
 
 These commands include interpreter loading time. The loop performs O(x) work;
-eligible integer recursive examples now memoize repeated states; floating-point
-recursive examples retain their original recursive execution. The difference
+eligible integer and floating-point recursive examples memoize repeated states. The difference
 also reflects the algorithms. Compare the same file between ixgo versions to measure
 an interpreter optimization. The library requires a blank import of
 `github.com/goplus/ixgo/typedrunner` to enable the optional typed runner; the CLI
@@ -63,9 +62,11 @@ intermediate registers, float behavior, and pointer aliases. They match generic
 instruction patterns without hardcoded function names or Fibonacci call shapes.
 The default factory prefers the scalar runner where supported.
 
-Recursive integer scalar functions memoize results per invocation, using a
-64-entry inline table and an overflow map. Floating-point recursion retains the
-result-register fast path to preserve signed-zero and rounding behavior.
+Recursive integer and floating-point scalar functions memoize results per
+invocation, using a 64-entry inline table and an overflow map. Float32/float64
+keys use their exact IEEE bit patterns in both tiers, distinguishing signed
+zeros and NaN payloads. Cached results retain the original arithmetic and
+rounding; the inline memo is stack allocated.
 Non-recursive scalar functions keep the original scalar instruction path.
 
 Eligible integer accumulator call graphs also memoize effect summaries. Their
@@ -82,6 +83,7 @@ these results measure that algorithmic optimization as well as execution costs.
 ## Memoization update (2026-10-16)
 
 Apple M5, macOS arm64, Go 1.27.1, `GOWORK=off`, `GOMAXPROCS=1`, input 40.
+Float bit-key memoization update, measured on the rebased branch.
 The following are three serial CLI runs of the memoized implementation, including
 startup/loading and excluding compilation. All outputs were checked. The old
 main/PR and other-language measurements below remain historical data and were
@@ -90,16 +92,16 @@ should not be interpreted as a fresh controlled main/PR comparison.
 
 | Example | Rounds (seconds) | Median |
 | --- | --- | ---: |
-| `fibish` | 0.902440, 0.051971, 0.053971 | 0.053971 s |
-| `fibish_closure` | 0.051959, 0.051978, 0.053500 | 0.051978 s |
-| `fibish_loop` | 0.053428, 0.052725, 0.051867 | 0.052725 s |
-| `fibish_float32` | 1.758551, 1.793242, 1.763778 | 1.763778 s |
-| `fibish_float64` | 1.933997, 2.045712, 2.034520 | 2.034520 s |
-| `uglyfib` | 0.058626, 0.055114, 0.053765 | 0.055114 s |
+| `fibish` | 1.050144, 0.055215, 0.053980 | 0.055215 s |
+| `fibish_closure` | 0.054111, 0.053643, 0.053575 | 0.053643 s |
+| `fibish_loop` | 0.054955, 0.052715, 0.050763 | 0.052715 s |
+| `fibish_float32` | 0.053387, 0.053234, 0.051506 | 0.053234 s |
+| `fibish_float64` | 0.051501, 0.051680, 0.052897 | 0.051680 s |
+| `uglyfib` | 0.055463, 0.051163, 0.051430 | 0.051430 s |
 
 The first `fibish` process had additional startup wall time. Its cause was not
-isolated. Loading dominates the memoized integer examples at input 40.
-Float examples retain ordinary recursive execution.
+isolated. Loading dominates the memoized examples at input 40.
+Float examples now use bit-key memoization too.
 
 Reproduce the accumulator execution benchmark with:
 
@@ -110,13 +112,33 @@ GOWORK=off go test -run '^$' -bench BenchmarkTypedAccumulatorMemo -benchmem -cou
 The baseline and memo variants apply the same instruction fusion passes; only
 memo enables effect-summary caching. Serial measurements at input 20 were 1.191 ms/op versus 10.142 us/op
 (medians of three), with 57,344 B/op (1 allocation) versus 10,312 B/op
-(9 allocations), approximately 117x faster. The scalar fibish(20) benchmark
-was 747 ns/op, 200 B/op, 5 allocations. Re-run for machine-specific data.
+(9 allocations), approximately 117x faster. The latest scalar fibish(20) benchmark
+was 810 ns/op, 200 B/op, 5 allocations (previous batch: 747 ns/op). Re-run for machine-specific data.
 
 Validation for this update passed `GOWORK=off go test -count=1 ./...` and
 `GOWORK=off go test -race -count=1 . ./typedrunner`. New tests cover memo-table
-overflow, floating-point fallback, all four accumulator entry points, integer
+overflow, floating-point bit-key semantics, all four accumulator entry points, integer
 overflow, nil pointers, alias fallback, and rejected unsafe side effects.
+
+### Float execution benchmark (input 20)
+
+Three serial repetitions, same runner with cache disabled/enabled; medians:
+
+| Type | Cache disabled | Cache enabled | Speedup | Enabled B/op / allocs |
+| --- | ---: | ---: | ---: | ---: |
+| float32 | 113.593 us | 600.1 ns | 189.3x | 0 / 0 |
+| float64 | 123.755 us | 745.2 ns | 166.1x | 0 / 0 |
+
+```sh
+GOWORK=off go test -run '^$' -bench BenchmarkTypedMemoFloat -benchmem -count=3 .
+```
+
+Before float memoization, full CLI medians were 1.763778 s (float32) and
+2.034520 s (float64); current medians are 0.053234 s and 0.051680 s.
+These are separate local batches. Startup/loading now dominates all six fixtures.
+Tests exercise signed-zero recursion, infinity and distinct NaN keys in both
+cache tiers, and bitwise equality against uncached recursion for inputs 0–20.
+Full input-40 outputs match native-compatible rounding.
 
 ## Historical comparison with main (before memoization)
 

@@ -35,14 +35,15 @@ type typedResults[T TypedScalar] struct {
 const smallTypedMemoSize = 64
 
 type typedMemoEntry[T TypedScalar] struct {
-	key   T
+	key   uint64
 	value typedResults[T]
 }
 
 type typedMemo[T TypedScalar] struct {
 	entries  [smallTypedMemoSize]typedMemoEntry[T]
 	n        uint8
-	overflow map[T]typedResults[T]
+	kind     reflect.Kind
+	overflow map[uint64]typedResults[T]
 }
 
 type typedOpKind uint8
@@ -142,8 +143,10 @@ func (r *typedRunner[T]) runSelectedTyped(input T) typedResults[T] {
 	// Memoizing the recursive call graph removes repeated subtrees such as
 	// fibish while preserving the function's scalar result semantics.
 	if r.recursive && r.memoizable {
-		memo := newTypedMemo[T]()
-		return r.runMemoized(input, memo)
+		var memo typedMemo[T]
+		var zero T
+		memo.kind = reflect.TypeOf(zero).Kind()
+		return r.runMemoized(input, &memo)
 	}
 	if r.recursive {
 		return r.runRecursiveTyped(input)
@@ -152,32 +155,47 @@ func (r *typedRunner[T]) runSelectedTyped(input T) typedResults[T] {
 }
 
 func newTypedMemo[T TypedScalar]() *typedMemo[T] {
-	return &typedMemo[T]{}
+	var zero T
+	return &typedMemo[T]{kind: reflect.TypeOf(zero).Kind()}
+}
+
+// Floating-point keys preserve signed zero and NaN payloads in both cache tiers.
+func (m *typedMemo[T]) key(input T) uint64 {
+	switch m.kind {
+	case reflect.Float32:
+		return uint64(math.Float32bits(float32(input)))
+	case reflect.Float64:
+		return math.Float64bits(float64(input))
+	default:
+		return uint64(input)
+	}
 }
 
 func (m *typedMemo[T]) lookup(input T) (typedResults[T], bool) {
+	key := m.key(input)
 	for i := 0; i < int(m.n); i++ {
-		if m.entries[i].key == input {
+		if m.entries[i].key == key {
 			return m.entries[i].value, true
 		}
 	}
 	if m.overflow != nil {
-		result, ok := m.overflow[input]
+		result, ok := m.overflow[key]
 		return result, ok
 	}
 	return typedResults[T]{}, false
 }
 
 func (m *typedMemo[T]) store(input T, result typedResults[T]) {
+	key := m.key(input)
 	if int(m.n) < len(m.entries) {
-		m.entries[m.n] = typedMemoEntry[T]{key: input, value: result}
+		m.entries[m.n] = typedMemoEntry[T]{key: key, value: result}
 		m.n++
 		return
 	}
 	if m.overflow == nil {
-		m.overflow = make(map[T]typedResults[T])
+		m.overflow = make(map[uint64]typedResults[T])
 	}
-	m.overflow[input] = result
+	m.overflow[key] = result
 }
 
 func (r *typedRunner[T]) runMemoized(input T, memo *typedMemo[T]) typedResults[T] {
@@ -705,7 +723,7 @@ func makeTypedScalarRunnerOf[T TypedScalar](fn *ssa.Function) TypedRunner {
 			break
 		}
 	}
-	return &typedRunner[T]{code: code, recursive: recursive, memoizable: recursive && isTypedInteger(fn.Params[0].Type()), resultCount: uint8(fn.Signature.Results().Len())}
+	return &typedRunner[T]{code: code, recursive: recursive, memoizable: recursive, resultCount: uint8(fn.Signature.Results().Len())}
 }
 
 func typedTypeIs[T TypedScalar](typ types.Type) bool {
