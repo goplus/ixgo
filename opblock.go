@@ -135,7 +135,7 @@ type function struct {
 	hasGCRegs      bool                      // function has dynamic GC-relevant registers
 	hasRunDefers   bool                      // function SSA contains RunDefers
 	hasDeferStack  bool                      // function emits ssa:deferstack
-	needInject     bool                      // yield pushed a Defer onto this function's deferstack
+	needInject     bool                      // yield or leave hook needs injected RunDefers
 	frameCacheSafe bool                      // no stack or local references need clearing
 	childFrameReg  register                  // first unused tuple slot for a returned child; -1 if absent
 	elidedTuples   []register                // tuple slots bypassed by direct Extract writes

@@ -577,7 +577,7 @@ func panicLeaf() { panic("callback") }
 			}()
 			calls := 0
 			invoke := func(callback func()) {
-				id := goroutineID()
+				id := GoroutineID()
 				caller, ok := i.deferMap.Load(id)
 				if !ok {
 					t.Fatal("missing active deferred frame")
@@ -605,7 +605,7 @@ func panicLeaf() { panic("callback") }
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, ok := i.deferMap.Load(goroutineID()); ok {
+			if _, ok := i.deferMap.Load(GoroutineID()); ok {
 				t.Error("completed defer retained its goroutine mapping")
 			}
 			if i.tryDeferFrame().pfn != nil {

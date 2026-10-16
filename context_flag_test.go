@@ -359,6 +359,149 @@ func main() {
 	}
 }
 
+func TestSetFuncHook(t *testing.T) {
+	tests := []struct {
+		name      string
+		source    string
+		want      []string
+		wantPanic bool
+		wantCode  int
+	}{
+		{
+			name: "repeated_calls",
+			source: `package main
+func helper() int { return 1 }
+func main() { _ = helper(); _ = helper() }`,
+			want: []string{"entry:main", "entry:helper", "leave:helper", "entry:helper", "leave:helper", "leave:main"},
+		},
+		{
+			name: "normal_defer",
+			source: `package main
+func cleanup() {}
+func helper() int { defer cleanup(); return 42 }
+func main() { if helper() != 42 { panic("result") } }`,
+			want: []string{"entry:main", "entry:helper", "entry:cleanup", "leave:cleanup", "leave:helper", "leave:main"},
+		},
+		{
+			name: "panic_without_user_defer",
+			source: `package main
+func helper() { panic("boom") }
+func main() { helper() }`,
+			want:      []string{"entry:main", "entry:helper", "leave:helper", "leave:main"},
+			wantPanic: true,
+		},
+		{
+			name: "panic_with_defers",
+			source: `package main
+func first() {}
+func second() {}
+func helper() { defer first(); defer second(); panic("boom") }
+func main() { helper() }`,
+			want: []string{
+				"entry:main", "entry:helper", "entry:second", "leave:second",
+				"entry:first", "leave:first", "leave:helper", "leave:main",
+			},
+			wantPanic: true,
+		},
+		{
+			name: "recovered_in_caller",
+			source: `package main
+func helper() { panic("boom") }
+func main() { defer func() { recover() }(); helper() }`,
+			want: []string{
+				"entry:main", "entry:helper", "leave:helper",
+				"entry:main$1", "leave:main$1", "leave:main",
+			},
+		},
+		{
+			name: "runtime_panic",
+			source: `package main
+func helper(n int) int { return 42 / n }
+func main() { _ = helper(0) }`,
+			want:      []string{"entry:main", "entry:helper", "leave:helper", "leave:main"},
+			wantPanic: true,
+		},
+		{
+			name: "recovered_named_result",
+			source: `package main
+func helper() (n int) {
+ defer func() { recover(); n = 42 }()
+ panic("boom")
+}
+func main() { if helper() != 42 { panic("result") } }`,
+			want: []string{"entry:main", "entry:helper", "entry:helper$1", "leave:helper$1", "leave:helper", "leave:main"},
+		},
+		{
+			name: "panic_in_user_defer",
+			source: `package main
+func cleanup() { panic("boom") }
+func helper() { defer cleanup() }
+func main() { helper() }`,
+			want:      []string{"entry:main", "entry:helper", "entry:cleanup", "leave:cleanup", "leave:helper", "leave:main"},
+			wantPanic: true,
+		},
+		{
+			name: "recursive",
+			source: `package main
+func helper(n int) { if n > 0 { helper(n-1) } }
+func main() { helper(1) }`,
+			want: []string{"entry:main", "entry:helper", "entry:helper", "leave:helper", "leave:helper", "leave:main"},
+		},
+		{
+			name: "goexit_main",
+			source: `package main
+import "runtime"
+func cleanup() {}
+func main() { defer cleanup(); runtime.Goexit() }`,
+			want:      []string{"entry:main", "entry:cleanup", "leave:cleanup", "leave:main"},
+			wantPanic: true,
+		},
+		{
+			name: "os_exit",
+			source: `package main
+import "os"
+func helper() { os.Exit(7) }
+func main() { helper() }`,
+			want:     []string{"entry:main", "entry:helper", "leave:helper", "leave:main"},
+			wantCode: 7,
+		},
+	}
+	for _, mode := range []struct {
+		name string
+		mode Mode
+	}{
+		{"default", 0},
+		{"cached", EnableCachedReg},
+	} {
+		for _, tt := range tests {
+			t.Run(mode.name+"/"+tt.name, func(t *testing.T) {
+				ctx := NewContext(mode.mode)
+				var events []string
+				record := func(event string, info *FuncInfo) {
+					if info.Function == nil || info.Frame == nil {
+						t.Fatalf("%s callback received incomplete FuncInfo", event)
+					}
+					_ = info.Position()
+					if info.Name() != "init" {
+						events = append(events, event+":"+info.Name())
+					}
+				}
+				ctx.SetFuncHook(func(info *FuncInfo) { record("entry", info) }, func(info *FuncInfo) { record("leave", info) })
+				code, err := ctx.RunFile("main.go", tt.source, nil)
+				if (err != nil) != tt.wantPanic {
+					t.Fatalf("RunFile error = %v, want panic = %v", err, tt.wantPanic)
+				}
+				if !tt.wantPanic && code != tt.wantCode {
+					t.Fatalf("exit code = %d, want %d", code, tt.wantCode)
+				}
+				if !reflect.DeepEqual(events, tt.want) {
+					t.Fatalf("events = %v, want %v", events, tt.want)
+				}
+			})
+		}
+	}
+}
+
 func TestReplAPI(t *testing.T) {
 	r := NewRepl(NewContext(0))
 	r.SetFileName("repl.go")

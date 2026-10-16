@@ -94,6 +94,8 @@ type Context struct {
 	Lookup        func(root, path string) (dir string, found bool)         // lookup external import
 	evalCallFn    func(interp *Interp, call *ssa.Call, res ...interface{}) // internal eval func for repl
 	debugFunc     func(*DebugInfo)                                         // debug func
+	entryFunc     func(*FuncInfo)                                          // hook func entry
+	leaveFunc     func(*FuncInfo)                                          // hook func leave
 	panicFunc     func(*PanicInfo)                                         // panic func
 	pkgs          map[string]*SourcePackage                                // imports
 	override      sync.Map                                                 // map[string]reflect.Value, override function
@@ -264,6 +266,39 @@ func (ctx *Context) SetDebug(fn func(*DebugInfo)) {
 	if ctx.Builder != nil {
 		ctx.Builder.Reset()
 	}
+}
+
+// FuncInfo describes an interpreted function invocation. Its embedded Frame is
+// valid only during the hook callback and must not be retained.
+type FuncInfo struct {
+	*ssa.Function
+	*Frame
+	fset *token.FileSet
+}
+
+// Position returns the function declaration position, not the call or exit site.
+func (i *FuncInfo) Position() token.Position {
+	return i.fset.Position(i.Pos())
+}
+
+// SetFuncHook sets callbacks invoked when an interpreted function is entered
+// and when it exits. Either callback may be nil. The leave callback runs after
+// user defers, including when the function unwinds due to panic, runtime.Goexit,
+// or os.Exit. These are interpreter exit notifications; they do not imply that
+// real Go executes defers on os.Exit.
+//
+// Hooks are captured when functions are compiled by NewInterp. Set them before
+// compilation; later changes do not affect already compiled functions. Do not
+// call SetFuncHook concurrently with compilation. Callbacks may run concurrently
+// from interpreted goroutines and must synchronize any shared state. FuncInfo
+// and its embedded Frame must not be retained after the callback returns.
+//
+// A non-nil leave callback adds an internal defer and enables panic unwinding
+// for each interpreted function, adding execution overhead. Functions compiled
+// without hooks retain their usual execution paths.
+func (ctx *Context) SetFuncHook(entry func(*FuncInfo), leave func(*FuncInfo)) {
+	ctx.entryFunc = entry
+	ctx.leaveFunc = leave
 }
 
 func (ctx *Context) SetPanic(fn func(*PanicInfo)) {
