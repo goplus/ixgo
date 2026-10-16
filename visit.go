@@ -25,6 +25,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/goplus/ixgo/internal/memo"
 	"github.com/goplus/ixgo/load"
 	"github.com/visualfc/xtype"
 	"golang.org/x/tools/go/ssa"
@@ -458,6 +459,13 @@ func (visit *visitor) function(fn *ssa.Function) {
 				args: []value{&FuncInfo{Function: pfn.Fn, Frame: fr, fset: fset}},
 			})
 			first(fr)
+		}
+	}
+	if entry == nil && leave == nil && visit.intp.ctx.Mode&EnableTracing == 0 && visit.intp.ctx.evalCallFn == nil && visit.intp.ctx.debugFunc == nil {
+		if memo.ScalarEligible(fn) {
+			installInterpreterMemo(pfn)
+		} else {
+			installInterpreterAccumulator(pfn)
 		}
 	}
 	pfn.makeInstr = nil
