@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unsafe"
 )
 
 func TestTypedAccumulatorMemo(t *testing.T) {
@@ -113,5 +114,28 @@ func BenchmarkTypedAccumulatorMemo(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+func TestTypedAccumulatorOverlappingPointers(t *testing.T) {
+	pkg, err := NewContext(0).LoadFile("overlap.go", `package main
+func leaf(x int64,a,b,p *int64) { *p += 1; if *a == 0 { *p += 2 } }
+func root(x int64,a,b,p *int64) { leaf(x,a,b,p); leaf(x,a,b,p) }
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fast := MakeTypedRunnerOf[int64](pkg.Func("root")).(TypedArgumentsRunner)
+	slow := makeTypedArgumentsRunnerOf[int64](pkg.Func("root")).(TypedArgumentsRunner)
+	run := func(r TypedArgumentsRunner) int64 {
+		storage := new([3]int64)
+		p := &storage[0]
+		a := (*int64)(unsafe.Add(unsafe.Pointer(p), 1))
+		*p = 252
+		r.RunArgs([]Value{int64(0), a, &storage[2], p})
+		return *p
+	}
+	if a, b := run(fast), run(slow); a != b {
+		t.Fatalf("overlap: memo=%d baseline=%d", a, b)
 	}
 }

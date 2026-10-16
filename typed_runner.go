@@ -1002,6 +1002,20 @@ func (r *typedArgsRunner[T]) RunArgs(args []Value) Value {
 	}
 	var memo map[typedAccumulatorKey[T]]T
 	memoEnabled := r.accumulatorMemo
+	// Unsafe callers can supply distinct, partially overlapping pointers.
+	// Reject overlapping external storage before assuming read-only inputs.
+	if memoEnabled {
+		var zero T
+		size := reflect.TypeOf(zero).Size()
+		for i := 0; i < externalLen; i++ {
+			for j := 0; j < i; j++ {
+				a, b := reflect.ValueOf(external[i]).Pointer(), reflect.ValueOf(external[j]).Pointer()
+				if (a >= b && a-b < size) || (b >= a && b-a < size) {
+					memoEnabled = false
+				}
+			}
+		}
+	}
 	if memoEnabled {
 		memo = make(map[typedAccumulatorKey[T]]T)
 	}

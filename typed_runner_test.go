@@ -135,7 +135,7 @@ func callback(invoke func(func(int)int)) (ok bool) {
 			}
 		}
 		invoke := func(fn func(int) int) {
-			id := goroutineID()
+			id := GoroutineID()
 			before, ok := interp.deferMap.Load(id)
 			if !ok {
 				t.Fatal("missing deferred caller")
@@ -155,7 +155,7 @@ func callback(invoke func(func(int)int)) (ok bool) {
 		if got, err := interp.RunFunc("callback", invoke); err != nil || got != true {
 			t.Fatalf("typed=%v callback: got=%v err=%v", typed, got, err)
 		}
-		if _, ok := interp.deferMap.Load(goroutineID()); ok {
+		if _, ok := interp.deferMap.Load(GoroutineID()); ok {
 			t.Fatal("deferred caller retained after return")
 		}
 	}
