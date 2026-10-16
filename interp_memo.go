@@ -73,6 +73,10 @@ type interpreterAccumulatorMemo struct {
 
 func installInterpreterAccumulator(p *function) {
 	plan := memo.AnalyzeAccumulator(p.Fn)
+	state := plan == nil
+	if state {
+		plan = memo.AnalyzeState(p.Fn)
+	}
 	if plan == nil {
 		return
 	}
@@ -98,7 +102,7 @@ func installInterpreterAccumulator(p *function) {
 			valid := !out.IsNil()
 			var keys []byte
 			for index := 0; index < p.narg; index++ {
-				if index == output {
+				if index == output && !state {
 					continue
 				}
 				input := reflect.ValueOf(fr.stack[index])
@@ -107,7 +111,7 @@ func installInterpreterAccumulator(p *function) {
 						valid = false
 						continue
 					}
-					if !out.IsNil() {
+					if index != output && !out.IsNil() {
 						addr, other := out.Pointer(), input.Pointer()
 						if (addr >= other && addr-other < input.Type().Elem().Size()) || (other >= addr && other-addr < out.Type().Elem().Size()) {
 							cache.disabled = true
@@ -115,18 +119,22 @@ func installInterpreterAccumulator(p *function) {
 					}
 					input = input.Elem()
 				}
-				keys = binary.LittleEndian.AppendUint64(keys, memo.IntegerBits(input))
+				keys = binary.LittleEndian.AppendUint64(keys, memo.ValueBits(input))
 			}
 			// Nil arguments retain the original load and panic order.
 			if valid && !cache.disabled {
 				key := interpreterAccumulatorKey{fn: p.Fn, inputs: string(keys)}
 				if delta, ok := cache.values[key]; ok {
-					memo.SetIntegerBits(out.Elem(), memo.IntegerBits(out.Elem())+delta)
+					if state {
+						memo.SetScalarBits(out.Elem(), delta)
+					} else {
+						memo.SetIntegerBits(out.Elem(), memo.IntegerBits(out.Elem())+delta)
+					}
 					fr.ipc = -1
 					fr.accMemo = nil
 					return
 				}
-				fr.accKey, fr.accStart, fr.accActive = key, memo.IntegerBits(out.Elem()), true
+				fr.accKey, fr.accStart, fr.accActive = key, memo.ValueBits(out.Elem()), true
 			}
 		}
 		first(fr)
@@ -140,8 +148,12 @@ func installInterpreterAccumulator(p *function) {
 			ret(fr)
 			if fr.ipc == -1 && fr.accMemo != nil {
 				if fr.accActive && !fr.accMemo.disabled {
-					end := memo.IntegerBits(reflect.ValueOf(fr.stack[output]).Elem())
-					fr.accMemo.values[fr.accKey] = end - fr.accStart
+					end := memo.ValueBits(reflect.ValueOf(fr.stack[output]).Elem())
+					if state {
+						fr.accMemo.values[fr.accKey] = end
+					} else {
+						fr.accMemo.values[fr.accKey] = end - fr.accStart
+					}
 				}
 				fr.accMemo = nil
 				fr.accActive = false

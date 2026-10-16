@@ -371,7 +371,7 @@ func BenchmarkInterpreterAccumulator(b *testing.B) {
 }
 
 func TestInterpreterAccumulatorRejectsEffects(t *testing.T) {
-	for _, body := range []string{"*a += 1", "*p *= 2", "if *p > 0 { x-- }", "f(x-1,p,b,p)", "if a == p { x-- }"} {
+	for _, body := range []string{"*a += 1", "f(x-1,p,b,p)", "if a == p { x-- }"} {
 		src := `package main
 func f(x int,a,b,p *int) {if x<2 {*p+=x;return};` + body + `;f(x-1,a,b,p);f(x-2,a,b,p)}`
 		i := loadMainMemo(t, []byte(src))
@@ -422,9 +422,9 @@ func widths(out *int64,n int,weight int64) {if n<2 {*out+=weight;return};widths(
 func outer(n int,out *int,extra int) {inner(out,n);inner(out,extra)}
 func inner(out *int,n int) {*out+=n}
 `))
-	// Conversions are intentionally outside the supported instruction subset.
-	if i.funcs[i.mainpkg.Func("mixed")].interpreterAccumulator {
-		t.Fatal("conversion accepted")
+	// Numerical conversions are supported by full-state caching.
+	if !i.funcs[i.mainpkg.Func("mixed")].interpreterAccumulator {
+		t.Fatal("conversion rejected")
 	}
 	for _, name := range []string{"sum", "weighted", "widths", "outer", "inner"} {
 		if !i.funcs[i.mainpkg.Func(name)].interpreterAccumulator {

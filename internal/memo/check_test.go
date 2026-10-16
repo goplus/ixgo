@@ -40,3 +40,29 @@ func floating(x float64,a,b,p *float64) {*p+=x}
 		t.Fatal("nil function accepted")
 	}
 }
+
+func TestStateEligibility(t *testing.T) {
+	pkg, err := ixgo.NewContext(0).LoadFile("state.go", `package main
+type Amount float64
+func defined(x Amount,p *Amount) {*p *= x}
+var global float64
+func arithmetic(n int,x float64,p *float64) {if n==0 {*p=(*p-x)*x/x;return};arithmetic(n-1,x,p)}
+func bits(x uint64,p *uint64) {*p=(*p^x)>>2}
+func multiple(x int,a,b *int) {*a *= x;*b *= x}
+func external(x float64,p *float64) {*p += global}
+func convert(x int,p *float64) {*p *= float64(x)}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"arithmetic", "bits", "convert", "defined"} {
+		if memo.AnalyzeState(pkg.Func(name)) == nil {
+			t.Fatal("state rejected", name)
+		}
+	}
+	for _, name := range []string{"multiple", "external"} {
+		if memo.AnalyzeState(pkg.Func(name)) != nil {
+			t.Fatal("unsafe state accepted", name)
+		}
+	}
+}

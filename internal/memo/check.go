@@ -78,13 +78,20 @@ func AccumulatorEligible(fn *ssa.Function) bool { return AnalyzeAccumulator(fn) 
 
 // AnalyzeAccumulator proves one isolated additive output and read-only inputs.
 // Parameter count, order, integer widths and recursive call signatures may vary.
-func AnalyzeAccumulator(root *ssa.Function) *AccumulatorPlan {
+func AnalyzeAccumulator(root *ssa.Function) *AccumulatorPlan { return analyzeOutput(root, true) }
+
+// AnalyzeState proves a closed numerical call graph with one mutable output.
+// The output's initial value is part of the key; cached final values preserve
+// arithmetic order and floating-point rounding without algebraic regrouping.
+func AnalyzeState(root *ssa.Function) *AccumulatorPlan { return analyzeOutput(root, false) }
+
+func analyzeOutput(root *ssa.Function, additive bool) *AccumulatorPlan {
 	if root == nil {
 		return nil
 	}
 	for output, param := range root.Params {
 		ptr, ok := param.Type().Underlying().(*types.Pointer)
-		if !ok || !integerType(ptr.Elem()) {
+		if !ok || !numericType(ptr.Elem(), additive) {
 			continue
 		}
 		seen := map[*ssa.Function]int{}
@@ -109,7 +116,7 @@ func AnalyzeAccumulator(root *ssa.Function) *AccumulatorPlan {
 				if ptr, ok := t.Underlying().(*types.Pointer); ok {
 					t = ptr.Elem()
 				}
-				if !integerType(t) {
+				if !numericType(t, additive) {
 					return false
 				}
 			}
@@ -129,63 +136,84 @@ func AnalyzeAccumulator(root *ssa.Function) *AccumulatorPlan {
 			}
 			// An accumulator address may only be forwarded or participate in an
 			// isolated load/add/store. In particular it cannot become a recursion input.
-			for _, use := range *out.Referrers() {
-				switch u := use.(type) {
-				case *ssa.Call:
-					if !validCall(u, out) {
-						return false
-					}
-				case *ssa.UnOp:
-					if u.Op != token.MUL || u.X != out || len(*u.Referrers()) != 1 {
-						return false
-					}
-					add, ok := (*u.Referrers())[0].(*ssa.BinOp)
-					if !ok || add.Op != token.ADD || len(*add.Referrers()) != 1 {
-						return false
-					}
-					other := add.X
-					if other == u {
-						other = add.Y
-					}
-					if load, ok := other.(*ssa.UnOp); ok && load.Op == token.MUL && load.X == out {
-						return false
-					}
+			if additive {
+				for _, use := range *out.Referrers() {
+					switch u := use.(type) {
+					case *ssa.Call:
+						if !validCall(u, out) {
+							return false
+						}
+					case *ssa.UnOp:
+						if u.Op != token.MUL || u.X != out || len(*u.Referrers()) != 1 {
+							return false
+						}
+						add, ok := (*u.Referrers())[0].(*ssa.BinOp)
+						if !ok || add.Op != token.ADD || len(*add.Referrers()) != 1 {
+							return false
+						}
+						other := add.X
+						if other == u {
+							other = add.Y
+						}
+						if load, ok := other.(*ssa.UnOp); ok && load.Op == token.MUL && load.X == out {
+							return false
+						}
 
-					store, ok := (*add.Referrers())[0].(*ssa.Store)
-					if !ok || store.Addr != out || store.Val != add || store.Block() != u.Block() {
-						return false
-					}
-					// No intervening call or write may alter the value read by the addition.
-					active := false
-					for _, instr := range u.Block().Instrs {
-						if instr == u {
-							active = true
-							continue
+						store, ok := (*add.Referrers())[0].(*ssa.Store)
+						if !ok || store.Addr != out || store.Val != add || store.Block() != u.Block() {
+							return false
 						}
-						if instr == store {
-							break
+						// No intervening call or write may alter the value read by the addition.
+						active := false
+						for _, instr := range u.Block().Instrs {
+							if instr == u {
+								active = true
+								continue
+							}
+							if instr == store {
+								break
+							}
+							if active {
+								switch instr.(type) {
+								case *ssa.Call, *ssa.Store:
+									return false
+								}
+							}
 						}
-						if active {
-							switch instr.(type) {
-							case *ssa.Call, *ssa.Store:
+					case *ssa.Store:
+						add, ok := u.Val.(*ssa.BinOp)
+						if !ok || add.Op != token.ADD || u.Addr != out {
+							return false
+						}
+						load, ok := add.X.(*ssa.UnOp)
+						if !ok || load.X != out || load.Op != token.MUL {
+							load, ok = add.Y.(*ssa.UnOp)
+							if !ok || load.X != out || load.Op != token.MUL {
 								return false
 							}
 						}
-					}
-				case *ssa.Store:
-					add, ok := u.Val.(*ssa.BinOp)
-					if !ok || add.Op != token.ADD || u.Addr != out {
+					default:
 						return false
 					}
-					load, ok := add.X.(*ssa.UnOp)
-					if !ok || load.X != out || load.Op != token.MUL {
-						load, ok = add.Y.(*ssa.UnOp)
-						if !ok || load.X != out || load.Op != token.MUL {
+				}
+			} else {
+				for _, use := range *out.Referrers() {
+					switch u := use.(type) {
+					case *ssa.UnOp:
+						if u.Op != token.MUL || u.X != out {
 							return false
 						}
+					case *ssa.Store:
+						if u.Addr != out {
+							return false
+						}
+					case *ssa.Call:
+						if !validCall(u, out) {
+							return false
+						}
+					default:
+						return false
 					}
-				default:
-					return false
 				}
 			}
 			for _, b := range fn.Blocks {
@@ -195,7 +223,7 @@ func AnalyzeAccumulator(root *ssa.Function) *AccumulatorPlan {
 					}
 					switch u := instr.(type) {
 					case *ssa.Alloc:
-						if !localType(u.Type().Underlying().(*types.Pointer).Elem()) {
+						if !localNumericType(u.Type().Underlying().(*types.Pointer).Elem(), additive) {
 							return false
 						}
 					case *ssa.UnOp:
@@ -233,8 +261,12 @@ func AnalyzeAccumulator(root *ssa.Function) *AccumulatorPlan {
 						if _, ok := u.Type().Underlying().(*types.Pointer); ok {
 							return false
 						}
-					case *ssa.ChangeType, *ssa.Convert:
+					case *ssa.ChangeType:
 						return false
+					case *ssa.Convert:
+						if additive || !numericType(u.X.Type(), false) || !numericType(u.Type(), false) {
+							return false
+						}
 					case *ssa.BinOp:
 						if _, ok := u.X.Type().Underlying().(*types.Pointer); ok {
 							return false
@@ -270,7 +302,7 @@ func validCall(call *ssa.Call, out ssa.Value) bool {
 	return fn != nil && len(call.Call.Args) == len(fn.Params) && outputArgument(call, out) >= 0
 }
 func integerType(t types.Type) bool {
-	b, ok := types.Unalias(t).(*types.Basic)
+	b, ok := types.Unalias(t).Underlying().(*types.Basic)
 	return ok && b.Info()&types.IsInteger != 0
 }
 func localAddress(v ssa.Value) bool {
@@ -282,16 +314,6 @@ func localAddress(v ssa.Value) bool {
 	}
 	return false
 }
-func localType(t types.Type) bool {
-	if integerType(t) {
-		return true
-	}
-	if a, ok := t.Underlying().(*types.Array); ok {
-		return localType(a.Elem())
-	}
-	return false
-}
-
 func blockInCycle(start *ssa.BasicBlock) bool {
 	seen := map[*ssa.BasicBlock]bool{}
 	var walk func(*ssa.BasicBlock) bool
@@ -314,6 +336,27 @@ func blockInCycle(start *ssa.BasicBlock) bool {
 		if walk(next) {
 			return true
 		}
+	}
+	return false
+}
+
+func numericType(t types.Type, integerOnly bool) bool {
+	b, ok := types.Unalias(t).Underlying().(*types.Basic)
+	if !ok {
+		return false
+	}
+	mask := types.IsInteger
+	if !integerOnly {
+		mask |= types.IsFloat
+	}
+	return b.Info()&mask != 0
+}
+func localNumericType(t types.Type, integerOnly bool) bool {
+	if numericType(t, integerOnly) {
+		return true
+	}
+	if a, ok := t.Underlying().(*types.Array); ok {
+		return localNumericType(a.Elem(), integerOnly)
 	}
 	return false
 }

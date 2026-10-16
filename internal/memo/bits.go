@@ -41,3 +41,27 @@ func SetIntegerBits(v reflect.Value, bits uint64) {
 		v.SetUint(bits)
 	}
 }
+
+// SetScalarBits restores numerical state without changing floating-point bits.
+func SetScalarBits(v reflect.Value, bits uint64) {
+	switch v.Kind() {
+	case reflect.Float32:
+		v.SetFloat(float64(math.Float32frombits(uint32(bits))))
+	case reflect.Float64:
+		v.SetFloat(math.Float64frombits(bits))
+	default:
+		SetIntegerBits(v, bits)
+	}
+}
+
+// ValueBits reads numerical state, including defined floating-point types.
+func ValueBits(v reflect.Value) uint64 {
+	switch v.Kind() {
+	case reflect.Float32:
+		return uint64(math.Float32bits(float32(v.Float())))
+	case reflect.Float64:
+		return math.Float64bits(v.Float())
+	default:
+		return IntegerBits(v)
+	}
+}

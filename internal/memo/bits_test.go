@@ -49,3 +49,19 @@ func TestIntegerBits(t *testing.T) {
 		}
 	}
 }
+
+func TestScalarBitsRoundTrip(t *testing.T) {
+	for _, typ := range []reflect.Type{reflect.TypeOf(float32(0)), reflect.TypeOf(float64(0))} {
+		cases := []uint64{0, 1, 0x80000000, 0x7f800000, 0x7fc00001, 0xffc00002}
+		if typ.Kind() == reflect.Float64 {
+			cases = []uint64{0, 1, 1 << 63, 0x7ff0000000000000, 0x7ff8000000000001, 0xfff8000000000002}
+		}
+		for _, bits := range cases {
+			v := reflect.New(typ).Elem()
+			SetScalarBits(v, bits)
+			if got := ValueBits(v); got != bits {
+				t.Fatalf("%v: %x != %x", typ, got, bits)
+			}
+		}
+	}
+}
