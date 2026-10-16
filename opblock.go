@@ -104,30 +104,32 @@ type closure struct {
 }
 
 type function struct {
-	Interp          *Interp
-	Fn              *ssa.Function                // ssa function
-	Main            *ssa.BasicBlock              // Fn.Blocks[0]
-	pool            *sync.Pool                   // create frame pool
-	makeInstr       ssa.Instruction              // make instr check
-	index           map[ssa.Value]uint32         // non-nil value -> kind(2), reflect.Kind(6), index(24)
-	instrIndex      map[ssa.Instruction][]uint32 // instr -> index
-	cacheRegs       []register                   // cache registers invalidated before runtime.GC
-	gcRegs          [][]register                 // registers cleared at each runtime.GC call site
-	gcReady         []atomic.Bool                // gcRegs entries already computed
-	gcMu            sync.Mutex                   // protects lazy liveness computation
-	closureCaptures []closureCapture             // MakeClosure list, built once for GC liveness
-	closureByResult map[int]int                  // result register -> index in closureCaptures
-	Instrs          []func(fr *frame)            // main instrs
-	Recover         []func(fr *frame)            // recover instrs
-	Blocks          []int                        // block offset
-	stack           []value                      // results args envs datas
-	ssaInstrs       []ssa.Instruction            // org ssa instr
-	base            int                          // base of interp
-	nres            int                          // results count
-	narg            int                          // arguments count
-	nenv            int                          // closure free vars count
-	used            int32                        // function used count
-	cached          int32                        // enable cached by pool
+	interpreterMemo        bool
+	interpreterAccumulator bool
+	Interp                 *Interp
+	Fn                     *ssa.Function                // ssa function
+	Main                   *ssa.BasicBlock              // Fn.Blocks[0]
+	pool                   *sync.Pool                   // create frame pool
+	makeInstr              ssa.Instruction              // make instr check
+	index                  map[ssa.Value]uint32         // non-nil value -> kind(2), reflect.Kind(6), index(24)
+	instrIndex             map[ssa.Instruction][]uint32 // instr -> index
+	cacheRegs              []register                   // cache registers invalidated before runtime.GC
+	gcRegs                 [][]register                 // registers cleared at each runtime.GC call site
+	gcReady                []atomic.Bool                // gcRegs entries already computed
+	gcMu                   sync.Mutex                   // protects lazy liveness computation
+	closureCaptures        []closureCapture             // MakeClosure list, built once for GC liveness
+	closureByResult        map[int]int                  // result register -> index in closureCaptures
+	Instrs                 []func(fr *frame)            // main instrs
+	Recover                []func(fr *frame)            // recover instrs
+	Blocks                 []int                        // block offset
+	stack                  []value                      // results args envs datas
+	ssaInstrs              []ssa.Instruction            // org ssa instr
+	base                   int                          // base of interp
+	nres                   int                          // results count
+	narg                   int                          // arguments count
+	nenv                   int                          // closure free vars count
+	used                   int32                        // function used count
+	cached                 int32                        // enable cached by pool
 
 	clearRanges []stackRange // slots cleared before pooling
 	localRefs   []register   // non-escaping locals holding references
@@ -221,6 +223,11 @@ func (p *function) allocFrame(caller *frame) *frame {
 }
 
 func (p *function) deleteFrame(caller *frame, fr *frame) {
+	fr.memo = nil
+	fr.accMemo = nil
+	fr.accActive = false
+	fr.accKey = interpreterAccumulatorKey{}
+	fr.accStart = 0
 	p.Interp.trackDeferFrame(caller)
 	if caller.callee == fr {
 		caller.callee = nil
@@ -262,6 +269,11 @@ func (p *function) allocFrameFromCaller(caller *frame) *frame {
 }
 
 func (p *function) deleteFrameToCaller(caller *frame, fr *frame) {
+	fr.memo = nil
+	fr.accMemo = nil
+	fr.accActive = false
+	fr.accKey = interpreterAccumulatorKey{}
+	fr.accStart = 0
 	if !p.frameCacheSafe || caller.pfn == nil || caller.pfn.childFrameReg < 0 || caller.stack[caller.pfn.childFrameReg] != nil {
 		p.deleteFrame(caller, fr)
 		return
