@@ -73,7 +73,8 @@ signature is one scalar input, two read-only scalar pointers, and an accumulator
 pointer, with no return values. The key contains the runner identity and three
 input values; the cached value is the accumulator delta. SSA checks restrict
 writes and accumulator reads, and runtime checks disable memoization when the
-accumulator aliases an input. Nil inputs retain normal execution. The cache is
+accumulator aliases an input. Partially overlapping external pointer storage
+created through unsafe also disables caching. Nil inputs retain normal execution. The cache is
 private to each invocation. Functions outside these conditions retain the
 existing execution path. Memoization changes the amount of recursive work;
 these results measure that algorithmic optimization as well as execution costs.
