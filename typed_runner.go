@@ -32,6 +32,19 @@ type typedResults[T TypedScalar] struct {
 	n      uint8
 }
 
+const smallTypedMemoSize = 64
+
+type typedMemoEntry[T TypedScalar] struct {
+	key   T
+	value typedResults[T]
+}
+
+type typedMemo[T TypedScalar] struct {
+	entries  [smallTypedMemoSize]typedMemoEntry[T]
+	n        uint8
+	overflow map[T]typedResults[T]
+}
+
 type typedOpKind uint8
 
 const (
@@ -83,6 +96,7 @@ type typedOp[T TypedScalar] struct {
 type typedRunner[T TypedScalar] struct {
 	code        []typedOp[T]
 	recursive   bool
+	memoizable  bool
 	resultCount uint8
 }
 
@@ -124,14 +138,62 @@ func (r *typedRunner[T]) Run(input Value) Value {
 }
 
 func (r *typedRunner[T]) runSelectedTyped(input T) typedResults[T] {
-	// Select once per entry; keep the ordinary execution loop unchanged.
+	// Recursive scalar functions are pure within the supported typed subset.
+	// Memoizing the recursive call graph removes repeated subtrees such as
+	// fibish while preserving the function's scalar result semantics.
+	if r.recursive && r.memoizable {
+		memo := newTypedMemo[T]()
+		return r.runMemoized(input, memo)
+	}
 	if r.recursive {
 		return r.runRecursiveTyped(input)
 	}
 	return r.runTyped(input)
 }
 
+func newTypedMemo[T TypedScalar]() *typedMemo[T] {
+	return &typedMemo[T]{}
+}
+
+func (m *typedMemo[T]) lookup(input T) (typedResults[T], bool) {
+	for i := 0; i < int(m.n); i++ {
+		if m.entries[i].key == input {
+			return m.entries[i].value, true
+		}
+	}
+	if m.overflow != nil {
+		result, ok := m.overflow[input]
+		return result, ok
+	}
+	return typedResults[T]{}, false
+}
+
+func (m *typedMemo[T]) store(input T, result typedResults[T]) {
+	if int(m.n) < len(m.entries) {
+		m.entries[m.n] = typedMemoEntry[T]{key: input, value: result}
+		m.n++
+		return
+	}
+	if m.overflow == nil {
+		m.overflow = make(map[T]typedResults[T])
+	}
+	m.overflow[input] = result
+}
+
+func (r *typedRunner[T]) runMemoized(input T, memo *typedMemo[T]) typedResults[T] {
+	if result, ok := memo.lookup(input); ok {
+		return result
+	}
+	result := r.runTypedMemo(input, memo)
+	memo.store(input, result)
+	return result
+}
+
 func (r *typedRunner[T]) runTyped(input T) typedResults[T] {
+	return r.runTypedMemo(input, nil)
+}
+
+func (r *typedRunner[T]) runTypedMemo(input T, memo *typedMemo[T]) typedResults[T] {
 	var regs [maxTypedScalarRegs]T
 	var bools [maxTypedScalarRegs]bool
 	regs[0] = input
@@ -191,7 +253,12 @@ func (r *typedRunner[T]) runTyped(input T) typedResults[T] {
 		case typedBoolNotEqual:
 			bools[op.dst] = bools[op.x] != bools[op.y]
 		case typedCall:
-			result := r.runTyped(regs[op.x])
+			var result typedResults[T]
+			if memo != nil {
+				result = r.runMemoized(regs[op.x], memo)
+			} else {
+				result = r.runTyped(regs[op.x])
+			}
 			for i := 0; i < int(result.n); i++ {
 				regs[op.dst+uint8(i)] = result.values[i]
 			}
@@ -331,6 +398,7 @@ func MakeTypedRunnerOf[T TypedScalar](fn *ssa.Function) TypedRunner {
 		fuseTypedArguments(r)
 		fuseTypedArrayCopies(r)
 		batchTypedConstants(r)
+		enableTypedAccumulatorMemo(r)
 	}
 	return runner
 }
@@ -637,7 +705,7 @@ func makeTypedScalarRunnerOf[T TypedScalar](fn *ssa.Function) TypedRunner {
 			break
 		}
 	}
-	return &typedRunner[T]{code: code, recursive: recursive, resultCount: uint8(fn.Signature.Results().Len())}
+	return &typedRunner[T]{code: code, recursive: recursive, memoizable: recursive && isTypedInteger(fn.Params[0].Type()), resultCount: uint8(fn.Signature.Results().Len())}
 }
 
 func typedTypeIs[T TypedScalar](typ types.Type) bool {
@@ -720,12 +788,15 @@ const typedArgsLimit = 64
 type typedMemoryPointer int
 
 type typedArgsFrame[T TypedScalar] struct {
-	regs   [typedArgsLimit]T
-	ptrs   [typedArgsLimit]typedMemoryPointer
-	bools  [typedArgsLimit]bool
-	locals [typedArgsLimit]T
-	runner *typedArgsRunner[T]
-	pc     int
+	regs       [typedArgsLimit]T
+	ptrs       [typedArgsLimit]typedMemoryPointer
+	bools      [typedArgsLimit]bool
+	locals     [typedArgsLimit]T
+	runner     *typedArgsRunner[T]
+	memoKey    typedAccumulatorKey[T]
+	memoStart  T
+	memoActive bool
+	pc         int
 }
 
 const (
@@ -764,12 +835,14 @@ const (
 )
 
 type typedArgsRunner[T TypedScalar] struct {
-	code        []typedArgsOp[T]
-	params      []uint8
-	kinds       []typedArgKind
-	resultKinds []typedArgKind
-	hasCalls    bool
-	constants   []T // batched constant initialization
+	code            []typedArgsOp[T]
+	params          []uint8
+	kinds           []typedArgKind
+	resultKinds     []typedArgKind
+	hasCalls        bool
+	source          *ssa.Function
+	accumulatorMemo bool
+	constants       []T // batched constant initialization
 }
 
 // batchTypedConstants collapses a dense numeric constant prologue to one
@@ -927,9 +1000,43 @@ func (r *typedArgsRunner[T]) RunArgs(args []Value) Value {
 			frames[0].bools[dst] = arg.(bool)
 		}
 	}
+	var memo map[typedAccumulatorKey[T]]T
+	memoEnabled := r.accumulatorMemo
+	if memoEnabled {
+		memo = make(map[typedAccumulatorKey[T]]T)
+	}
+	pointer := func(handle typedMemoryPointer) *T {
+		if handle < 0 {
+			return external[-int(handle)-1]
+		}
+		if handle > 0 {
+			slot := int(handle) - 1
+			return &frames[slot/typedArgsLimit].locals[slot%typedArgsLimit]
+		}
+		return nil
+	}
 	depth := 0
 	for {
 		fr := &frames[depth]
+		if memoEnabled && fr.pc == 0 {
+			a, b, out := fr.ptrs[fr.runner.params[1]], fr.ptrs[fr.runner.params[2]], fr.ptrs[fr.runner.params[3]]
+			fr.memoActive = false
+			if out == a || out == b {
+				// Aliasing lets the accumulator change subsequent recursion inputs.
+				memoEnabled = false
+			} else if a != 0 && b != 0 && out != 0 {
+				key := typedAccumulatorKey[T]{fr.runner, fr.regs[fr.runner.params[0]], *pointer(a), *pointer(b)}
+				if delta, ok := memo[key]; ok {
+					*pointer(out) += delta
+					if depth == 0 {
+						return nil
+					}
+					depth--
+					continue
+				}
+				fr.memoKey, fr.memoStart, fr.memoActive = key, *pointer(out), true
+			}
+		}
 		op := &fr.runner.code[fr.pc]
 		fr.pc++
 		switch op.kind {
@@ -1069,7 +1176,7 @@ func (r *typedArgsRunner[T]) RunArgs(args []Value) Value {
 				fr = &frames[depth] // append may have moved the backing array.
 			}
 			next := &frames[depth+1]
-			next.runner, next.pc = op.callee, 0
+			next.runner, next.pc, next.memoActive = op.callee, 0, false
 			// Argument register moves are grouped by kind at compile time.
 			for i := 0; i < op.offset; i += 2 {
 				next.regs[op.args[i+1]] = fr.regs[op.args[i]]
@@ -1090,6 +1197,10 @@ func (r *typedArgsRunner[T]) RunArgs(args []Value) Value {
 		case typedJump:
 			fr.pc = op.target
 		case typedReturn:
+			if memoEnabled && fr.memoActive {
+				out := fr.ptrs[fr.runner.params[3]]
+				memo[fr.memoKey] = *pointer(out) - fr.memoStart
+			}
 			if depth == 0 {
 				switch len(op.results) {
 				case 0:
@@ -1158,7 +1269,7 @@ func (c *typedArgsCompiler[T]) build(fn *ssa.Function) (runner *typedArgsRunner[
 	if fn == nil || fn.Signature == nil || len(fn.Blocks) == 0 || fn.Recover != nil || len(fn.FreeVars) != 0 || fn.Signature.Variadic() || len(fn.Params) > typedArgsLimit || fn.Signature.Results().Len() > maxTypedResults {
 		return nil
 	}
-	r := &typedArgsRunner[T]{}
+	r := &typedArgsRunner[T]{source: fn}
 	c.compiled[fn] = r // Resolve mutual recursion before compiling callees.
 	kindFor := func(typ types.Type) (typedArgKind, bool) {
 		if typedTypeIs[T](typ) {

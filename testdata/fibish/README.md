@@ -32,8 +32,9 @@ go build -o /tmp/ixgo-fibish ./cmd/ixgo
 ```
 
 These commands include interpreter loading time. The loop performs O(x) work;
-the recursive examples perform exponentially more work, so the difference also
-reflects the algorithms. Compare the same file between ixgo versions to measure
+eligible integer recursive examples now memoize repeated states; floating-point
+recursive examples retain their original recursive execution. The difference
+also reflects the algorithms. Compare the same file between ixgo versions to measure
 an interpreter optimization. The library requires a blank import of
 `github.com/goplus/ixgo/typedrunner` to enable the optional typed runner; the CLI
 already imports it.
@@ -62,11 +63,61 @@ intermediate registers, float behavior, and pointer aliases. They match generic
 instruction patterns without hardcoded function names or Fibonacci call shapes.
 The default factory prefers the scalar runner where supported.
 
-Recursive scalar functions use the result-register fast path. Non-recursive scalar
-functions keep the original scalar instruction path. Fusion is limited to the
-argument/memory runner.
+Recursive integer scalar functions memoize results per invocation, using a
+64-entry inline table and an overflow map. Floating-point recursion retains the
+result-register fast path to preserve signed-zero and rounding behavior.
+Non-recursive scalar functions keep the original scalar instruction path.
 
-## Comparison with main
+Eligible integer accumulator call graphs also memoize effect summaries. Their
+signature is one scalar input, two read-only scalar pointers, and an accumulator
+pointer, with no return values. The key contains the runner identity and three
+input values; the cached value is the accumulator delta. SSA checks restrict
+writes and accumulator reads, and runtime checks disable memoization when the
+accumulator aliases an input. Nil inputs retain normal execution. The cache is
+private to each invocation. Functions outside these conditions retain the
+existing execution path. Memoization changes the amount of recursive work;
+these results measure that algorithmic optimization as well as execution costs.
+
+## Memoization update (2026-10-16)
+
+Apple M5, macOS arm64, Go 1.27.1, `GOWORK=off`, `GOMAXPROCS=1`, input 40.
+The following are three serial CLI runs of the memoized implementation, including
+startup/loading and excluding compilation. All outputs were checked. The old
+main/PR and other-language measurements below remain historical data and were
+not rerun in this batch. These tables have different measurement dates and
+should not be interpreted as a fresh controlled main/PR comparison.
+
+| Example | Rounds (seconds) | Median |
+| --- | --- | ---: |
+| `fibish` | 0.902440, 0.051971, 0.053971 | 0.053971 s |
+| `fibish_closure` | 0.051959, 0.051978, 0.053500 | 0.051978 s |
+| `fibish_loop` | 0.053428, 0.052725, 0.051867 | 0.052725 s |
+| `fibish_float32` | 1.758551, 1.793242, 1.763778 | 1.763778 s |
+| `fibish_float64` | 1.933997, 2.045712, 2.034520 | 2.034520 s |
+| `uglyfib` | 0.058626, 0.055114, 0.053765 | 0.055114 s |
+
+The first `fibish` process had additional startup wall time. Its cause was not
+isolated. Loading dominates the memoized integer examples at input 40.
+Float examples retain ordinary recursive execution.
+
+Reproduce the accumulator execution benchmark with:
+
+```sh
+GOWORK=off go test -run '^$' -bench BenchmarkTypedAccumulatorMemo -benchmem -count=3 .
+```
+
+The baseline and memo variants apply the same instruction fusion passes; only
+memo enables effect-summary caching. Serial measurements at input 20 were 1.191 ms/op versus 10.142 us/op
+(medians of three), with 57,344 B/op (1 allocation) versus 10,312 B/op
+(9 allocations), approximately 117x faster. The scalar fibish(20) benchmark
+was 747 ns/op, 200 B/op, 5 allocations. Re-run for machine-specific data.
+
+Validation for this update passed `GOWORK=off go test -count=1 ./...` and
+`GOWORK=off go test -race -count=1 . ./typedrunner`. New tests cover memo-table
+overflow, floating-point fallback, all four accumulator entry points, integer
+overflow, nil pointers, alias fallback, and rejected unsafe side effects.
+
+## Historical comparison with main (before memoization)
 
 Measured 2026-10-15 on Apple M5, macOS arm64, Go 1.27.1, `GOWORK=off`,
 `GOMAXPROCS=1`, input 40.
