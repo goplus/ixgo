@@ -930,6 +930,12 @@ func (i *Interp) callDiscardsResult(caller *frame, fn value, args []value, ssaAr
 
 // Callback entries restore context even when panic skips deleteFrame.
 func (i *Interp) callFunction(caller *frame, pfn *function, args []value, env []value) (result value) {
+	if env == nil && pfn.typedRunner != nil && len(args) == pfn.narg {
+		if runner, ok := pfn.typedRunner.(TypedArgumentsRunner); ok {
+			return runner.RunArgs(args)
+		}
+		return pfn.typedRunner.Run(args[0])
+	}
 	if caller.deferid != 0 {
 		defer i.trackDeferFrame(caller)
 	}
