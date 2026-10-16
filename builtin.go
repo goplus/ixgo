@@ -678,7 +678,7 @@ func (interp *Interp) makeBuiltinByStack(pfn *function, fn *ssa.Builtin, ssaArgs
 }
 
 func valueClear(v reflect.Value) {
-	reflect.ValueOf(v).MethodByName("Clear").Call(nil)
+	v.Clear()
 }
 
 const ptrSize = 4 << (^uintptr(0) >> 63)
