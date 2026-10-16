@@ -152,7 +152,7 @@ func (i *Interp) findType(rt reflect.Type, local bool) (types.Type, bool) {
 
 func (i *Interp) tryDeferFrame() *frame {
 	if i != nil && atomic.LoadInt32(&i.deferCount) != 0 {
-		if f, ok := i.deferMap.Load(goroutineID()); ok {
+		if f, ok := i.deferMap.Load(GoroutineID()); ok {
 			return f.(*frame)
 		}
 	}
@@ -739,7 +739,7 @@ func pushDeferAt(head **_defer, d *_defer) {
 func (fr *frame) runDefers() {
 	interp := fr.interp
 	atomic.AddInt32(&interp.deferCount, 1)
-	fr.deferid = goroutineID()
+	fr.deferid = GoroutineID()
 	interp.deferMap.Store(fr.deferid, fr)
 	d := deferHead(&fr._defer).Swap(nil)
 	for ; d != nil; d = d.tail {
@@ -1368,7 +1368,7 @@ func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{
 		funcs:        make(map[*ssa.Function]*function),
 		msets:        make(map[reflect.Type](map[string]*ssa.Function)),
 		chexit:       make(chan int),
-		mainid:       goroutineID(),
+		mainid:       GoroutineID(),
 	}
 
 	ctx.loadPkgMu.Lock()
@@ -1744,6 +1744,7 @@ func deref(typ types.Type) types.Type {
 	return typ
 }
 
-func goroutineID() uint64 {
+// GoroutineID returns the ID of the current goroutine.
+func GoroutineID() uint64 {
 	return gid.Get()
 }

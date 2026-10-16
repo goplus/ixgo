@@ -275,6 +275,12 @@ func (visit *visitor) function(fn *ssa.Function) {
 		visit.intp.loadType(deref(alloc.Type()))
 	}
 	pfn := visit.intp.loadFunction(fn)
+	entry, leave := visit.intp.ctx.entryFunc, visit.intp.ctx.leaveFunc
+	if leave != nil {
+		// Mark this before visiting callees, including recursive calls, so
+		// call compilation does not select a NoRecover execution path.
+		pfn.Recover = make([]func(*frame), 0)
+	}
 	for _, p := range fn.Params {
 		pfn.regIndex(p)
 	}
@@ -430,7 +436,30 @@ func (visit *visitor) function(fn *ssa.Function) {
 			pfn.Recover = pfn.Instrs[offset:]
 		}
 	}
-	injectRangeFuncRunDefers(pfn)
+	if leave != nil {
+		pfn.needInject = true
+	}
+	injectMissingRunDefers(pfn)
+	// Wrap after return injection: the first instruction can itself be Return.
+	fset := visit.intp.ctx.FileSet
+	if entry != nil {
+		first := pfn.Instrs[0]
+		pfn.Instrs[0] = func(fr *frame) {
+			entry(&FuncInfo{Function: pfn.Fn, Frame: fr, fset: fset})
+			first(fr)
+		}
+	}
+	if leave != nil {
+		first := pfn.Instrs[0]
+		pfn.Instrs[0] = func(fr *frame) {
+			// Registered first, so the hook runs after user defers.
+			pushDeferAt(&fr._defer, &_defer{
+				fn:   reflect.ValueOf(leave),
+				args: []value{&FuncInfo{Function: pfn.Fn, Frame: fr, fset: fset}},
+			})
+			first(fr)
+		}
+	}
 	pfn.makeInstr = nil
 	pfn.base = visit.base
 	visit.base += len(pfn.ssaInstrs) + 2
@@ -444,12 +473,13 @@ func loc(fset *token.FileSet, pos token.Pos) string {
 	return " at " + fset.Position(pos).String()
 }
 
-// injectRangeFuncRunDefers runs after all blocks are compiled. Yield
+// injectMissingRunDefers runs after all blocks are compiled. Yield
 // closures are visited recursively as *ssa.Function operands during the
 // block loop, so they have already marked needInject by this point.
 // x/tools often omits RunDefers on the enclosing function when the only
-// defers live in range-over-func yield bodies.
-func injectRangeFuncRunDefers(pfn *function) {
+// defers live in range-over-func yield bodies. Functions with an injected
+// leave hook also need RunDefers even if they have no source-level defers.
+func injectMissingRunDefers(pfn *function) {
 	if !pfn.needInject || pfn.hasRunDefers {
 		return
 	}

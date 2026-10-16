@@ -46,7 +46,7 @@ func init() {
 	RegisterExternal("runtime.Goexit", func(fr *frame) {
 		interp := fr.interp
 		// main goroutine use panic
-		if goroutineID() == interp.mainid {
+		if GoroutineID() == interp.mainid {
 			atomic.StoreInt32(&interp.goexited, 1)
 			panic(goexitPanic(0))
 		} else {
