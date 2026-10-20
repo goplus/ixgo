@@ -183,7 +183,7 @@ func BenchmarkFrameGC(b *testing.B) {
 	fr := &frame{
 		pfn:   pfn,
 		stack: append([]value(nil), pfn.stack...),
-		ipc:   pc + 1,
+		ipc:   int32(pc + 1),
 	}
 	b.Run("precomputed", func(b *testing.B) {
 		b.ReportAllocs()

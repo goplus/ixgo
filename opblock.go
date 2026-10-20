@@ -140,7 +140,14 @@ type function struct {
 	childFrameReg  register                  // first unused tuple slot for a returned child; -1 if absent
 	elidedTuples   []register                // tuple slots bypassed by direct Extract writes
 	elidedExtract  map[*ssa.Extract]struct{} // Extracts skipped after dests write
+	memoFlags      uint8
 }
+
+const (
+	interpreterMemoScalar uint8 = 1 << iota
+	interpreterMemoAccumulator
+	interpreterMemoReceiver
+)
 
 // closureCapture is one MakeClosure: its result register and captured
 // binding registers (Allocs, inner closures, or other values).
@@ -186,7 +193,7 @@ func (p *function) initPool() {
 	p.frameCacheSafe = len(p.clearRanges) == 0 && len(p.localRefs) == 0
 	p.pool = &sync.Pool{}
 	p.pool.New = func() interface{} {
-		fr := &frame{interp: p.Interp, pfn: p, block: p.Main}
+		fr := &frame{pfn: p, block: p.Main}
 		fr.stack = append([]value{}, p.stack...)
 		return fr
 	}
@@ -211,7 +218,7 @@ func (p *function) allocFrame(caller *frame) *frame {
 		if atomic.AddInt32(&p.used, 1) > int32(p.Interp.ctx.callForPool) {
 			atomic.StoreInt32(&p.cached, 1)
 		}
-		fr = &frame{interp: p.Interp, pfn: p, block: p.Main}
+		fr = &frame{pfn: p, block: p.Main}
 		fr.stack = append([]value{}, p.stack...)
 	}
 	fr.caller = caller
@@ -221,6 +228,9 @@ func (p *function) allocFrame(caller *frame) *frame {
 }
 
 func (p *function) deleteFrame(caller *frame, fr *frame) {
+	if p.memoFlags != 0 && fr.memoState != nil {
+		fr.memoState.reset()
+	}
 	p.Interp.trackDeferFrame(caller)
 	if caller.callee == fr {
 		caller.callee = nil
@@ -265,6 +275,9 @@ func (p *function) deleteFrameToCaller(caller *frame, fr *frame) {
 	if !p.frameCacheSafe || caller.pfn == nil || caller.pfn.childFrameReg < 0 || caller.stack[caller.pfn.childFrameReg] != nil {
 		p.deleteFrame(caller, fr)
 		return
+	}
+	if p.memoFlags != 0 && fr.memoState != nil {
+		fr.memoState.reset()
 	}
 	if caller.deferid != 0 {
 		p.Interp.trackDeferFrame(caller)
@@ -671,7 +684,7 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 		return func(fr *frame) {
 			predIndex := -1
 			for i, pred := range block.Preds {
-				if fr.pred == pred.Index {
+				if fr.pred == int32(pred.Index) {
 					predIndex = i
 					break
 				}
@@ -1101,45 +1114,45 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 	// Instructions executed for effect
 	case *ssa.Jump:
 		return func(fr *frame) {
-			fr.pred, fr.block = fr.block.Index, fr.block.Succs[0]
-			fr.ipc = fr.pfn.Blocks[fr.block.Index]
+			fr.pred, fr.block = int32(fr.block.Index), fr.block.Succs[0]
+			fr.ipc = int32(fr.pfn.Blocks[fr.block.Index])
 		}
 	case *ssa.If:
 		ic, kc, vc := pfn.regIndex3(instr.Cond)
 		if kc == kindConst {
 			if xtype.Bool(vc) {
 				return func(fr *frame) {
-					fr.pred = fr.block.Index
+					fr.pred = int32(fr.block.Index)
 					fr.block = fr.block.Succs[0]
-					fr.ipc = fr.pfn.Blocks[fr.block.Index]
+					fr.ipc = int32(fr.pfn.Blocks[fr.block.Index])
 				}
 			}
 			return func(fr *frame) {
-				fr.pred = fr.block.Index
+				fr.pred = int32(fr.block.Index)
 				fr.block = fr.block.Succs[1]
-				fr.ipc = fr.pfn.Blocks[fr.block.Index]
+				fr.ipc = int32(fr.pfn.Blocks[fr.block.Index])
 			}
 		}
 		switch instr.Cond.Type().(type) {
 		case *types.Basic:
 			return func(fr *frame) {
-				fr.pred = fr.block.Index
+				fr.pred = int32(fr.block.Index)
 				if fr.reg(ic).(bool) {
 					fr.block = fr.block.Succs[0]
 				} else {
 					fr.block = fr.block.Succs[1]
 				}
-				fr.ipc = fr.pfn.Blocks[fr.block.Index]
+				fr.ipc = int32(fr.pfn.Blocks[fr.block.Index])
 			}
 		default:
 			return func(fr *frame) {
-				fr.pred = fr.block.Index
+				fr.pred = int32(fr.block.Index)
 				if fr.bool(ic) {
 					fr.block = fr.block.Succs[0]
 				} else {
 					fr.block = fr.block.Succs[1]
 				}
-				fr.ipc = fr.pfn.Blocks[fr.block.Index]
+				fr.ipc = int32(fr.pfn.Blocks[fr.block.Index])
 			}
 		}
 	case *ssa.Return:
@@ -1219,7 +1232,7 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 		iv, ia, ib := getCallIndex(pfn, &instr.Call)
 		return func(fr *frame) {
 			fn, args := interp.prepareCall(fr, &instr.Call, iv, ia, ib)
-			root := &frame{interp: interp}
+			root := &frame{}
 			run := interp.prepareGoCall(root, fn, args, instr.Call.Args)
 			atomic.AddInt32(&interp.goroutines, 1)
 			go func() {

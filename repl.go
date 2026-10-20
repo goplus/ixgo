@@ -440,12 +440,12 @@ func (r *Repl) runFuncEx(i *Interp, pkg *ssa.Package, fnname string, fs *fnState
 	fr := pfn.allocFrame(&frame{})
 	if fs != nil {
 		copy(fr.stack, fs.fr.stack)
-		fr.ipc = fs.pc
+		fr.ipc = int32(fs.pc)
 	}
 	var pc int
 	for fr.ipc != -1 {
 		fn := fr.pfn.Instrs[fr.ipc]
-		pc = fr.ipc
+		pc = int(fr.ipc)
 		fr.ipc++
 		fn(fr)
 	}

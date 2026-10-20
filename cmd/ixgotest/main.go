@@ -24,7 +24,7 @@ func init() {
 		gorootTestSkips["peano.go"] = "stack overflow"
 	}
 	gorootTestSkips["closure.go"] = "runtime.ReadMemStats"
-	gorootTestSkips["divmod.go"] = "slow, 1m18s"
+	gorootTestSkips["divmod.go"] = "slow, 16.771s"
 	gorootTestSkips["nilptr.go"] = "skip drawin"
 	gorootTestSkips["heapsampling.go"] = "runtime.MemProfileRecord"
 	// gorootTestSkips["stackobj.go"] = "skip gc"
@@ -59,9 +59,9 @@ func init() {
 	case ver >= 17:
 		// gorootTestSkips["fixedbugs/issue45045.go"] = "runtime.SetFinalizer"
 		// gorootTestSkips["fixedbugs/issue46725.go"] = "runtime.SetFinalizer"
-		gorootTestSkips["abi/fibish.go"] = "slow, 34s"
-		gorootTestSkips["abi/fibish_closure.go"] = "slow, 35s"
-		gorootTestSkips["abi/uglyfib.go"] = "5m48s"
+		// gorootTestSkips["abi/fibish.go"] = "slow, 3.997s" // memo 0.050s
+		// gorootTestSkips["abi/fibish_closure.go"] = "slow, 6.371s" // memo 0.049s
+		// gorootTestSkips["abi/uglyfib.go"] = "slow, 114.526s" // memo 0.048s
 		// gorootTestSkips["fixedbugs/issue23017.go"] = "BUG" //fixed https://github.com/golang/go/issues/55086
 
 		// gorootTestSkips["typeparam/issue376214.go"] = "build SSA package error: variadic parameter must be of unnamed slice type"

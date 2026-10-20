@@ -194,18 +194,18 @@ type _defer struct {
 }
 
 type frame struct {
-	interp  *Interp
-	caller  *frame
-	callee  *frame
-	pfn     *function
-	_defer  *_defer
-	_panic  *_panic
-	block   *ssa.BasicBlock
-	stack   []value // result args env datas
-	phiVals []value // temporary values for parallel phi assignments
-	ipc     int
-	pred    int
-	deferid uint64
+	pfn       *function
+	caller    *frame
+	callee    *frame
+	_defer    *_defer
+	_panic    *_panic
+	block     *ssa.BasicBlock
+	stack     []value // result args env datas
+	phiVals   []value // temporary values for parallel phi assignments
+	ipc       int32
+	pred      int32
+	deferid   uint64
+	memoState *interpreterMemoState
 }
 
 func dumpBlock(block *ssa.BasicBlock, level int, pc ssa.Instruction) {
@@ -276,10 +276,10 @@ func (fr *frame) gc() {
 		fr.phiVals[i] = nil
 	}
 	pc := fr.ipc - 1
-	if pc < 0 || pc >= len(fr.pfn.gcRegs) {
+	if pc < 0 || int(pc) >= len(fr.pfn.gcRegs) {
 		return
 	}
-	for _, reg := range fr.pfn.gcRegsForPC(pc) {
+	for _, reg := range fr.pfn.gcRegsForPC(int(pc)) {
 		fr.stack[reg] = nil
 	}
 }
@@ -511,7 +511,7 @@ func (fr *frame) valid() bool {
 }
 
 func (fr *frame) pc() uintptr {
-	return uintptr(fr.pfn.base + fr.ipc)
+	return uintptr(fr.pfn.base + int(fr.ipc))
 }
 
 func (fr *frame) aborted() bool {
@@ -658,15 +658,15 @@ func copyExternalResults(caller *frame, ir register, dests []register, results [
 }
 
 func (fr *frame) runtimeError(instr funcInstr, text string) error {
-	if fr.interp.ctx.panicFunc != nil {
-		return fr.interp.ctx.handlePanic(fr, instr, RuntimeError(text))
+	if fr.pfn.Interp.ctx.panicFunc != nil {
+		return fr.pfn.Interp.ctx.handlePanic(fr, instr, RuntimeError(text))
 	}
 	return RuntimeError(text)
 }
 
 func (fr *frame) plainError(instr funcInstr, text string) error {
-	if fr.interp.ctx.panicFunc != nil {
-		return fr.interp.ctx.handlePanic(fr, instr, PlainError(text))
+	if fr.pfn.Interp.ctx.panicFunc != nil {
+		return fr.pfn.Interp.ctx.handlePanic(fr, instr, PlainError(text))
 	}
 	return PlainError(text)
 }
@@ -703,7 +703,7 @@ func (fr *frame) runDefer(d *_defer) (ok bool) {
 			}
 		}
 	}()
-	fr.interp.callDiscardsResult(fr, d.fn, d.args, d.ssaArgs)
+	fr.pfn.Interp.callDiscardsResult(fr, d.fn, d.args, d.ssaArgs)
 	ok = true
 	return
 }
@@ -737,7 +737,7 @@ func pushDeferAt(head **_defer, d *_defer) {
 }
 
 func (fr *frame) runDefers() {
-	interp := fr.interp
+	interp := fr.pfn.Interp
 	atomic.AddInt32(&interp.deferCount, 1)
 	fr.deferid = GoroutineID()
 	interp.deferMap.Store(fr.deferid, fr)
@@ -1043,7 +1043,7 @@ func (i *Interp) callFunctionByStackNoRecover0(caller *frame, pfn *function, ir 
 		fr.stack[i] = caller.reg(ia[i])
 	}
 	for fr.ipc != -1 {
-		fn := fr.pfn.Instrs[fr.ipc]
+		fn := fr.pfn.Instrs[int(fr.ipc)]
 		fr.ipc++
 		fn(fr)
 	}
@@ -1056,7 +1056,7 @@ func (i *Interp) callFunctionByStackNoRecover1(caller *frame, pfn *function, ir 
 		fr.stack[i+1] = caller.reg(ia[i])
 	}
 	for fr.ipc != -1 {
-		fn := fr.pfn.Instrs[fr.ipc]
+		fn := fr.pfn.Instrs[int(fr.ipc)]
 		fr.ipc++
 		fn(fr)
 	}
@@ -1070,7 +1070,7 @@ func (i *Interp) callFunctionByStackNoRecoverN(caller *frame, pfn *function, ir 
 		fr.stack[i+pfn.nres] = caller.reg(ia[i])
 	}
 	for fr.ipc != -1 {
-		fn := fr.pfn.Instrs[fr.ipc]
+		fn := fr.pfn.Instrs[int(fr.ipc)]
 		fr.ipc++
 		fn(fr)
 	}
@@ -1100,7 +1100,7 @@ func (i *Interp) callFunctionByStackNoRecoverWithEnv(caller *frame, pfn *functio
 		fr.stack[pfn.narg+i+pfn.nres] = env[i]
 	}
 	for fr.ipc != -1 {
-		fn := fr.pfn.Instrs[fr.ipc]
+		fn := fr.pfn.Instrs[int(fr.ipc)]
 		fr.ipc++
 		fn(fr)
 	}
@@ -1271,6 +1271,7 @@ func (i *Interp) callExternalWithFrameByStack(caller *frame, fn reflect.Value, i
 // undefined and fr.block contains the block at which to resume
 // control.
 func (fr *frame) run() {
+	interp := fr.pfn.Interp
 	if fr.pfn.Recover != nil {
 		defer func() {
 			if fr.ipc == -1 || fr._defer == nil {
@@ -1304,8 +1305,8 @@ func (fr *frame) run() {
 		}()
 	}
 
-	for fr.ipc != -1 && atomic.LoadInt32(&fr.interp.exited) == 0 {
-		fn := fr.pfn.Instrs[fr.ipc]
+	for fr.ipc != -1 && atomic.LoadInt32(&interp.exited) == 0 {
+		fn := fr.pfn.Instrs[int(fr.ipc)]
 		fr.ipc++
 		fn(fr)
 	}
@@ -1317,7 +1318,7 @@ func doRecover(caller *frame) value {
 	// function (two levels beneath the panicking function) to
 	// have any effect.  Thus we ignore both "defer recover()" and
 	// "defer f() -> g() -> recover()".
-	if caller.interp.ctx.Mode&DisableRecover == 0 &&
+	if caller.pfn.Interp.ctx.Mode&DisableRecover == 0 &&
 		caller._panic.isNil() &&
 		caller.caller != nil && !caller.caller._panic.isNil() {
 		p := caller.caller._panic.arg
@@ -1513,7 +1514,7 @@ func (i *Interp) toType(typ types.Type) reflect.Type {
 }
 
 func (i *Interp) RunFunc(name string, args ...Value) (r Value, err error) {
-	fr := &frame{interp: i}
+	fr := &frame{}
 	defer func() {
 		if i.ctx.Mode&DisableRecover != 0 {
 			return

@@ -522,7 +522,7 @@ func TestCallExternalAndRelease(t *testing.T) {
 	_, _, interp := loadMain(t, `package main
 func main() {}
 `)
-	fr := &frame{interp: interp}
+	fr := &frame{pfn: &function{Interp: interp}}
 	toUpper := func(s string) string { return s + "!" }
 	if v := interp.callExternal(fr, reflect.ValueOf(toUpper), []value{"ab"}, nil); v != "ab!" {
 		t.Fatal("callExternal", v)
@@ -774,7 +774,7 @@ func main() {
 			walk(fn)
 		}
 	}
-	fr := &frame{interp: interp}
+	fr := &frame{pfn: &function{Interp: interp}}
 	maybe := func(name string) *ssa.Builtin { return builtins[name] }
 	p := new(int)
 	if b := maybe("len"); b != nil {

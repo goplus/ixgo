@@ -22,7 +22,7 @@ func init() {
 	if funcval.IsSupport {
 		RegisterExternal("(reflect.Value).Pointer", func(fr *frame, v reflect.Value) uintptr {
 			if v.Kind() == reflect.Func {
-				if c := fr.interp.getMakeFuncVal(v.Interface()); c != nil && c.interp == fr.interp {
+				if c := fr.pfn.Interp.getMakeFuncVal(v.Interface()); c != nil && c.interp == fr.pfn.Interp {
 					return uintptr(c.pfn.base)
 				}
 			}
@@ -30,7 +30,7 @@ func init() {
 		})
 		RegisterExternal("(reflect.Value).UnsafePointer", func(fr *frame, v reflect.Value) unsafe.Pointer {
 			if v.Kind() == reflect.Func {
-				if c := fr.interp.getMakeFuncVal(v.Interface()); c != nil && c.interp == fr.interp {
+				if c := fr.pfn.Interp.getMakeFuncVal(v.Interface()); c != nil && c.interp == fr.pfn.Interp {
 					return unsafe.Pointer(uintptr(c.pfn.base))
 				}
 			}
@@ -61,7 +61,7 @@ func isInlineFunc(f *runtime.Func) bool {
 func runtimeFuncFileLine(fr *frame, f *runtime.Func, pc uintptr) (file string, line int) {
 	entry := f.Entry()
 	if isInlineFunc(f) && pc > entry {
-		interp := fr.interp
+		interp := fr.pfn.Interp
 		if pfn := findFuncByEntry(interp, int(entry)); pfn != nil {
 			// pc-1 : fn.instr.pos
 			pos := pfn.PosForPC(int(pc - entry - 1))

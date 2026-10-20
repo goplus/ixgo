@@ -403,7 +403,7 @@ func (visit *visitor) function(fn *ssa.Function) {
 				if index == 0 && b.Index == 0 {
 					ofn := ifn
 					ifn = func(fr *frame) {
-						log.Printf("Entering %v%v.", fr.pfn.Fn, loc(fr.interp.ctx.FileSet, fr.pfn.Fn.Pos()))
+						log.Printf("Entering %v%v.", fr.pfn.Fn, loc(fr.pfn.Interp.ctx.FileSet, fr.pfn.Fn.Pos()))
 						ofn(fr)
 					}
 				}
@@ -413,13 +413,13 @@ func (visit *visitor) function(fn *ssa.Function) {
 						ofn(fr)
 						var caller ssa.Instruction
 						if fr.caller != nil {
-							caller = fr.caller.pfn.InstrForPC(fr.caller.ipc - 1)
+							caller = fr.caller.pfn.InstrForPC(int(fr.caller.ipc) - 1)
 						}
 						if caller == nil {
 							log.Printf("Leaving %v.\n", fr.pfn.Fn)
 						} else {
 							log.Printf("Leaving %v, resuming %v call %v%v.\n",
-								fr.pfn.Fn, fr.caller.pfn.Fn, caller, loc(fr.interp.ctx.FileSet, caller.Pos()))
+								fr.pfn.Fn, fr.caller.pfn.Fn, caller, loc(fr.pfn.Interp.ctx.FileSet, caller.Pos()))
 						}
 					}
 				}
@@ -459,6 +459,9 @@ func (visit *visitor) function(fn *ssa.Function) {
 			})
 			first(fr)
 		}
+	}
+	if entry == nil && leave == nil && visit.intp.ctx.Mode&EnableTracing == 0 && visit.intp.ctx.evalCallFn == nil && visit.intp.ctx.debugFunc == nil {
+		applyMemoPlugin(pfn, fn)
 	}
 	pfn.makeInstr = nil
 	pfn.base = visit.base
