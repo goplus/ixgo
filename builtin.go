@@ -600,7 +600,7 @@ func (interp *Interp) makeBuiltinByStack(pfn *function, fn *ssa.Builtin, ssaArgs
 		}
 	case "Offsetof": // instance of generic function
 		return func(fr *frame) {
-			offset, err := builtinOffsetof(fr, fn, fr.ipc-1)
+			offset, err := builtinOffsetof(fr, fn, int(fr.ipc)-1)
 			if err != nil {
 				panic(err)
 			}

@@ -694,7 +694,7 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 		return func(fr *frame) {
 			predIndex := -1
 			for i, pred := range block.Preds {
-				if fr.pred == pred.Index {
+				if fr.pred == int32(pred.Index) {
 					predIndex = i
 					break
 				}
@@ -1124,45 +1124,45 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 	// Instructions executed for effect
 	case *ssa.Jump:
 		return func(fr *frame) {
-			fr.pred, fr.block = fr.block.Index, fr.block.Succs[0]
-			fr.ipc = fr.pfn.Blocks[fr.block.Index]
+			fr.pred, fr.block = int32(fr.block.Index), fr.block.Succs[0]
+			fr.ipc = int32(fr.pfn.Blocks[fr.block.Index])
 		}
 	case *ssa.If:
 		ic, kc, vc := pfn.regIndex3(instr.Cond)
 		if kc == kindConst {
 			if xtype.Bool(vc) {
 				return func(fr *frame) {
-					fr.pred = fr.block.Index
+					fr.pred = int32(fr.block.Index)
 					fr.block = fr.block.Succs[0]
-					fr.ipc = fr.pfn.Blocks[fr.block.Index]
+					fr.ipc = int32(fr.pfn.Blocks[fr.block.Index])
 				}
 			}
 			return func(fr *frame) {
-				fr.pred = fr.block.Index
+				fr.pred = int32(fr.block.Index)
 				fr.block = fr.block.Succs[1]
-				fr.ipc = fr.pfn.Blocks[fr.block.Index]
+				fr.ipc = int32(fr.pfn.Blocks[fr.block.Index])
 			}
 		}
 		switch instr.Cond.Type().(type) {
 		case *types.Basic:
 			return func(fr *frame) {
-				fr.pred = fr.block.Index
+				fr.pred = int32(fr.block.Index)
 				if fr.reg(ic).(bool) {
 					fr.block = fr.block.Succs[0]
 				} else {
 					fr.block = fr.block.Succs[1]
 				}
-				fr.ipc = fr.pfn.Blocks[fr.block.Index]
+				fr.ipc = int32(fr.pfn.Blocks[fr.block.Index])
 			}
 		default:
 			return func(fr *frame) {
-				fr.pred = fr.block.Index
+				fr.pred = int32(fr.block.Index)
 				if fr.bool(ic) {
 					fr.block = fr.block.Succs[0]
 				} else {
 					fr.block = fr.block.Succs[1]
 				}
-				fr.ipc = fr.pfn.Blocks[fr.block.Index]
+				fr.ipc = int32(fr.pfn.Blocks[fr.block.Index])
 			}
 		}
 	case *ssa.Return:

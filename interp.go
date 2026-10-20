@@ -203,8 +203,8 @@ type frame struct {
 	block          *ssa.BasicBlock
 	stack          []value // result args env datas
 	phiVals        []value // temporary values for parallel phi assignments
-	ipc            int
-	pred           int
+	ipc            int32
+	pred           int32
 	deferid        uint64
 	receiverMemo   *interpreterReceiverMemo
 	receiverKey    interpreterAccumulatorKey
@@ -286,10 +286,10 @@ func (fr *frame) gc() {
 		fr.phiVals[i] = nil
 	}
 	pc := fr.ipc - 1
-	if pc < 0 || pc >= len(fr.pfn.gcRegs) {
+	if pc < 0 || int(pc) >= len(fr.pfn.gcRegs) {
 		return
 	}
-	for _, reg := range fr.pfn.gcRegsForPC(pc) {
+	for _, reg := range fr.pfn.gcRegsForPC(int(pc)) {
 		fr.stack[reg] = nil
 	}
 }
@@ -521,7 +521,7 @@ func (fr *frame) valid() bool {
 }
 
 func (fr *frame) pc() uintptr {
-	return uintptr(fr.pfn.base + fr.ipc)
+	return uintptr(fr.pfn.base + int(fr.ipc))
 }
 
 func (fr *frame) aborted() bool {
@@ -1053,7 +1053,7 @@ func (i *Interp) callFunctionByStackNoRecover0(caller *frame, pfn *function, ir 
 		fr.stack[i] = caller.reg(ia[i])
 	}
 	for fr.ipc != -1 {
-		fn := fr.pfn.Instrs[fr.ipc]
+		fn := fr.pfn.Instrs[int(fr.ipc)]
 		fr.ipc++
 		fn(fr)
 	}
@@ -1066,7 +1066,7 @@ func (i *Interp) callFunctionByStackNoRecover1(caller *frame, pfn *function, ir 
 		fr.stack[i+1] = caller.reg(ia[i])
 	}
 	for fr.ipc != -1 {
-		fn := fr.pfn.Instrs[fr.ipc]
+		fn := fr.pfn.Instrs[int(fr.ipc)]
 		fr.ipc++
 		fn(fr)
 	}
@@ -1080,7 +1080,7 @@ func (i *Interp) callFunctionByStackNoRecoverN(caller *frame, pfn *function, ir 
 		fr.stack[i+pfn.nres] = caller.reg(ia[i])
 	}
 	for fr.ipc != -1 {
-		fn := fr.pfn.Instrs[fr.ipc]
+		fn := fr.pfn.Instrs[int(fr.ipc)]
 		fr.ipc++
 		fn(fr)
 	}
@@ -1110,7 +1110,7 @@ func (i *Interp) callFunctionByStackNoRecoverWithEnv(caller *frame, pfn *functio
 		fr.stack[pfn.narg+i+pfn.nres] = env[i]
 	}
 	for fr.ipc != -1 {
-		fn := fr.pfn.Instrs[fr.ipc]
+		fn := fr.pfn.Instrs[int(fr.ipc)]
 		fr.ipc++
 		fn(fr)
 	}
@@ -1315,7 +1315,7 @@ func (fr *frame) run() {
 	}
 
 	for fr.ipc != -1 && atomic.LoadInt32(&fr.interp.exited) == 0 {
-		fn := fr.pfn.Instrs[fr.ipc]
+		fn := fr.pfn.Instrs[int(fr.ipc)]
 		fr.ipc++
 		fn(fr)
 	}

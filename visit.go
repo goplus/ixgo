@@ -413,7 +413,7 @@ func (visit *visitor) function(fn *ssa.Function) {
 						ofn(fr)
 						var caller ssa.Instruction
 						if fr.caller != nil {
-							caller = fr.caller.pfn.InstrForPC(fr.caller.ipc - 1)
+							caller = fr.caller.pfn.InstrForPC(int(fr.caller.ipc) - 1)
 						}
 						if caller == nil {
 							log.Printf("Leaving %v.\n", fr.pfn.Fn)
