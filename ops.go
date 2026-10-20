@@ -1430,15 +1430,15 @@ func typeAssert(fr *frame, instr *ssa.TypeAssert, typ reflect.Type, xtyp reflect
 			if !rt.AssignableTo(typ) {
 				err = fr.runtimeError(instr, fmt.Sprintf("interface conversion: %v is %v, not %v", xtyp, rt, typ))
 				if itype, ok := instr.AssertedType.Underlying().(*types.Interface); ok {
-					if it, ok := fr.interp.findType(rt, false); ok {
+					if it, ok := fr.pfn.Interp.findType(rt, false); ok {
 						if meth, _ := types.MissingMethod(it, itype, true); meth != nil {
 							err = fr.runtimeError(instr, fmt.Sprintf("interface conversion: %v is not %v: missing method %s",
 								rt, instr.AssertedType, meth.Name()))
 						}
 					}
 				} else if typ.PkgPath() == rt.PkgPath() && typ.Name() == rt.Name() {
-					t1, ok1 := fr.interp.findType(typ, false)
-					t2, ok2 := fr.interp.findType(rt, false)
+					t1, ok1 := fr.pfn.Interp.findType(typ, false)
+					t2, ok2 := fr.pfn.Interp.findType(rt, false)
 					if ok1 && ok2 {
 						n1, ok1 := t1.(*types.Named)
 						n2, ok2 := t2.(*types.Named)

@@ -35,7 +35,7 @@ import (
 
 func init() {
 	RegisterExternal("os.Exit", func(fr *frame, code int) {
-		interp := fr.interp
+		interp := fr.pfn.Interp
 		if atomic.LoadInt32(&interp.goexited) == 1 {
 			//os.Exit(code)
 			interp.chexit <- code
@@ -44,7 +44,7 @@ func init() {
 		}
 	})
 	RegisterExternal("runtime.Goexit", func(fr *frame) {
-		interp := fr.interp
+		interp := fr.pfn.Interp
 		// main goroutine use panic
 		if GoroutineID() == interp.mainid {
 			atomic.StoreInt32(&interp.goexited, 1)
@@ -105,7 +105,7 @@ func runtimeCallers(fr *frame, skip int, pc []uintptr) int {
 	var rpc []uintptr
 	for _, pc := range pcs {
 		// skip wrapper method func
-		if fn := findFuncByPC(fr.interp, int(pc)); fn != nil && isWrapperFuncName(fn.Fn.String()) {
+		if fn := findFuncByPC(fr.pfn.Interp, int(pc)); fn != nil && isWrapperFuncName(fn.Fn.String()) {
 			continue
 		}
 		rpc = append(rpc, pc)
@@ -119,7 +119,7 @@ func runtimeCallers(fr *frame, skip int, pc []uintptr) int {
 }
 
 func runtimeFuncForPC(fr *frame, pc uintptr) *runtime.Func {
-	if pfn := findFuncByPC(fr.interp, int(pc)); pfn != nil {
+	if pfn := findFuncByPC(fr.pfn.Interp, int(pc)); pfn != nil {
 		return runtimeFunc(pfn)
 	}
 	return runtime.FuncForPC(pc)

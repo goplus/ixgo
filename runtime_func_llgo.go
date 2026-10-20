@@ -20,7 +20,7 @@ const (
 func init() {
 	RegisterExternal("(reflect.Value).Pointer", func(fr *frame, v reflect.Value) uintptr {
 		if v.Kind() == reflect.Func {
-			if c := fr.interp.getMakeFuncValue(v); c != nil && c.interp == fr.interp {
+			if c := fr.pfn.Interp.getMakeFuncValue(v); c != nil && c.interp == fr.pfn.Interp {
 				return uintptr(c.pfn.base)
 			}
 		}
@@ -28,7 +28,7 @@ func init() {
 	})
 	RegisterExternal("(reflect.Value).UnsafePointer", func(fr *frame, v reflect.Value) unsafe.Pointer {
 		if v.Kind() == reflect.Func {
-			if c := fr.interp.getMakeFuncValue(v); c != nil && c.interp == fr.interp {
+			if c := fr.pfn.Interp.getMakeFuncValue(v); c != nil && c.interp == fr.pfn.Interp {
 				return unsafe.Pointer(uintptr(c.pfn.base))
 			}
 		}
@@ -59,7 +59,7 @@ func runtimePanic(e interface{})
 func runtimeFuncFileLine(fr *frame, f *runtime.Func, pc uintptr) (file string, line int) {
 	entry := f.Entry()
 	if isInlineFunc(f) && pc >= entry {
-		interp := fr.interp
+		interp := fr.pfn.Interp
 		if pfn := findFuncByEntry(interp, int(entry)); pfn != nil {
 			var pos token.Pos
 			if pc == entry {

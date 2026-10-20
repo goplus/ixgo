@@ -403,7 +403,7 @@ func (visit *visitor) function(fn *ssa.Function) {
 				if index == 0 && b.Index == 0 {
 					ofn := ifn
 					ifn = func(fr *frame) {
-						log.Printf("Entering %v%v.", fr.pfn.Fn, loc(fr.interp.ctx.FileSet, fr.pfn.Fn.Pos()))
+						log.Printf("Entering %v%v.", fr.pfn.Fn, loc(fr.pfn.Interp.ctx.FileSet, fr.pfn.Fn.Pos()))
 						ofn(fr)
 					}
 				}
@@ -419,7 +419,7 @@ func (visit *visitor) function(fn *ssa.Function) {
 							log.Printf("Leaving %v.\n", fr.pfn.Fn)
 						} else {
 							log.Printf("Leaving %v, resuming %v call %v%v.\n",
-								fr.pfn.Fn, fr.caller.pfn.Fn, caller, loc(fr.interp.ctx.FileSet, caller.Pos()))
+								fr.pfn.Fn, fr.caller.pfn.Fn, caller, loc(fr.pfn.Interp.ctx.FileSet, caller.Pos()))
 						}
 					}
 				}

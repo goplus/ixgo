@@ -132,18 +132,22 @@ type function struct {
 	clearRanges []stackRange // slots cleared before pooling
 	localRefs   []register   // non-escaping locals holding references
 
-	hasGCRegs              bool                      // function has dynamic GC-relevant registers
-	hasRunDefers           bool                      // function SSA contains RunDefers
-	hasDeferStack          bool                      // function emits ssa:deferstack
-	needInject             bool                      // yield or leave hook needs injected RunDefers
-	frameCacheSafe         bool                      // no stack or local references need clearing
-	childFrameReg          register                  // first unused tuple slot for a returned child; -1 if absent
-	elidedTuples           []register                // tuple slots bypassed by direct Extract writes
-	elidedExtract          map[*ssa.Extract]struct{} // Extracts skipped after dests write
-	interpreterReceiver    bool
-	interpreterMemo        bool
-	interpreterAccumulator bool
+	hasGCRegs      bool                      // function has dynamic GC-relevant registers
+	hasRunDefers   bool                      // function SSA contains RunDefers
+	hasDeferStack  bool                      // function emits ssa:deferstack
+	needInject     bool                      // yield or leave hook needs injected RunDefers
+	frameCacheSafe bool                      // no stack or local references need clearing
+	childFrameReg  register                  // first unused tuple slot for a returned child; -1 if absent
+	elidedTuples   []register                // tuple slots bypassed by direct Extract writes
+	elidedExtract  map[*ssa.Extract]struct{} // Extracts skipped after dests write
+	memoFlags      uint8
 }
+
+const (
+	interpreterMemoScalar uint8 = 1 << iota
+	interpreterMemoAccumulator
+	interpreterMemoReceiver
+)
 
 // closureCapture is one MakeClosure: its result register and captured
 // binding registers (Allocs, inner closures, or other values).
@@ -189,7 +193,7 @@ func (p *function) initPool() {
 	p.frameCacheSafe = len(p.clearRanges) == 0 && len(p.localRefs) == 0
 	p.pool = &sync.Pool{}
 	p.pool.New = func() interface{} {
-		fr := &frame{interp: p.Interp, pfn: p, block: p.Main}
+		fr := &frame{pfn: p, block: p.Main}
 		fr.stack = append([]value{}, p.stack...)
 		return fr
 	}
@@ -214,7 +218,7 @@ func (p *function) allocFrame(caller *frame) *frame {
 		if atomic.AddInt32(&p.used, 1) > int32(p.Interp.ctx.callForPool) {
 			atomic.StoreInt32(&p.cached, 1)
 		}
-		fr = &frame{interp: p.Interp, pfn: p, block: p.Main}
+		fr = &frame{pfn: p, block: p.Main}
 		fr.stack = append([]value{}, p.stack...)
 	}
 	fr.caller = caller
@@ -224,16 +228,9 @@ func (p *function) allocFrame(caller *frame) *frame {
 }
 
 func (p *function) deleteFrame(caller *frame, fr *frame) {
-	fr.receiverMemo = nil
-	fr.receiverKey = interpreterAccumulatorKey{}
-	fr.receiverFields = nil
-	fr.receiverStarts = nil
-	fr.receiverAffine = nil
-	fr.memo = nil
-	fr.accMemo = nil
-	fr.accActive = false
-	fr.accKey = interpreterAccumulatorKey{}
-	fr.accStart = 0
+	if p.memoFlags != 0 && fr.memoState != nil {
+		fr.memoState.reset()
+	}
 	p.Interp.trackDeferFrame(caller)
 	if caller.callee == fr {
 		caller.callee = nil
@@ -279,16 +276,9 @@ func (p *function) deleteFrameToCaller(caller *frame, fr *frame) {
 		p.deleteFrame(caller, fr)
 		return
 	}
-	fr.receiverMemo = nil
-	fr.receiverKey = interpreterAccumulatorKey{}
-	fr.receiverFields = nil
-	fr.receiverStarts = nil
-	fr.receiverAffine = nil
-	fr.memo = nil
-	fr.accMemo = nil
-	fr.accActive = false
-	fr.accKey = interpreterAccumulatorKey{}
-	fr.accStart = 0
+	if p.memoFlags != 0 && fr.memoState != nil {
+		fr.memoState.reset()
+	}
 	if caller.deferid != 0 {
 		p.Interp.trackDeferFrame(caller)
 	}
@@ -1242,7 +1232,7 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 		iv, ia, ib := getCallIndex(pfn, &instr.Call)
 		return func(fr *frame) {
 			fn, args := interp.prepareCall(fr, &instr.Call, iv, ia, ib)
-			root := &frame{interp: interp}
+			root := &frame{}
 			run := interp.prepareGoCall(root, fn, args, instr.Call.Args)
 			atomic.AddInt32(&interp.goroutines, 1)
 			go func() {
