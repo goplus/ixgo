@@ -194,18 +194,28 @@ type _defer struct {
 }
 
 type frame struct {
-	interp  *Interp
-	caller  *frame
-	callee  *frame
-	pfn     *function
-	_defer  *_defer
-	_panic  *_panic
-	block   *ssa.BasicBlock
-	stack   []value // result args env datas
-	phiVals []value // temporary values for parallel phi assignments
-	ipc     int
-	pred    int
-	deferid uint64
+	interp         *Interp
+	caller         *frame
+	callee         *frame
+	pfn            *function
+	_defer         *_defer
+	_panic         *_panic
+	block          *ssa.BasicBlock
+	stack          []value // result args env datas
+	phiVals        []value // temporary values for parallel phi assignments
+	ipc            int
+	pred           int
+	deferid        uint64
+	receiverMemo   *interpreterReceiverMemo
+	receiverKey    interpreterAccumulatorKey
+	receiverFields []reflect.Value
+	receiverStarts []uint64
+	receiverAffine []receiverTransform
+	memo           *interpreterMemo
+	accMemo        *interpreterAccumulatorMemo
+	accKey         interpreterAccumulatorKey
+	accStart       uint64
+	accActive      bool
 }
 
 func dumpBlock(block *ssa.BasicBlock, level int, pc ssa.Instruction) {

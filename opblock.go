@@ -132,14 +132,17 @@ type function struct {
 	clearRanges []stackRange // slots cleared before pooling
 	localRefs   []register   // non-escaping locals holding references
 
-	hasGCRegs      bool                      // function has dynamic GC-relevant registers
-	hasRunDefers   bool                      // function SSA contains RunDefers
-	hasDeferStack  bool                      // function emits ssa:deferstack
-	needInject     bool                      // yield or leave hook needs injected RunDefers
-	frameCacheSafe bool                      // no stack or local references need clearing
-	childFrameReg  register                  // first unused tuple slot for a returned child; -1 if absent
-	elidedTuples   []register                // tuple slots bypassed by direct Extract writes
-	elidedExtract  map[*ssa.Extract]struct{} // Extracts skipped after dests write
+	hasGCRegs              bool                      // function has dynamic GC-relevant registers
+	hasRunDefers           bool                      // function SSA contains RunDefers
+	hasDeferStack          bool                      // function emits ssa:deferstack
+	needInject             bool                      // yield or leave hook needs injected RunDefers
+	frameCacheSafe         bool                      // no stack or local references need clearing
+	childFrameReg          register                  // first unused tuple slot for a returned child; -1 if absent
+	elidedTuples           []register                // tuple slots bypassed by direct Extract writes
+	elidedExtract          map[*ssa.Extract]struct{} // Extracts skipped after dests write
+	interpreterReceiver    bool
+	interpreterMemo        bool
+	interpreterAccumulator bool
 }
 
 // closureCapture is one MakeClosure: its result register and captured
@@ -221,6 +224,16 @@ func (p *function) allocFrame(caller *frame) *frame {
 }
 
 func (p *function) deleteFrame(caller *frame, fr *frame) {
+	fr.receiverMemo = nil
+	fr.receiverKey = interpreterAccumulatorKey{}
+	fr.receiverFields = nil
+	fr.receiverStarts = nil
+	fr.receiverAffine = nil
+	fr.memo = nil
+	fr.accMemo = nil
+	fr.accActive = false
+	fr.accKey = interpreterAccumulatorKey{}
+	fr.accStart = 0
 	p.Interp.trackDeferFrame(caller)
 	if caller.callee == fr {
 		caller.callee = nil
@@ -266,6 +279,16 @@ func (p *function) deleteFrameToCaller(caller *frame, fr *frame) {
 		p.deleteFrame(caller, fr)
 		return
 	}
+	fr.receiverMemo = nil
+	fr.receiverKey = interpreterAccumulatorKey{}
+	fr.receiverFields = nil
+	fr.receiverStarts = nil
+	fr.receiverAffine = nil
+	fr.memo = nil
+	fr.accMemo = nil
+	fr.accActive = false
+	fr.accKey = interpreterAccumulatorKey{}
+	fr.accStart = 0
 	if caller.deferid != 0 {
 		p.Interp.trackDeferFrame(caller)
 	}
