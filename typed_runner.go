@@ -35,6 +35,74 @@ func RegisterMixedRunner(factory TypedRunnerFactory) {
 	mixedRunnerFactory = factory
 }
 
+type mixedCallPatch struct {
+	callee *function
+	args   []register
+	dests  []register
+	run    *func(*frame)
+}
+
+func (visit *visitor) deferMixedCall(pfn *function, call *ssa.Call, fallback func(*frame)) func(*frame) {
+	callee := call.Common().StaticCallee()
+	if callee == nil || callee.Blocks == nil {
+		return fallback
+	}
+	ifn := visit.intp.funcs[callee]
+	if ifn == nil || ifn.Recover != nil || ifn.canRunMixed(len(call.Common().Args), nil) {
+		return fallback
+	}
+	_, args, bindings := getCallIndex(pfn, call.Common())
+	args = append(args, bindings...)
+	var dests []register
+	switch ifn.nres {
+	case 0:
+	case 1:
+		dests = []register{pfn.regIndex(call)}
+	default:
+		dests = make([]register, ifn.nres)
+		for j := range dests {
+			dests[j] = -1
+		}
+		if refs := call.Referrers(); refs != nil {
+			for _, ref := range *refs {
+				if ex, ok := ref.(*ssa.Extract); ok {
+					if _, elided := pfn.elidedExtract[ex]; elided && ex.Referrers() != nil && len(*ex.Referrers()) > 0 {
+						dests[ex.Index] = pfn.regIndex(ex)
+					}
+				}
+			}
+		}
+	}
+	// Patch inside tracing and memo wrappers without replacing those wrappers.
+	run := fallback
+	visit.mixedCalls = append(visit.mixedCalls, mixedCallPatch{ifn, args, dests, &run})
+	return func(fr *frame) { run(fr) }
+}
+
+// Recursive callees finish before their ancestors install memo wrappers.
+// Wait for the traversal to unwind before checking installation-only flags.
+func (visit *visitor) installMixedRunners() {
+	pending := visit.mixedPending
+	visit.mixedPending = nil
+	for _, pfn := range pending {
+		if mixedGraphUsesMemo(visit.intp, pfn.Fn, make(map[*ssa.Function]bool)) {
+			continue
+		}
+		pfn.mixedRunner = mixedRunnerFactory(pfn.Fn)
+		if binder, ok := pfn.mixedRunner.(TypedRunnerTypeBinder); ok && !binder.BindTypes(visit.intp.toType) {
+			pfn.mixedRunner = nil
+		}
+	}
+	for _, patch := range visit.mixedCalls {
+		if patch.callee.Recover == nil && patch.callee.canRunMixed(len(patch.args), nil) {
+			if run := makeCallSpecializerInstr(visit.intp, patch.callee, patch.args, patch.dests); run != nil {
+				*patch.run = run
+			}
+		}
+	}
+	visit.mixedCalls = nil
+}
+
 func mixedGraphUsesMemo(interp *Interp, fn *ssa.Function, seen map[*ssa.Function]bool) bool {
 	if interp == nil || fn == nil || seen[fn] {
 		return false

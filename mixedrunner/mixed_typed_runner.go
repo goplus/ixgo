@@ -114,6 +114,8 @@ type mixedTypedRunner struct {
 	params, results []types.BasicKind
 	paramTypes      []types.Type
 	runtimeTypes    []reflect.Type
+	refSlots        int
+	refParams       []uint8
 	graph           map[*ssa.Function]*mixedTypedRunner
 }
 
@@ -176,6 +178,9 @@ func (c *mixedCompiler) build(fn *ssa.Function) *mixedTypedRunner {
 		}
 		regs[v] = uint8(len(r.constants))
 		r.constants = append(r.constants, 0)
+		if pointer {
+			r.refSlots = len(r.constants)
+		}
 		return true
 	}
 	for _, p := range fn.Params {
@@ -185,6 +190,9 @@ func (c *mixedCompiler) build(fn *ssa.Function) *mixedTypedRunner {
 		}
 		if !ok || !alloc(p) {
 			return nil
+		}
+		if k == types.Invalid {
+			r.refParams = append(r.refParams, regs[p])
 		}
 		r.params = append(r.params, k)
 		r.paramTypes = append(r.paramTypes, p.Type())
@@ -267,7 +275,7 @@ func (c *mixedCompiler) build(fn *ssa.Function) *mixedTypedRunner {
 					return nil
 				}
 				k, ok := mixedKind(in.Val.Type())
-				if !ok {
+				if !ok || k == types.Bool {
 					return nil
 				}
 				op = mixedOp{mixedBaseOp: mixedBaseOp[uint64]{kind: mixedStore, x: regs[in.Addr], y: regs[in.Val]}, scalar: k}
@@ -573,6 +581,9 @@ func (r *mixedTypedRunner) RunArgs(args []ixgo.Value) ixgo.Value {
 	depth := 0
 	regs := &frames[0].regs
 	frames[0].runner = r
+	if r.refSlots != 0 {
+		frames[0].refs = make([]reflect.Value, r.refSlots)
+	}
 	copy(regs[:], r.constants)
 	for i, k := range r.params {
 		if k == types.Invalid {
@@ -661,10 +672,15 @@ func (r *mixedTypedRunner) RunArgs(args []ixgo.Value) ixgo.Value {
 			if next.runner != op.callee {
 				copy(regs[:], op.callee.constants)
 				next.runner = op.callee
+				if len(next.refs) < op.callee.refSlots {
+					next.refs = make([]reflect.Value, op.callee.refSlots)
+				}
 			}
 			for i, src := range op.args {
 				regs[i] = caller.regs[src]
-				next.refs[i] = caller.refs[src]
+			}
+			for _, i := range op.callee.refParams {
+				next.refs[i] = caller.refs[op.args[i]]
 			}
 			code, pc = op.callee.code, 0
 			continue
@@ -687,7 +703,9 @@ func (r *mixedTypedRunner) RunArgs(args []ixgo.Value) ixgo.Value {
 			for i, src := range op.results {
 				caller.regs[destinations[i]] = regs[src]
 			}
-			clear(frames[depth].refs[:])
+			if n := frames[depth].runner.refSlots; n != 0 {
+				clear(frames[depth].refs[:n])
+			}
 			code, pc, regs = caller.code, caller.pc+1, &caller.regs
 			depth--
 			continue
@@ -704,7 +722,7 @@ type mixedFrame struct {
 	code   []mixedOp
 	pc     int
 	regs   [mixedArgsLimit]uint64
-	refs   [mixedArgsLimit]reflect.Value
+	refs   []reflect.Value
 }
 
 func mixedBool(b bool) uint64 {

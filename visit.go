@@ -61,11 +61,14 @@ func checkPackages(intp *Interp, pkgs []*ssa.Package) (err error) {
 }
 
 type visitor struct {
-	intp *Interp
-	prog *ssa.Program
-	pkgs map[*ssa.Package]bool
-	seen map[*ssa.Function]bool
-	base int
+	intp         *Interp
+	prog         *ssa.Program
+	pkgs         map[*ssa.Package]bool
+	seen         map[*ssa.Function]bool
+	base         int
+	depth        int
+	mixedPending []*function
+	mixedCalls   []mixedCallPatch
 }
 
 func (visit *visitor) program() {
@@ -218,6 +221,22 @@ func (visit *visitor) function(fn *ssa.Function) {
 		return
 	}
 	visit.seen[fn] = true
+	visit.depth++
+	complete := false
+	defer func() {
+		visit.depth--
+		if !complete {
+			visit.mixedPending = nil
+			visit.mixedCalls = nil
+		} else if visit.depth == 0 {
+			visit.installMixedRunners()
+		}
+	}()
+	visit.compileFunction(fn)
+	complete = true
+}
+
+func (visit *visitor) compileFunction(fn *ssa.Function) {
 	fnPath := fn.String()
 	if value, ok := visit.intp.ctx.override.Load(fnPath); ok &&
 		visit.intp.preToType(fn.Type()) == value.(reflect.Value).Type() {
@@ -340,6 +359,11 @@ func (visit *visitor) function(fn *ssa.Function) {
 			ifn := makeInstr(visit.intp, pfn, instr)
 			if ifn == nil {
 				continue
+			}
+			if visit.intp.ctx.Mode&DisableMixedRunner == 0 && mixedRunnerFactory != nil {
+				if call, ok := instr.(*ssa.Call); ok {
+					ifn = visit.deferMixedCall(pfn, call, ifn)
+				}
 			}
 			if visit.intp.ctx.evalMode && fn.String() == "main.init" {
 				if visit.intp.ctx.evalInit == nil {
@@ -469,11 +493,8 @@ func (visit *visitor) function(fn *ssa.Function) {
 		if visit.intp.ctx.Mode&DisableMemo == 0 {
 			applyMemoPlugin(pfn, fn)
 		}
-		if visit.intp.ctx.Mode&DisableMixedRunner == 0 && pfn.memoFlags == 0 && mixedRunnerFactory != nil && !mixedGraphUsesMemo(visit.intp, fn, make(map[*ssa.Function]bool)) {
-			pfn.mixedRunner = mixedRunnerFactory(fn)
-			if binder, ok := pfn.mixedRunner.(TypedRunnerTypeBinder); ok && !binder.BindTypes(visit.intp.toType) {
-				pfn.mixedRunner = nil
-			}
+		if visit.intp.ctx.Mode&DisableMixedRunner == 0 && pfn.memoFlags == 0 && mixedRunnerFactory != nil {
+			visit.mixedPending = append(visit.mixedPending, pfn)
 		}
 	}
 	pfn.base = visit.base

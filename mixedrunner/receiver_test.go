@@ -1,11 +1,15 @@
 package mixedrunner
 
 import (
+	"go/constant"
 	"go/types"
 	"reflect"
+	"runtime"
+	"sync"
 	"testing"
 
 	"github.com/goplus/ixgo"
+	"golang.org/x/tools/go/ssa"
 )
 
 func TestNumericReceiverFields(t *testing.T) {
@@ -72,6 +76,111 @@ func TestNumericReceiverFields(t *testing.T) {
 			}
 			if _, err := i.RunFunc("nilRead"); err == nil {
 				t.Fatal("nil receiver did not panic")
+			}
+		})
+	}
+}
+
+func TestMixedFrameReferences(t *testing.T) {
+	const source = `package main
+ type S struct { x int }
+ func numeric(n int) int { if n == 0 { return 1 }; return numeric(n-1)+1 }
+ func first(p *S, n int) int { p.x += n; return p.x }
+ func second(n int, p *S) int { p.x += n; return p.x }
+ func recurse(p *S, n int) int {
+ if n == 0 { return p.x }
+ x := numeric(4)
+ first(p, x)
+ second(x, p)
+ return recurse(p, n-1)
+ }
+ `
+	pkg, err := ixgo.NewContext(ixgo.DisableMemo).LoadFile("refs.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	numeric := MakeRunner(pkg.Func("numeric")).(*mixedTypedRunner)
+	if numeric.refSlots != 0 || len(numeric.refParams) != 0 {
+		t.Fatal("numeric runner requires reference storage")
+	}
+	// A numeric frame needs only its registers and small call metadata.
+	if size := reflect.TypeOf(mixedFrame{}).Size(); size > mixedArgsLimit*8+128 {
+		t.Fatalf("numeric frame is too large: %d bytes", size)
+	}
+	r := MakeRunner(pkg.Func("recurse")).(*mixedTypedRunner)
+	for _, node := range r.graph {
+		if node.refSlots > len(node.constants) {
+			t.Fatal("reference storage exceeds register count")
+		}
+	}
+	structType := reflect.StructOf([]reflect.StructField{{Name: "X", Type: reflect.TypeOf(0)}})
+	if !r.BindTypes(func(types.Type) reflect.Type { return reflect.PointerTo(structType) }) {
+		t.Fatal("receiver binding failed")
+	}
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 20 {
+				ptr := reflect.New(structType)
+				if got := r.RunArgs([]ixgo.Value{ptr.Interface(), 32}); got != 320 {
+					t.Errorf("mixed pointer/numeric calls: got %v, want 320", got)
+				}
+				if got := ptr.Elem().Field(0).Int(); got != 320 {
+					t.Errorf("receiver field: got %v, want 320", got)
+				}
+			}
+		}()
+	}
+	for range 10 {
+		runtime.GC()
+	}
+	wg.Wait()
+}
+
+func TestMixedRejectBoolStore(t *testing.T) {
+	pkg, err := ixgo.NewContext(0).LoadFile("store.go", `package main
+ type S struct { x int }
+ func store(p *S) { p.x = 1 }
+ `)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn := pkg.Func("store")
+	for _, block := range fn.Blocks {
+		for _, instr := range block.Instrs {
+			if store, ok := instr.(*ssa.Store); ok {
+				// A malformed SSA store must not reach the numeric field writer.
+				store.Val = ssa.NewConst(constant.MakeBool(true), types.Typ[types.Bool])
+				if MakeRunner(fn) != nil {
+					t.Fatal("bool store accepted")
+				}
+				return
+			}
+		}
+	}
+	t.Fatal("missing store instruction")
+}
+
+func BenchmarkMixedNumericFrames(b *testing.B) {
+	pkg, err := ixgo.NewContext(0).LoadFile("frames.go", `package main
+ func leaf(n int) int { return n+1 }
+ func shallow(n int) int { return leaf(n)+leaf(n) }
+ func recursive(n int) int { if n == 0 { return 0 }; return recursive(n-1)+1 }
+ `)
+	if err != nil {
+		b.Fatal(err)
+	}
+	for _, name := range []string{"leaf", "shallow", "recursive"} {
+		r := MakeRunner(pkg.Func(name)).(ixgo.TypedArgumentsRunner)
+		args := []ixgo.Value{16}
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				if got := r.RunArgs(args); got == nil {
+					b.Fatal("missing result")
+				}
 			}
 		})
 	}

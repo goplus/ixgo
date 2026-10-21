@@ -68,13 +68,19 @@ process runs with `GOMAXPROCS=1`; loading and compilation are excluded.
 | `test/abi/fibish.go` | 3.902 s | 2.433 s | 1.60x |
 | `test/divmod.go` | 26.769 s | 10.473 s | 2.56x |
 
+The workload paths above are relative to `GOROOT` (for example,
+`$(go env GOROOT)/test/divmod.go`), not this repository. They require a Go
+distribution containing its test sources.
+
 These are workload-specific measurements, not a general speedup guarantee. Short-lived
 workloads can lose time to compilation. Unsupported parts of a program continue to use
 the ordinary interpreter.
 
 ## Recursion and panics
 
-Recursive calls use dynamically growing heap frames without a fixed depth limit. Very
+Recursive calls use dynamically growing heap frames without a fixed depth limit.
+Numeric frames contain only raw-bit registers and call metadata; GC-visible reference
+storage is allocated separately only for frames using pointer parameters or fields. Very
 deep or untrusted recursion can exhaust heap memory. Integer division or remainder by
 zero and negative shifts use native Go operations so their recoverable panic values are
 preserved. Functions using `defer` are not compiled by this runner.
