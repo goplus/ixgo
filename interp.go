@@ -101,6 +101,7 @@ type Interp struct {
 	goexited     int32                                       // is call runtime.Goexit
 	exited       int32                                       // is call os.Exit
 	gcEnabled    bool                                        // program can invoke runtime.GC
+	execution    *ExecutionTracker                           // optional execution tracking session
 	interpExt
 }
 
@@ -796,7 +797,10 @@ func (i *DebugInfo) Position() token.Position {
 }
 
 func (i *DebugInfo) AsVar() (*types.Var, interface{}, bool) {
-	return i.toValue()
+	if i.toValue != nil {
+		return i.toValue()
+	}
+	return nil, nil, false
 }
 
 func (i *DebugInfo) AsFunc() (*types.Func, bool) {
@@ -1272,6 +1276,11 @@ func (i *Interp) callExternalWithFrameByStack(caller *frame, fn reflect.Value, i
 // control.
 func (fr *frame) run() {
 	interp := fr.pfn.Interp
+	if tracker := interp.execution; tracker != nil {
+		tracker.enter(fr)
+		// Run after user defers and recovery.
+		defer tracker.leave(fr)
+	}
 	if fr.pfn.Recover != nil {
 		defer func() {
 			if fr.ipc == -1 || fr._defer == nil {
@@ -1370,6 +1379,7 @@ func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{
 		msets:        make(map[reflect.Type](map[string]*ssa.Function)),
 		chexit:       make(chan int),
 		mainid:       GoroutineID(),
+		execution:    ctx.execution,
 	}
 
 	ctx.loadPkgMu.Lock()

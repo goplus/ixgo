@@ -50,6 +50,7 @@ type Repl struct {
 	interp     *Interp                   // last interp
 	fsInit     *fnState                  // func init
 	fsMain     *fnState                  // func main
+	debug      bool                      // debug metadata mode of saved frames
 	globalMap  map[string]interface{}    // keep repl global map
 	importPkgs map[string]*types.Package // checked imports
 	fileName   string                    // file.go or file.gop
@@ -92,6 +93,8 @@ func toResultEval(interp *Interp, vs []interface{}, rs *types.Tuple) (eval []*Ev
 	return
 }
 
+// NewRepl creates a REPL. Call SetDebug or SetExecutionTracker before the first
+// Eval to enable debugging; saved frames require a stable metadata layout.
 func NewRepl(ctx *Context) *Repl {
 	r := &Repl{
 		ctx:        ctx,
@@ -106,8 +109,11 @@ func NewRepl(ctx *Context) *Repl {
 	// reset runtime.GC to default
 	ctx.RegisterExternal("runtime.GC", runtime.GC)
 	ctx.evalCallFn = func(interp *Interp, call *ssa.Call, res ...interface{}) {
-		if len(*call.Referrers()) != 0 {
-			return
+		for _, ref := range *call.Referrers() {
+			// Debug metadata does not consume a result in the user's code.
+			if _, debug := ref.(*ssa.DebugRef); !debug {
+				return
+			}
 		}
 		v := call.Call.Value
 		if un, ok := v.(*ssa.UnOp); ok {
@@ -130,6 +136,9 @@ func (r *Repl) SetFileName(filename string) {
 
 func (r *Repl) Eval(expr string) (tok token.Token, dump []*Eval, err error) {
 	r.lastEval = nil
+	if r.interp != nil && r.debug != (r.ctx.BuilderMode&ssa.GlobalDebug != 0) {
+		return token.ILLEGAL, nil, fmt.Errorf("cannot change REPL debug metadata after evaluation; enable debugging before the first Eval")
+	}
 	tok = r.firstToken(expr)
 	err = r.eval(tok, expr)
 	return tok, r.lastEval, err
@@ -165,6 +174,7 @@ func main() {
 }
 
 func (r *Repl) eval(tok token.Token, expr string) (err error) {
+	debug := r.ctx.BuilderMode&ssa.GlobalDebug != 0
 	var src string
 	var inMain bool
 	var evalConst bool
@@ -329,6 +339,7 @@ func (r *Repl) eval(tok token.Token, expr string) (err error) {
 		return nil
 	}
 	r.interp = i
+	r.debug = debug
 	r.fsInit = rinit
 	r.fsMain = rmain
 	for k, v := range i.globals {
@@ -439,8 +450,20 @@ func (r *Repl) runFuncEx(i *Interp, pkg *ssa.Package, fnname string, fs *fnState
 	pfn := i.funcs[fn]
 	fr := pfn.allocFrame(&frame{})
 	if fs != nil {
-		copy(fr.stack, fs.fr.stack)
+		// init/main have no call slots; skip their leading tracking state.
+		dst, src := fr.stack, fs.fr.stack
+		if i.execution != nil {
+			dst = dst[int(fr.pfn.executionReg())+1:]
+		}
+		if fs.fr.pfn.Interp.execution != nil {
+			src = src[int(fs.fr.pfn.executionReg())+1:]
+		}
+		copy(dst, src)
 		fr.ipc = int32(fs.pc)
+	}
+	if tracker := i.execution; tracker != nil {
+		tracker.enter(fr)
+		defer tracker.leave(fr)
 	}
 	var pc int
 	for fr.ipc != -1 {
