@@ -31,26 +31,18 @@ func RegisterMixedRunner(factory TypedRunnerFactory) {
 	mixedRunnerFactory = factory
 }
 
-type mixedMemoProbe struct{ enabled bool }
-
-func (p *mixedMemoProbe) InstallScalarMemo()                    { p.enabled = true }
-func (p *mixedMemoProbe) InstallReceiverMemo(*MemoReceiverPlan) { p.enabled = true }
-func (p *mixedMemoProbe) InstallAccumulatorMemo(int, bool)      { p.enabled = true }
-
-func mixedGraphUsesMemo(fn *ssa.Function, seen map[*ssa.Function]bool) bool {
-	if memoPlugin == nil || fn == nil || seen[fn] {
+func mixedGraphUsesMemo(interp *Interp, fn *ssa.Function, seen map[*ssa.Function]bool) bool {
+	if interp == nil || fn == nil || seen[fn] {
 		return false
 	}
 	seen[fn] = true
-	var probe mixedMemoProbe
-	memoPlugin(&probe, fn)
-	if probe.enabled {
+	if pfn := interp.funcs[fn]; pfn != nil && pfn.memoFlags != 0 {
 		return true
 	}
 	for _, block := range fn.Blocks {
 		for _, instr := range block.Instrs {
 			if call, ok := instr.(*ssa.Call); ok {
-				if callee := call.Common().StaticCallee(); callee != nil && mixedGraphUsesMemo(callee, seen) {
+				if callee := call.Common().StaticCallee(); callee != nil && mixedGraphUsesMemo(interp, callee, seen) {
 					return true
 				}
 			}

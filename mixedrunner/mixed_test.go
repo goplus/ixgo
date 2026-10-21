@@ -208,3 +208,118 @@ func closure(x int) int {return func(y int) int {return x+y}(2)}
 		}
 	}
 }
+
+func TestMixedNumericDifferential(t *testing.T) {
+	const source = `package main
+func i8(x, y int8) (int8, bool) { return x+y, x < y }
+func i16(x, y int16) int16 { return x &^ y }
+func i32(x, y int32) int32 { return x ^ y }
+func i64(x, y int64) int64 { return x / y }
+func u(x, y uint) uint { return x >> y }
+func u8(x, y uint8) uint8 { return x % y }
+func u16(x, y uint16) uint16 { return x | y }
+func u32(x, y uint32) uint32 { return x << y }
+func u64(x, y uint64) uint64 { return x - y }
+func up(x, y uintptr) uintptr { return x * y }
+func f32(x, y float32) float32 { return x / y }
+func f64(x, y float64) float64 { return x*y + y }
+func conversions(x int64) (uint8, float32, float64) { return uint8(x), float32(x), float64(x) }
+func constants() (uint64, int64, float64, bool) { return 0xffffffffffffffff, -1, 1.25, true }
+func cInt(x int) int { return x + 1 }
+func cInt8() int8 { return 7 }
+func cInt16() int16 { return 7 }
+func cInt32() int32 { return 7 }
+func cUint() uint { return 7 }
+func cUint8() uint8 { return 7 }
+func cUint16() uint16 { return 7 }
+func cUint32() uint32 { return 7 }
+func cFloat32() float32 { return 1.25 }
+func shifts(x int64, y uint8) (int64, uint64) { return x >> y, uint64(x) << y }
+func bools(x, y bool) (bool, bool, bool) { return !x, x == y, x != y }
+func neg(x int32) (int32, int32) { return -x, ^x }
+func multi(x int, y float64) (int, float64) { return x+1, y/2 }
+func unsupported(x int) int { return []int{x}[0] }
+`
+	ctx := ixgo.NewContext(0)
+	pkg, err := ctx.LoadFile("numeric.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	interp, err := ctx.LoadInterp("numeric.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer interp.UnsafeRelease()
+	tests := []struct {
+		name string
+		args []ixgo.Value
+	}{
+		{"i8", []ixgo.Value{int8(5), int8(7)}}, {"i16", []ixgo.Value{int16(0x55), int16(0x0f)}},
+		{"i32", []ixgo.Value{int32(0x55), int32(0x0f)}}, {"i64", []ixgo.Value{int64(-17), int64(3)}},
+		{"u", []ixgo.Value{uint(0x80), uint(3)}}, {"u8", []ixgo.Value{uint8(17), uint8(5)}},
+		{"u16", []ixgo.Value{uint16(0x55), uint16(0x0f)}}, {"u32", []ixgo.Value{uint32(3), uint32(4)}},
+		{"u64", []ixgo.Value{uint64(9), uint64(4)}}, {"up", []ixgo.Value{uintptr(3), uintptr(4)}},
+		{"f32", []ixgo.Value{float32(7.5), float32(2)}}, {"f64", []ixgo.Value{2.5, 4.0}},
+		{"conversions", []ixgo.Value{int64(-17)}}, {"constants", nil}, {"cInt", []ixgo.Value{6}}, {"cInt8", nil}, {"cInt16", nil}, {"cInt32", nil}, {"cUint", nil}, {"cUint8", nil}, {"cUint16", nil}, {"cUint32", nil}, {"cFloat32", nil},
+		{"shifts", []ixgo.Value{int64(-16), uint8(2)}}, {"bools", []ixgo.Value{true, false}},
+		{"neg", []ixgo.Value{int32(0x55)}}, {"multi", []ixgo.Value{3, 2.5}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			fn := pkg.Func(tc.name)
+			r, ok := MakeRunner(fn).(ixgo.TypedArgumentsRunner)
+			if !ok {
+				t.Fatalf("no mixed runner for %s", tc.name)
+			}
+			want, err := interp.RunFunc(tc.name, tc.args...)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := r.RunArgs(tc.args); !reflect.DeepEqual(got, want) {
+				t.Fatalf("got %#v want %#v", got, want)
+			}
+		})
+	}
+	if MakeRunner(pkg.Func("unsupported")) != nil {
+		t.Fatal("unsupported function selected")
+	}
+	if got := MakeRunner(pkg.Func("cInt")).Run(6); got != 7 {
+		t.Fatalf("Run: %v", got)
+	}
+}
+
+func TestMixedFallbackAndInvalidInputs(t *testing.T) {
+	const source = `package main
+func named(x MyInt) MyInt { return x }
+type MyInt int
+func badcall(x int) int { return len([]int{x}) }
+func badresult(x int) []int { return []int{x} }
+func zero() {}
+func div(x, y int) int { return x/y }
+`
+	ctx := ixgo.NewContext(0)
+	pkg, err := ctx.LoadFile("fallback.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"named", "badcall", "badresult"} {
+		if MakeRunner(pkg.Func(name)) != nil {
+			t.Fatalf("%s unexpectedly selected", name)
+		}
+	}
+	zero := MakeRunner(pkg.Func("zero")).(ixgo.TypedArgumentsRunner)
+	if got := zero.RunArgs(nil); got != nil {
+		t.Fatalf("zero: %#v", got)
+	}
+	r := MakeRunner(pkg.Func("div")).(ixgo.TypedArgumentsRunner)
+	for _, args := range [][]ixgo.Value{{}, {int8(1), int(1)}, {1}} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("invalid args %v did not panic", args)
+				}
+			}()
+			r.RunArgs(args)
+		}()
+	}
+}

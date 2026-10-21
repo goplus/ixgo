@@ -467,7 +467,7 @@ func (visit *visitor) function(fn *ssa.Function) {
 		visit.intp.ctx.Mode&EnableTracing == 0 && visit.intp.ctx.BuilderMode&ssa.GlobalDebug == 0 &&
 		visit.intp.ctx.evalCallFn == nil && visit.intp.ctx.debugFunc == nil {
 		applyMemoPlugin(pfn, fn)
-		if pfn.memoFlags == 0 && mixedRunnerFactory != nil && !mixedGraphUsesMemo(fn, make(map[*ssa.Function]bool)) {
+		if pfn.memoFlags == 0 && mixedRunnerFactory != nil && !mixedGraphUsesMemo(visit.intp, fn, make(map[*ssa.Function]bool)) {
 			pfn.mixedRunner = mixedRunnerFactory(fn)
 		}
 	}
