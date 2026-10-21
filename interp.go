@@ -123,12 +123,11 @@ func (i *Interp) loadFunction(fn *ssa.Function) *function {
 		return pfn
 	}
 	pfn := &function{
-		Interp:     i,
-		Fn:         fn,
-		index:      make(map[ssa.Value]uint32),
-		instrIndex: make(map[ssa.Instruction][]uint32),
-		narg:       len(fn.Params),
-		nenv:       len(fn.FreeVars),
+		Interp: i,
+		Fn:     fn,
+		index:  make(map[ssa.Value]uint32),
+		narg:   len(fn.Params),
+		nenv:   len(fn.FreeVars),
 	}
 	if len(fn.Blocks) > 0 {
 		pfn.Main = fn.Blocks[0]
@@ -334,92 +333,93 @@ func (pfn *function) gcRegsAt(pc int) []register {
 		return nil
 	}
 	dead := make(map[int]bool)
-	checkRegs := func(regs ...uint32) {
-		for _, v := range regs {
-			vk, rk := kind(v>>30), reflect.Kind(v>>24&0x3f)
-			if !vk.isStatic() && isGCRegisterKind(rk) {
-				dead[int(v&0xffffff)] = true
-			}
+	for _, reg := range pfn.index {
+		vk, rk := kind(reg>>30), reflect.Kind(reg>>24&0x3f)
+		if !vk.isStatic() && isGCRegisterKind(rk) {
+			dead[int(reg&0xffffff)] = true
 		}
 	}
-	// visit.function registers all parameters and free variables before the body.
-	for _, param := range pfn.Fn.Params {
-		checkRegs(pfn.index[param])
-	}
-	for _, free := range pfn.Fn.FreeVars {
-		checkRegs(pfn.index[free])
-	}
-	var remain int
-	for i, instr := range block.Instrs {
-		checkRegs(pfn.instrIndex[instr]...)
-		if cur == instr {
-			remain = i
-			break
+	var liveIn map[*ssa.BasicBlock]map[ssa.Value]bool
+	add := func(dst, src map[ssa.Value]bool) {
+		for v := range src {
+			dst[v] = true
 		}
 	}
-
-	seen := make(map[*ssa.BasicBlock]bool)
-	var checkChild func(block *ssa.BasicBlock)
-	checkChild = func(block *ssa.BasicBlock) {
-		for _, child := range block.Dominees() {
-			if seen[child] {
-				continue
-			}
-			seen[child] = true
-			checkChild(child)
-		}
-	}
-	checkChild(block)
-
-	for parent := block; parent != nil; {
-		idom := parent.Idom()
-		if idom == nil {
-			break
-		}
-		var find bool
-		switch idom.Comment {
-		case "for.loop":
-			find = true
-		case "rangeindex.loop":
-			find = true
-		case "rangechan.loop":
-		case "rangeiter.loop":
-		}
-		for _, v := range idom.Succs {
-			if find {
-				seen[v] = true
-				checkChild(v)
-			}
-			if parent == v {
-				find = true
-			}
-		}
-		for _, instr := range idom.Instrs {
-			checkRegs(pfn.instrIndex[instr]...)
-		}
-		parent = idom
-	}
-	if block.Comment == "for.done" {
-		delete(seen, block)
-	}
-	var ops []*ssa.Value
-	for _, instr := range block.Instrs[remain+1:] {
-		for _, op := range instr.Operands(ops[:0]) {
-			if *op == nil {
-				continue
-			}
-			dead[int(pfn.regIndex(*op))] = false
-		}
-	}
-	for liveBlock := range seen {
-		var ops []*ssa.Value
-		for _, instr := range liveBlock.Instrs {
-			for _, op := range instr.Operands(ops[:0]) {
-				if *op == nil {
+	liveOut := func(b *ssa.BasicBlock) map[ssa.Value]bool {
+		live := make(map[ssa.Value]bool)
+		for _, succ := range b.Succs {
+			add(live, liveIn[succ])
+			for i, pred := range succ.Preds {
+				if pred != b {
 					continue
 				}
-				dead[int(pfn.regIndex(*op))] = false
+				for _, instr := range succ.Instrs {
+					phi, ok := instr.(*ssa.Phi)
+					if !ok {
+						break
+					}
+					live[phi.Edges[i]] = true
+				}
 			}
+		}
+		return live
+	}
+	var ops []*ssa.Value
+	transfer := func(live map[ssa.Value]bool, instr ssa.Instruction) {
+		if v, ok := instr.(ssa.Value); ok {
+			delete(live, v)
+		}
+		if _, ok := instr.(*ssa.Phi); !ok {
+			ops = instr.Operands(ops[:0])
+			for _, op := range ops {
+				if *op != nil {
+					live[*op] = true
+				}
+			}
+		}
+		// Recovered panics resume in an otherwise disconnected SSA block.
+		// Its implicit named-result loads must survive every possible panic.
+		if pfn.Recover != nil && instr.Block() != pfn.Fn.Recover {
+			add(live, liveIn[pfn.Fn.Recover])
+		}
+	}
+	pfn.gcLiveOnce.Do(func() {
+		// Phi inputs are uses on predecessor edges, not in the successor block.
+		liveIn = make(map[*ssa.BasicBlock]map[ssa.Value]bool)
+		for _, b := range pfn.Fn.Blocks {
+			liveIn[b] = make(map[ssa.Value]bool)
+		}
+		for changed := true; changed; {
+			changed = false
+			for i := len(pfn.Fn.Blocks) - 1; i >= 0; i-- {
+				b := pfn.Fn.Blocks[i]
+				live := liveOut(b)
+				for j := len(b.Instrs) - 1; j >= 0; j-- {
+					transfer(live, b.Instrs[j])
+				}
+				for v := range live {
+					if !liveIn[b][v] {
+						liveIn[b][v] = true
+						changed = true
+					}
+				}
+			}
+		}
+		pfn.initClosureCaptures()
+		pfn.gcLiveIn = liveIn
+	})
+	// Published maps are immutable; each query owns its live set and operand scratch.
+	liveIn = pfn.gcLiveIn
+	live := liveOut(block)
+	for j := len(block.Instrs) - 1; j >= 0 && block.Instrs[j] != cur; j-- {
+		transfer(live, block.Instrs[j])
+	}
+	if pfn.Recover != nil && block != pfn.Fn.Recover {
+		add(live, liveIn[pfn.Fn.Recover])
+	}
+	for v := range live {
+		if reg, ok := pfn.index[v]; ok {
+			dead[int(reg&0xffffff)] = false
 		}
 	}
 	// Captured registers are not operands of later closure calls.

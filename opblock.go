@@ -105,29 +105,29 @@ type closure struct {
 
 type function struct {
 	Interp          *Interp
-	Fn              *ssa.Function                // ssa function
-	Main            *ssa.BasicBlock              // Fn.Blocks[0]
-	pool            *sync.Pool                   // create frame pool
-	makeInstr       ssa.Instruction              // make instr check
-	index           map[ssa.Value]uint32         // non-nil value -> kind(2), reflect.Kind(6), index(24)
-	instrIndex      map[ssa.Instruction][]uint32 // instr -> index
-	cacheRegs       []register                   // cache registers invalidated before runtime.GC
-	gcRegs          [][]register                 // registers cleared at each runtime.GC call site
-	gcReady         []atomic.Bool                // gcRegs entries already computed
-	gcMu            sync.Mutex                   // protects lazy liveness computation
-	closureCaptures []closureCapture             // MakeClosure list, built once for GC liveness
-	closureByResult map[int]int                  // result register -> index in closureCaptures
-	Instrs          []func(fr *frame)            // main instrs
-	Recover         []func(fr *frame)            // recover instrs
-	Blocks          []int                        // block offset
-	stack           []value                      // results args envs datas
-	ssaInstrs       []ssa.Instruction            // org ssa instr
-	base            int                          // base of interp
-	nres            int                          // results count
-	narg            int                          // arguments count
-	nenv            int                          // closure free vars count
-	used            int32                        // function used count
-	cached          int32                        // enable cached by pool
+	Fn              *ssa.Function                          // ssa function
+	Main            *ssa.BasicBlock                        // Fn.Blocks[0]
+	pool            *sync.Pool                             // create frame pool
+	index           map[ssa.Value]uint32                   // non-nil value -> kind(2), reflect.Kind(6), index(24)
+	cacheRegs       []register                             // cache registers invalidated before runtime.GC
+	gcRegs          [][]register                           // registers cleared at each runtime.GC call site
+	gcReady         []atomic.Bool                          // gcRegs entries already computed
+	gcMu            sync.Mutex                             // protects lazy liveness computation
+	gcLiveOnce      sync.Once                              // computes block liveness on first GC query
+	gcLiveIn        map[*ssa.BasicBlock]map[ssa.Value]bool // immutable block live-in sets
+	closureCaptures []closureCapture                       // MakeClosure list, built once for GC liveness
+	closureByResult map[int]int                            // result register -> index in closureCaptures
+	Instrs          []func(fr *frame)                      // main instrs
+	Recover         []func(fr *frame)                      // recover instrs
+	Blocks          []int                                  // block offset
+	stack           []value                                // results args envs datas
+	ssaInstrs       []ssa.Instruction                      // org ssa instr
+	base            int                                    // base of interp
+	nres            int                                    // results count
+	narg            int                                    // arguments count
+	nenv            int                                    // closure free vars count
+	used            int32                                  // function used count
+	cached          int32                                  // enable cached by pool
 
 	clearRanges []stackRange // slots cleared before pooling
 	localRefs   []register   // non-escaping locals holding references
@@ -164,7 +164,7 @@ func (p *function) UnsafeRelease() {
 	p.Fn = nil
 	p.pool = nil
 	p.index = nil
-	p.instrIndex = nil
+	p.gcLiveIn = nil
 	p.cacheRegs = nil
 	p.gcRegs = nil
 	p.gcReady = nil
@@ -477,9 +477,6 @@ func (p *function) regInstr(v ssa.Value) uint32 {
 	i := uint32(len(p.stack) | int(vk<<30) | int(kind<<24))
 	p.stack = append(p.stack, vs)
 	p.index[v] = i
-	if p.makeInstr != nil {
-		p.instrIndex[p.makeInstr] = append(p.instrIndex[p.makeInstr], i)
-	}
 	return i
 }
 
@@ -1024,6 +1021,9 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 					Send: send,
 				})
 			}
+			if interp.gcEnabled {
+				fr.gcFrames()
+			}
 			chosen, recv, recvOk := reflect.Select(cases)
 			if !instr.Blocking {
 				chosen-- // default case should have index -1.
@@ -1260,6 +1260,9 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 			c := fr.reg(ic)
 			x := fr.reg(ix)
 			ch := reflect.ValueOf(c)
+			if interp.gcEnabled {
+				fr.gcFrames()
+			}
 			if x == nil {
 				ch.Send(reflect.New(ch.Type().Elem()).Elem())
 			} else {

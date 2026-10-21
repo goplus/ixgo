@@ -1803,3 +1803,69 @@ func TestInterpreterReceiverSaturatedTransforms(t *testing.T) {
 	}
 	receiverDifferential(t, baseline, i, "run", 13)
 }
+
+func TestGCGlobalChannelReceive(t *testing.T) {
+	for _, commaOK := range []bool{false, true} {
+		for _, closed := range []bool{false, true} {
+			i, err := NewContext(ExperimentalSupportGC).LoadInterp("receive.go", `package main
+func receive(ch chan int) int { x, _ := <-ch; return x }
+`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pfn := i.funcs[i.mainpkg.Func("receive")]
+			var recv *ssa.UnOp
+			var pc int
+			for j, instr := range pfn.ssaInstrs {
+				if op, ok := instr.(*ssa.UnOp); ok {
+					recv, pc = op, j
+					break
+				}
+			}
+			if recv == nil {
+				t.Fatal("missing receive")
+			}
+			ch := make(chan int, 1)
+			want := 0
+			if closed {
+				close(ch)
+			} else {
+				ch <- 42
+				want = 42
+			}
+			// Native channels can be embedded directly in the static register table.
+			reg := pfn.regIndex(recv.X)
+			pfn.index[recv.X] = uint32(kindGlobal)<<30 | uint32(reflect.Chan)<<24 | uint32(reg)
+			pfn.stack[reg] = ch
+			recv.CommaOk = commaOK
+			fr := &frame{pfn: pfn, block: recv.Block(), ipc: int32(pc + 1), stack: append([]value(nil), pfn.stack...)}
+			makeUnOpARROW(pfn, recv)(fr)
+			got := fr.reg(pfn.regIndex(recv))
+			if commaOK {
+				v := got.(tuple)
+				if v[0] != want || v[1] != !closed {
+					t.Fatalf("receive: %v", v)
+				}
+			} else if got != want {
+				t.Fatalf("receive: %v, want %d", got, want)
+			}
+			i.UnsafeRelease()
+		}
+	}
+}
+
+func TestGCFramesSkipsOnlyEmptyRoots(t *testing.T) {
+	cached := new(int)
+	pfn := &function{cacheRegs: []register{0}}
+	fr := &frame{pfn: pfn, block: &ssa.BasicBlock{}, stack: []value{cached}, phiVals: []value{cached}}
+	fr.gcFrames()
+	if fr.stack[0] != nil || fr.phiVals[0] != nil {
+		t.Fatal("frame without SSA roots retained hidden references")
+	}
+	child := &frame{pfn: &function{}, block: &ssa.BasicBlock{}, caller: fr}
+	fr.stack[0], fr.phiVals[0] = cached, cached
+	child.gcFrames()
+	if fr.stack[0] != nil || fr.phiVals[0] != nil {
+		t.Fatal("empty child frame skipped cleanup of its caller")
+	}
+}
