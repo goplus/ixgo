@@ -25,7 +25,7 @@ jobs:
       run: go test -race -v -coverprofile="coverage.txt" -covermode=atomic .
 
     - name: Test mixedrunner
-      run: go test -race -coverpkg=.,./mixedrunner -coverprofile="coverage.mixedrunner.txt" -covermode=atomic ./mixedrunner ./mixedrunner/integration
+      run: go test -race "-coverpkg=.,./mixedrunner" -coverprofile="coverage.mixedrunner.txt" -covermode=atomic ./mixedrunner ./mixedrunner/integration
 
     - name: Test xgobuild
       run: go test -race -v -coverprofile="coverage.xgobuild.txt" -covermode=atomic ./xgobuild
