@@ -471,6 +471,9 @@ func (visit *visitor) function(fn *ssa.Function) {
 		}
 		if visit.intp.ctx.Mode&DisableMixedRunner == 0 && pfn.memoFlags == 0 && mixedRunnerFactory != nil && !mixedGraphUsesMemo(visit.intp, fn, make(map[*ssa.Function]bool)) {
 			pfn.mixedRunner = mixedRunnerFactory(fn)
+			if binder, ok := pfn.mixedRunner.(TypedRunnerTypeBinder); ok && !binder.BindTypes(visit.intp.toType) {
+				pfn.mixedRunner = nil
+			}
 		}
 	}
 	pfn.base = visit.base

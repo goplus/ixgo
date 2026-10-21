@@ -5,7 +5,11 @@
 
 package ixgo
 
-import "golang.org/x/tools/go/ssa"
+import (
+	"go/types"
+	"golang.org/x/tools/go/ssa"
+	"reflect"
+)
 
 // TypedRunner executes a statically compiled function without interpreter frames.
 type TypedRunner interface {
@@ -68,4 +72,10 @@ func (pfn *function) runMixed(args []value, env []value) (value, bool) {
 		return runner.RunArgs(args), true
 	}
 	return pfn.mixedRunner.Run(args[0]), true
+}
+
+// TypedRunnerTypeBinder binds interpreter runtime types before installation.
+// Returning false rejects the runner. Binding must finish before execution.
+type TypedRunnerTypeBinder interface {
+	BindTypes(func(types.Type) reflect.Type) bool
 }

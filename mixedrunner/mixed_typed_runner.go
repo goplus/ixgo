@@ -14,6 +14,7 @@ import (
 	"strconv"
 
 	"github.com/goplus/ixgo"
+	"github.com/goplus/reflectx"
 	"golang.org/x/tools/go/ssa"
 )
 
@@ -93,6 +94,9 @@ const (
 	mixedNotEqual
 	mixedNegate
 	mixedNot
+	mixedFieldAddr
+	mixedLoad
+	mixedStore
 )
 
 // Every register carries raw bits; the instruction supplies its numeric kind.
@@ -101,12 +105,16 @@ type mixedOp struct {
 	scalar, other types.BasicKind
 	callee        *mixedTypedRunner
 	args          []uint8
+	field         int
 }
 
 type mixedTypedRunner struct {
 	code            []mixedOp
 	constants       []uint64
 	params, results []types.BasicKind
+	paramTypes      []types.Type
+	runtimeTypes    []reflect.Type
+	graph           map[*ssa.Function]*mixedTypedRunner
 }
 
 func mixedKind(t types.Type) (types.BasicKind, bool) {
@@ -131,6 +139,7 @@ func mixedBoundaryKind(t types.Type) (types.BasicKind, bool) {
 func MakeRunner(fn *ssa.Function) ixgo.TypedRunner {
 	c := mixedCompiler{compiled: make(map[*ssa.Function]*mixedTypedRunner)}
 	if r := c.build(fn); r != nil {
+		r.graph = c.compiled
 		return r
 	}
 	return nil
@@ -153,7 +162,16 @@ func (c *mixedCompiler) build(fn *ssa.Function) *mixedTypedRunner {
 		if _, ok := regs[v]; ok {
 			return true
 		}
-		if _, ok := mixedKind(v.Type()); !ok || len(r.constants) >= mixedArgsLimit {
+		_, numeric := mixedKind(v.Type())
+		pointer := false
+		switch v := v.(type) {
+		case *ssa.Parameter:
+			pointer = mixedReceiver(v.Type())
+		case *ssa.FieldAddr:
+			_, pointer = v.X.(*ssa.Parameter)
+			pointer = pointer && mixedReceiver(v.X.Type())
+		}
+		if (!numeric && !pointer) || len(r.constants) >= mixedArgsLimit {
 			return false
 		}
 		regs[v] = uint8(len(r.constants))
@@ -162,10 +180,14 @@ func (c *mixedCompiler) build(fn *ssa.Function) *mixedTypedRunner {
 	}
 	for _, p := range fn.Params {
 		k, ok := mixedBoundaryKind(p.Type())
+		if !ok && mixedReceiver(p.Type()) {
+			k, ok = types.Invalid, true
+		}
 		if !ok || !alloc(p) {
 			return nil
 		}
 		r.params = append(r.params, k)
+		r.paramTypes = append(r.paramTypes, p.Type())
 	}
 	for i := 0; i < fn.Signature.Results().Len(); i++ {
 		k, ok := mixedBoundaryKind(fn.Signature.Results().At(i).Type())
@@ -238,6 +260,17 @@ func (c *mixedCompiler) build(fn *ssa.Function) *mixedTypedRunner {
 			switch in := ins.(type) {
 			case *ssa.Phi:
 				continue
+			case *ssa.FieldAddr:
+				op = mixedOp{mixedBaseOp: mixedBaseOp[uint64]{kind: mixedFieldAddr, dst: regs[in], x: regs[in.X]}, field: in.Field}
+			case *ssa.Store:
+				if _, ok := in.Addr.(*ssa.FieldAddr); !ok {
+					return nil
+				}
+				k, ok := mixedKind(in.Val.Type())
+				if !ok {
+					return nil
+				}
+				op = mixedOp{mixedBaseOp: mixedBaseOp[uint64]{kind: mixedStore, x: regs[in.Addr], y: regs[in.Val]}, scalar: k}
 			case *ssa.Call:
 				callee, ok := in.Call.Value.(*ssa.Function)
 				if !ok || in.Call.IsInvoke() {
@@ -314,6 +347,17 @@ func (c *mixedCompiler) build(fn *ssa.Function) *mixedTypedRunner {
 					}
 				}
 			case *ssa.UnOp:
+				if in.Op == token.MUL {
+					if _, ok := in.X.(*ssa.FieldAddr); !ok {
+						return nil
+					}
+					k, ok := mixedKind(in.Type())
+					if !ok {
+						return nil
+					}
+					op = mixedOp{mixedBaseOp: mixedBaseOp[uint64]{kind: mixedLoad, dst: regs[in], x: regs[in.X]}, scalar: k}
+					break
+				}
 				k, ok := mixedKind(in.X.Type())
 				if !ok {
 					return nil
@@ -531,13 +575,30 @@ func (r *mixedTypedRunner) RunArgs(args []ixgo.Value) ixgo.Value {
 	frames[0].runner = r
 	copy(regs[:], r.constants)
 	for i, k := range r.params {
-		regs[i] = mixedUnbox(args[i], k)
+		if k == types.Invalid {
+			if len(r.runtimeTypes) != len(r.params) || reflect.TypeOf(args[i]) != r.runtimeTypes[i] {
+				panic("ixgo: invalid mixed receiver type")
+			}
+			frames[0].refs[i] = reflect.ValueOf(args[i])
+		} else {
+			regs[i] = mixedUnbox(args[i], k)
+		}
 	}
 	// Frame registers stay in place across calls and returns.
 	code, pc := r.code, 0
 	for {
 		op := &code[pc]
 		switch op.kind {
+		case mixedFieldAddr:
+			receiver := frames[depth].refs[op.x]
+			if receiver.IsNil() {
+				mixedNilPanic()
+			}
+			frames[depth].refs[op.dst] = reflectx.FieldX(receiver.Elem(), op.field)
+		case mixedLoad:
+			regs[op.dst] = mixedReadField(frames[depth].refs[op.x], op.scalar)
+		case mixedStore:
+			mixedWriteField(frames[depth].refs[op.x], regs[op.y], op.scalar)
 		case mixedAdd:
 			regs[op.dst] = regs[op.x] + regs[op.y]
 		case mixedSub:
@@ -603,6 +664,7 @@ func (r *mixedTypedRunner) RunArgs(args []ixgo.Value) ixgo.Value {
 			}
 			for i, src := range op.args {
 				regs[i] = caller.regs[src]
+				next.refs[i] = caller.refs[src]
 			}
 			code, pc = op.callee.code, 0
 			continue
@@ -625,6 +687,7 @@ func (r *mixedTypedRunner) RunArgs(args []ixgo.Value) ixgo.Value {
 			for i, src := range op.results {
 				caller.regs[destinations[i]] = regs[src]
 			}
+			clear(frames[depth].refs[:])
 			code, pc, regs = caller.code, caller.pc+1, &caller.regs
 			depth--
 			continue
@@ -641,6 +704,7 @@ type mixedFrame struct {
 	code   []mixedOp
 	pc     int
 	regs   [mixedArgsLimit]uint64
+	refs   [mixedArgsLimit]reflect.Value
 }
 
 func mixedBool(b bool) uint64 {
@@ -992,4 +1056,69 @@ func mixedConstantValue[T mixedScalar](v constant.Value) (T, bool) {
 		return z, false
 	}
 	return T(n), true
+}
+
+// Only direct numeric fields of pointer parameters may be addressed.
+func mixedReceiver(t types.Type) bool {
+	p, ok := types.Unalias(t).(*types.Pointer)
+	if !ok {
+		return false
+	}
+	st, ok := p.Elem().Underlying().(*types.Struct)
+	if !ok {
+		return false
+	}
+	for i := 0; i < st.NumFields(); i++ {
+		k, ok := mixedKind(st.Field(i).Type())
+		if !ok || k == types.Bool {
+			return false
+		}
+	}
+	return true
+}
+
+// BindTypes binds exact receiver identities, including interpreted named types.
+func (r *mixedTypedRunner) BindTypes(resolve func(types.Type) reflect.Type) bool {
+	for _, node := range r.graph {
+		node.runtimeTypes = make([]reflect.Type, len(node.params))
+		for i, k := range node.params {
+			if k == types.Invalid {
+				node.runtimeTypes[i] = resolve(node.paramTypes[i])
+				if node.runtimeTypes[i] == nil {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+func mixedNilPanic() { var p *int; _ = *p }
+
+func mixedReadField(v reflect.Value, k types.BasicKind) uint64 {
+	switch k {
+	case types.Float32:
+		return uint64(math.Float32bits(float32(v.Float())))
+	case types.Float64:
+		return math.Float64bits(v.Float())
+	}
+	if k >= types.Uint && k <= types.Uintptr {
+		return v.Uint()
+	}
+	return uint64(v.Int())
+}
+
+func mixedWriteField(v reflect.Value, bits uint64, k types.BasicKind) {
+	switch k {
+	case types.Float32:
+		v.SetFloat(float64(math.Float32frombits(uint32(bits))))
+	case types.Float64:
+		v.SetFloat(math.Float64frombits(bits))
+	default:
+		if k >= types.Uint && k <= types.Uintptr {
+			v.SetUint(bits)
+		} else {
+			v.SetInt(int64(bits))
+		}
+	}
 }

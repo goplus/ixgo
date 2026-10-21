@@ -38,6 +38,7 @@ import (
 	"github.com/goplus/ixgo/testdata/info"
 	"github.com/goplus/ixgo/testdata/pkg"
 
+	_ "github.com/goplus/ixgo/memo"
 	_ "github.com/goplus/ixgo/pkg/bytes"
 	_ "github.com/goplus/ixgo/pkg/errors"
 	_ "github.com/goplus/ixgo/pkg/fmt"
