@@ -25,6 +25,10 @@ type mixedScalar interface {
 const mixedArgsLimit = 64
 const mixedMaxResults = 8
 
+// Register indices and result counts must fit in uint8.
+const _ uint8 = mixedArgsLimit - 1
+const _ uint8 = mixedMaxResults
+
 type mixedOpKind uint8
 
 const (
@@ -514,6 +518,8 @@ func specializeMixedOp(op *mixedOp) {
 
 func (r *mixedTypedRunner) Run(input ixgo.Value) ixgo.Value { return r.RunArgs([]ixgo.Value{input}) }
 
+// RunArgs requires the exact parameter count and exact built-in dynamic types.
+// Named types and convertible values are not accepted.
 func (r *mixedTypedRunner) RunArgs(args []ixgo.Value) ixgo.Value {
 	if len(args) != len(r.params) {
 		panic("ixgo: invalid mixed runner argument count")
@@ -947,9 +953,10 @@ func mixedNumeric[T mixedScalar](op *mixedOp, x, y T, shift uint64) uint64 {
 	panic("ixgo: invalid mixed numeric opcode")
 }
 
+var mixedBinaryOps = map[token.Token]mixedOpKind{token.ADD: mixedBaseAdd, token.SUB: mixedBaseSub, token.MUL: mixedBaseMul, token.QUO: mixedBaseQuo, token.REM: mixedBaseRem, token.AND: mixedBaseAnd, token.OR: mixedBaseOr, token.XOR: mixedBaseXor, token.AND_NOT: mixedBaseAndNot, token.SHL: mixedBaseShl, token.SHR: mixedBaseShr, token.LSS: mixedBaseLess, token.LEQ: mixedBaseLessEqual, token.GTR: mixedBaseGreater, token.GEQ: mixedBaseGreaterEqual, token.EQL: mixedBaseEqual, token.NEQ: mixedBaseNotEqual}
+
 func mixedBinaryOpKind(op token.Token) (mixedOpKind, bool) {
-	m := map[token.Token]mixedOpKind{token.ADD: mixedBaseAdd, token.SUB: mixedBaseSub, token.MUL: mixedBaseMul, token.QUO: mixedBaseQuo, token.REM: mixedBaseRem, token.AND: mixedBaseAnd, token.OR: mixedBaseOr, token.XOR: mixedBaseXor, token.AND_NOT: mixedBaseAndNot, token.SHL: mixedBaseShl, token.SHR: mixedBaseShr, token.LSS: mixedBaseLess, token.LEQ: mixedBaseLessEqual, token.GTR: mixedBaseGreater, token.GEQ: mixedBaseGreaterEqual, token.EQL: mixedBaseEqual, token.NEQ: mixedBaseNotEqual}
-	k, ok := m[op]
+	k, ok := mixedBinaryOps[op]
 	return k, ok
 }
 func mixedIsInteger(t types.Type) bool {
@@ -975,6 +982,10 @@ func mixedConstantValue[T mixedScalar](v constant.Value) (T, bool) {
 	}
 	if v.Kind() != constant.Int {
 		return z, false
+	}
+	if k >= reflect.Uint && k <= reflect.Uintptr {
+		n, ok := constant.Uint64Val(v)
+		return T(n), ok
 	}
 	n, ok := constant.Int64Val(v)
 	if !ok {

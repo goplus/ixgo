@@ -112,3 +112,99 @@ func floating(x float32,y float64) float64 {return float64(x)+y}
 		}
 	}
 }
+
+func TestMixedRuntimeParity(t *testing.T) {
+	const source = `package main
+func wide(x uint64) uint64 { return x ^ 0xffffffffffffffff }
+func pair(n int, x float64) (bool, float64) { return n>0, float64(n)+x }
+func empty() {}
+func recurse(n int) int { if n==0{return 0};return recurse(n-1)+1 }
+func even(n int) bool {if n==0{return true};return odd(n-1)}
+func odd(n int) bool {if n==0{return false};return even(n-1)}
+func div(x,y int) int {return x/y}
+func rem(x,y int) int {return x%y}
+func shift(x uint64,y int8) uint64 {return x<<y}
+func discard(x int) {div(1,x)}
+func recoverCall(x int) (ok bool) {defer func(){ok=recover()!=nil}();discard(x);return}
+func closure(x int) int {return func(y int) int {return x+y}(2)}
+`
+	pkg, err := ixgo.NewContext(0).LoadFile("parity.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		args []ixgo.Value
+		want ixgo.Value
+	}{
+		{"wide", []ixgo.Value{uint64(1)}, ^uint64(1)},
+		{"pair", []ixgo.Value{2, 0.5}, ixgo.Tuple{true, 2.5}},
+		{"empty", nil, nil},
+		{"recurse", []ixgo.Value{10000}, 10000},
+		{"even", []ixgo.Value{10001}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, ok := MakeRunner(pkg.Func(tc.name)).(ixgo.TypedArgumentsRunner)
+			if !ok {
+				t.Fatal("runner rejected")
+			}
+			if got := r.RunArgs(tc.args); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("got %v want %v", got, tc.want)
+			}
+		})
+	}
+	capture := func(f func()) (v interface{}) { defer func() { v = recover() }(); f(); return }
+	zero, negative := 0, int8(-1)
+	for _, tc := range []struct {
+		name   string
+		args   []ixgo.Value
+		native func()
+	}{
+		{"div", []ixgo.Value{1, 0}, func() { _ = 1 / zero }},
+		{"rem", []ixgo.Value{1, 0}, func() { _ = 1 % zero }},
+		{"shift", []ixgo.Value{uint64(1), negative}, func() { _ = uint64(1) << negative }},
+	} {
+		r := MakeRunner(pkg.Func(tc.name)).(ixgo.TypedArgumentsRunner)
+		got := capture(func() { r.RunArgs(tc.args) })
+		want := capture(tc.native)
+		if got == nil || !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s panic: %T %v; want %T %v", tc.name, got, got, want, want)
+		}
+		if _, ok := got.(runtime.Error); !ok {
+			t.Fatalf("%s: not runtime.Error", tc.name)
+		}
+	}
+	r := MakeRunner(pkg.Func("wide")).(ixgo.TypedArgumentsRunner)
+	type named uint64
+	for _, args := range [][]ixgo.Value{nil, {uint64(0), uint64(0)}, {int64(0)}, {named(0)}} {
+		if capture(func() { r.RunArgs(args) }) == nil {
+			t.Fatalf("accepted invalid args %v", args)
+		}
+	}
+	i, err := ixgo.NewContext(0).LoadInterp("parity.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	fn, ok := i.GetFunc("pair")
+	if !ok {
+		t.Fatal("missing pair")
+	}
+	b, x := fn.(func(int, float64) (bool, float64))(2, 0.5)
+	if !b || x != 2.5 {
+		t.Fatalf("reflect tuple: %v %v", b, x)
+	}
+	fn, ok = i.GetFunc("empty")
+	if !ok {
+		t.Fatal("missing empty")
+	}
+	fn.(func())()
+	for _, tc := range []struct {
+		name string
+		want ixgo.Value
+	}{{"recoverCall", true}, {"closure", 2}} {
+		if got, err := i.RunFunc(tc.name, 0); err != nil || got != tc.want {
+			t.Fatalf("%s: %v %v", tc.name, got, err)
+		}
+	}
+}

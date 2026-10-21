@@ -1453,30 +1453,22 @@ func makeCallSpecializerInstr(interp *Interp, ifn *function, ia, dests []registe
 			return nil
 		}
 	}
-	if ifn.mixedRunner != nil && len(ia) == ifn.narg {
-		if runner, ok := ifn.mixedRunner.(TypedArgumentsRunner); ok {
-			return func(fr *frame) {
-				args := make([]Value, len(ia))
-				for j, reg := range ia {
-					args[j] = fr.reg(reg)
-				}
-				result := runner.RunArgs(args)
-				switch len(dests) {
-				case 0:
-				case 1:
-					fr.setReg(dests[0], result)
-				default:
-					values := result.(tuple)
-					for j, dest := range dests {
-						fr.setReg(dest, values[j])
-					}
-				}
-			}
-		}
+	if ifn.canRunMixed(len(ia), nil) {
 		return func(fr *frame) {
-			result := ifn.mixedRunner.Run(fr.reg(ia[0]))
-			if len(dests) == 1 {
+			args := make([]Value, len(ia))
+			for j, reg := range ia {
+				args[j] = fr.reg(reg)
+			}
+			result, _ := ifn.runMixed(args, nil)
+			switch len(dests) {
+			case 0:
+			case 1:
 				fr.setReg(dests[0], result)
+			default:
+				values := result.(tuple)
+				for j, dest := range dests {
+					fr.setReg(dest, values[j])
+				}
 			}
 		}
 	}
