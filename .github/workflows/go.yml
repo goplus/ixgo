@@ -24,6 +24,9 @@ jobs:
     - name: Test ixgo
       run: go test -race -v -coverprofile="coverage.txt" -covermode=atomic .
 
+    - name: Test mixedrunner
+      run: go test -race -coverpkg=.,./mixedrunner -coverprofile="coverage.mixedrunner.txt" -covermode=atomic ./mixedrunner ./mixedrunner/integration
+
     - name: Test xgobuild
       run: go test -race -v -coverprofile="coverage.xgobuild.txt" -covermode=atomic ./xgobuild
 
@@ -34,7 +37,7 @@ jobs:
       uses: codecov/codecov-action@v7
       with:
         slug: goplus/ixgo
-        files: coverage.txt,coverage.xgobuild.txt,coverage.transform.txt
+        files: coverage.txt,coverage.mixedrunner.txt,coverage.xgobuild.txt,coverage.transform.txt
 
     - name: Install ixgo
       run: go install -v ./cmd/ixgo
