@@ -109,3 +109,26 @@ func answer(n int) int { return n + 1 }
 		}
 	}
 }
+
+func TestMixedReflectResults(t *testing.T) {
+	for _, tc := range []struct {
+		typ    reflect.Type
+		result value
+		want   []value
+	}{
+		{reflect.TypeOf(func(int) {}), nil, nil},
+		{reflect.TypeOf(func(int) *int { return nil }), nil, []value{(*int)(nil)}},
+		{reflect.TypeOf(func(int) (int, bool) { return 0, false }), tuple{7, true}, []value{7, true}},
+	} {
+		p := &function{narg: 1, nres: tc.typ.NumOut(), mixedRunner: testArgsRunner{tc.result}}
+		got := new(Interp).callFunctionByReflect(nil, p, tc.typ, []reflect.Value{reflect.ValueOf(2)}, nil)
+		if len(got) != len(tc.want) {
+			t.Fatalf("result count %d, want %d", len(got), len(tc.want))
+		}
+		for j, v := range got {
+			if v.Interface() != tc.want[j] {
+				t.Fatalf("result %d: %v, want %v", j, v.Interface(), tc.want[j])
+			}
+		}
+	}
+}
