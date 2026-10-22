@@ -463,7 +463,7 @@ func (visit *visitor) function(fn *ssa.Function) {
 			first(fr)
 		}
 	}
-	if entry == nil && leave == nil && visit.intp.execution == nil &&
+	if visit.intp.ctx.Mode&DisableMemo == 0 && entry == nil && leave == nil && visit.intp.execution == nil &&
 		visit.intp.ctx.Mode&EnableTracing == 0 && visit.intp.ctx.BuilderMode&ssa.GlobalDebug == 0 &&
 		visit.intp.ctx.evalCallFn == nil && visit.intp.ctx.debugFunc == nil {
 		applyMemoPlugin(pfn, fn)
