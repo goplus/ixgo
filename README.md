@@ -118,6 +118,27 @@ You can `export GOFLAGS='-tags=goplus.ifacefuncval'`, or prefix a command:
 
 See [goplus/reflectx cmd/iface_patch](https://github.com/goplus/reflectx/tree/main/cmd/iface_patch).
 
+### packages (optional)
+
+Optional optimization packages can be enabled with blank imports:
+
+| Package | Purpose |
+| --- | --- |
+| [directcall](directcall/README.md) | Speeds up calls to supported standard-library functions with direct-call adapters. Import `ixgo/pkg` or individual export packages separately as needed. |
+| [directfunc](directfunc/README.md) | Speeds up calls to interpreted closures and function values with supported signatures, including repeated calls inside loops. |
+| [memo](memo/README.md) | Caches results and supported state transformations for eligible recursive functions and receiver methods. Use `ixgo.DisableMemo` to disable installation for a Context. |
+
+```go
+import (
+	_ "github.com/goplus/ixgo/directcall"
+	_ "github.com/goplus/ixgo/directfunc"
+	_ "github.com/goplus/ixgo/memo"
+)
+```
+
+These packages work with the standard Go toolchain. See each package's documentation
+for supported paths and limitations.
+
 ### ixgo demo
 
 #### The XGo Playground (WebAssembly)
