@@ -935,8 +935,10 @@ func (i *Interp) callDiscardsResult(caller *frame, fn value, args []value, ssaAr
 
 // Callback entries restore context even when panic skips deleteFrame.
 func (i *Interp) callFunction(caller *frame, pfn *function, args []value, env []value) (result value) {
-	if result, ok := pfn.runMixedBorrowed(args, env); ok {
-		return result
+	if pfn.mixedRunner != nil {
+		if result, ok := pfn.runMixedBorrowed(args, env); ok {
+			return result
+		}
 	}
 	if caller.deferid != 0 {
 		defer i.trackDeferFrame(caller)
@@ -1015,8 +1017,10 @@ func (i *Interp) callFunctionByReflect(caller *frame, pfn *function, typ reflect
 }
 
 func (i *Interp) callFunctionDiscardsResult(caller *frame, pfn *function, args []value, env []value) {
-	if _, ok := pfn.runMixedBorrowed(args, env); ok {
-		return
+	if pfn.mixedRunner != nil {
+		if _, ok := pfn.runMixedBorrowed(args, env); ok {
+			return
+		}
 	}
 
 	if caller.deferid != 0 {
