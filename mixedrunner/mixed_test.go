@@ -323,3 +323,39 @@ func div(x, y int) int { return x/y }
 		}()
 	}
 }
+
+func BenchmarkMixedDivmod(b *testing.B) {
+	path := filepath.Join(runtime.GOROOT(), "test", "divmod.go")
+	source, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		b.Skip("Go distribution test sources unavailable")
+	}
+	if err != nil {
+		b.Fatal(err)
+	}
+	pkg, err := ixgo.NewContext(0).LoadFile(path, source)
+	if err != nil {
+		b.Fatal(err)
+	}
+	for _, name := range []string{"udiv", "idiv"} {
+		r := MakeRunner(pkg.Func(name)).(ixgo.TypedArgumentsRunner)
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				for _, x := range []uint64{17, 1<<32 + 1, 1<<63 - 1} {
+					for _, y := range []uint64{3, 1<<16 + 1, 1<<62 - 1} {
+						var args [2]ixgo.Value
+						if name == "udiv" {
+							args = [2]ixgo.Value{x, y}
+						} else {
+							args = [2]ixgo.Value{int64(x), -int64(y)}
+						}
+						if r.RunArgs(args[:]) == nil {
+							b.Fatal("missing result")
+						}
+					}
+				}
+			}
+		})
+	}
+}

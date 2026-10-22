@@ -65,12 +65,11 @@ const (
 	mixedBaseBoolNotEqual
 )
 
-type mixedBaseOp[T mixedScalar] struct {
-	kind                    mixedOpKind
-	dst, x, y               uint8
-	nres                    uint8
-	results                 []uint8
-	value                   T
+type mixedBaseOp struct {
+	kind      mixedOpKind
+	dst, x, y uint8
+	results   []uint8
+	// target also holds the field index for mixedFieldAddr.
 	truePC, falsePC, target int
 }
 
@@ -101,11 +100,10 @@ const (
 
 // Every register carries raw bits; the instruction supplies its numeric kind.
 type mixedOp struct {
-	mixedBaseOp[uint64]
+	mixedBaseOp
 	scalar, other types.BasicKind
 	callee        *mixedTypedRunner
 	args          []uint8
-	field         int
 }
 
 type mixedTypedRunner struct {
@@ -269,7 +267,7 @@ func (c *mixedCompiler) build(fn *ssa.Function) *mixedTypedRunner {
 			case *ssa.Phi:
 				continue
 			case *ssa.FieldAddr:
-				op = mixedOp{mixedBaseOp: mixedBaseOp[uint64]{kind: mixedFieldAddr, dst: regs[in], x: regs[in.X]}, field: in.Field}
+				op = mixedOp{mixedBaseOp: mixedBaseOp{kind: mixedFieldAddr, dst: regs[in], x: regs[in.X], target: in.Field}}
 			case *ssa.Store:
 				if _, ok := in.Addr.(*ssa.FieldAddr); !ok {
 					return nil
@@ -278,7 +276,7 @@ func (c *mixedCompiler) build(fn *ssa.Function) *mixedTypedRunner {
 				if !ok || k == types.Bool {
 					return nil
 				}
-				op = mixedOp{mixedBaseOp: mixedBaseOp[uint64]{kind: mixedStore, x: regs[in.Addr], y: regs[in.Val]}, scalar: k}
+				op = mixedOp{mixedBaseOp: mixedBaseOp{kind: mixedStore, x: regs[in.Addr], y: regs[in.Val]}, scalar: k}
 			case *ssa.Call:
 				callee, ok := in.Call.Value.(*ssa.Function)
 				if !ok || in.Call.IsInvoke() {
@@ -309,7 +307,7 @@ func (c *mixedCompiler) build(fn *ssa.Function) *mixedTypedRunner {
 				if in.Index < 0 || in.Index >= len(results) {
 					return nil
 				}
-				op = mixedOp{mixedBaseOp: mixedBaseOp[uint64]{kind: mixedBaseMove, dst: regs[in], x: results[in.Index]}}
+				op = mixedOp{mixedBaseOp: mixedBaseOp{kind: mixedBaseMove, dst: regs[in], x: results[in.Index]}}
 			case *ssa.BinOp:
 				k, ok := mixedKind(in.X.Type())
 				if !ok {
@@ -348,7 +346,7 @@ func (c *mixedCompiler) build(fn *ssa.Function) *mixedTypedRunner {
 				if !ok {
 					return nil
 				}
-				op = mixedOp{mixedBaseOp: mixedBaseOp[uint64]{kind: kind, dst: regs[in], x: x, y: y}, scalar: k, other: yk}
+				op = mixedOp{mixedBaseOp: mixedBaseOp{kind: kind, dst: regs[in], x: x, y: y}, scalar: k, other: yk}
 				if in.Op == token.SHL || in.Op == token.SHR {
 					if count, ok := in.Y.(*ssa.Const); ok && constant.Sign(count.Value) >= 0 {
 						op.other = types.Uint64
@@ -363,7 +361,7 @@ func (c *mixedCompiler) build(fn *ssa.Function) *mixedTypedRunner {
 					if !ok {
 						return nil
 					}
-					op = mixedOp{mixedBaseOp: mixedBaseOp[uint64]{kind: mixedLoad, dst: regs[in], x: regs[in.X]}, scalar: k}
+					op = mixedOp{mixedBaseOp: mixedBaseOp{kind: mixedLoad, dst: regs[in], x: regs[in.X]}, scalar: k}
 					break
 				}
 				k, ok := mixedKind(in.X.Type())
@@ -394,7 +392,7 @@ func (c *mixedCompiler) build(fn *ssa.Function) *mixedTypedRunner {
 				if !ok {
 					return nil
 				}
-				op = mixedOp{mixedBaseOp: mixedBaseOp[uint64]{kind: kind, dst: regs[in], x: x}, scalar: k}
+				op = mixedOp{mixedBaseOp: mixedBaseOp{kind: kind, dst: regs[in], x: x}, scalar: k}
 			case *ssa.Convert:
 				k, ok := mixedKind(in.X.Type())
 				if !ok || k == types.Bool {
@@ -408,13 +406,13 @@ func (c *mixedCompiler) build(fn *ssa.Function) *mixedTypedRunner {
 				if !ok {
 					return nil
 				}
-				op = mixedOp{mixedBaseOp: mixedBaseOp[uint64]{kind: mixedConvert, dst: regs[in], x: x}, scalar: k, other: to}
+				op = mixedOp{mixedBaseOp: mixedBaseOp{kind: mixedConvert, dst: regs[in], x: x}, scalar: k, other: to}
 			case *ssa.If:
 				x, ok := reg(in.Cond)
 				if !ok || len(b.Succs) != 2 {
 					return nil
 				}
-				op = mixedOp{mixedBaseOp: mixedBaseOp[uint64]{kind: mixedBaseBranch, x: x}}
+				op = mixedOp{mixedBaseOp: mixedBaseOp{kind: mixedBaseBranch, x: x}}
 				patches = append(patches, patch{len(r.code), b})
 			case *ssa.Jump:
 				if len(b.Succs) != 1 {
@@ -470,12 +468,12 @@ func (c *mixedCompiler) build(fn *ssa.Function) *mixedTypedRunner {
 			if !ok {
 				return 0, false
 			}
-			r.code = append(r.code, mixedOp{mixedBaseOp: mixedBaseOp[uint64]{kind: mixedBaseMove, dst: uint8(scratch + i), x: x}})
+			r.code = append(r.code, mixedOp{mixedBaseOp: mixedBaseOp{kind: mixedBaseMove, dst: uint8(scratch + i), x: x}})
 		}
 		for i, phi := range phis[to] {
-			r.code = append(r.code, mixedOp{mixedBaseOp: mixedBaseOp[uint64]{kind: mixedBaseMove, dst: regs[phi], x: uint8(scratch + i)}})
+			r.code = append(r.code, mixedOp{mixedBaseOp: mixedBaseOp{kind: mixedBaseMove, dst: regs[phi], x: uint8(scratch + i)}})
 		}
-		r.code = append(r.code, mixedOp{mixedBaseOp: mixedBaseOp[uint64]{kind: mixedBaseJump, target: blockPC[to]}})
+		r.code = append(r.code, mixedOp{mixedBaseOp: mixedBaseOp{kind: mixedBaseJump, target: blockPC[to]}})
 		return pc, true
 	}
 	for _, p := range patches {
@@ -605,7 +603,7 @@ func (r *mixedTypedRunner) RunArgs(args []ixgo.Value) ixgo.Value {
 			if receiver.IsNil() {
 				mixedNilPanic()
 			}
-			frames[depth].refs[op.dst] = reflectx.FieldX(receiver.Elem(), op.field)
+			frames[depth].refs[op.dst] = reflectx.FieldX(receiver.Elem(), op.target)
 		case mixedLoad:
 			regs[op.dst] = mixedReadField(frames[depth].refs[op.x], op.scalar)
 		case mixedStore:

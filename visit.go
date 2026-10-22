@@ -362,7 +362,7 @@ func (visit *visitor) compileFunction(fn *ssa.Function) {
 			}
 			if visit.intp.ctx.Mode&DisableMixedRunner == 0 && mixedRunnerFactory != nil {
 				if call, ok := instr.(*ssa.Call); ok {
-					ifn = visit.deferMixedCall(pfn, call, ifn)
+					visit.deferMixedCall(pfn, call, len(pfn.Instrs)+index)
 				}
 			}
 			if visit.intp.ctx.evalMode && fn.String() == "main.init" {

@@ -185,3 +185,35 @@ func BenchmarkMixedNumericFrames(b *testing.B) {
 		})
 	}
 }
+
+func TestMixedReceiverFieldIndex(t *testing.T) {
+	const source = `package main
+ type S struct { unused int; x int }
+ func read(p *S) int { return p.x }
+ func write(p *S, n int) int { p.x = n; return read(p) }
+ `
+	pkg, err := ixgo.NewContext(0).LoadFile("fields.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	structType := reflect.StructOf([]reflect.StructField{{Name: "Unused", Type: reflect.TypeOf(0)}, {Name: "X", Type: reflect.TypeOf(0)}})
+	for _, name := range []string{"read", "write"} {
+		r := MakeRunner(pkg.Func(name)).(*mixedTypedRunner)
+		if !r.BindTypes(func(types.Type) reflect.Type { return reflect.PointerTo(structType) }) {
+			t.Fatal("receiver binding failed")
+		}
+		ptr := reflect.New(structType)
+		ptr.Elem().Field(0).SetInt(99)
+		ptr.Elem().Field(1).SetInt(42)
+		args := []ixgo.Value{ptr.Interface()}
+		if name == "write" {
+			args = append(args, 42)
+		}
+		if got := r.RunArgs(args); got != 42 || ptr.Elem().Field(0).Int() != 99 {
+			t.Fatalf("%s: wrong field access: %v, %v", name, got, ptr.Elem())
+		}
+	}
+	if size := reflect.TypeOf(mixedOp{}).Size(); size > 104 {
+		t.Fatalf("mixed instruction is too large: %d bytes", size)
+	}
+}

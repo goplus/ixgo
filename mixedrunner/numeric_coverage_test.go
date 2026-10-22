@@ -288,7 +288,7 @@ func TestMixedInvalidOpcodes(t *testing.T) {
 		{mixedBaseEqual, 1, 1, 1}, {mixedBaseEqual, 1, 0, 0},
 		{mixedBaseNotEqual, 1, 0, 1}, {mixedBaseNotEqual, 1, 1, 0},
 	} {
-		op := mixedOp{mixedBaseOp: mixedBaseOp[uint64]{kind: tc.kind}, scalar: types.Bool}
+		op := mixedOp{mixedBaseOp: mixedBaseOp{kind: tc.kind}, scalar: types.Bool}
 		if got := mixedEvaluate(&op, tc.x, tc.y); got != tc.want {
 			t.Fatalf("boolean opcode %d: got %d, want %d", tc.kind, got, tc.want)
 		}

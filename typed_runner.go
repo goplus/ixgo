@@ -20,6 +20,7 @@ type TypedRunner interface {
 // RunArgs requires exactly the compiled parameter count. Each argument must have
 // the exact built-in Go dynamic type of its parameter (not a named type or a
 // merely convertible numeric type). Violating these preconditions may panic.
+// Implementations may retain the argument slice after returning.
 type TypedArgumentsRunner interface {
 	TypedRunner
 	RunArgs([]Value) Value
@@ -36,20 +37,25 @@ func RegisterMixedRunner(factory TypedRunnerFactory) {
 }
 
 type mixedCallPatch struct {
+	caller *function
 	callee *function
+	index  int
 	args   []register
 	dests  []register
-	run    *func(*frame)
 }
 
-func (visit *visitor) deferMixedCall(pfn *function, call *ssa.Call, fallback func(*frame)) func(*frame) {
+func (visit *visitor) deferMixedCall(pfn *function, call *ssa.Call, index int) {
+	ctx := visit.intp.ctx
+	if ctx.Mode&EnableTracing != 0 || ctx.evalMode || ctx.evalCallFn != nil || ctx.debugFunc != nil || ctx.entryFunc != nil || ctx.leaveFunc != nil {
+		return
+	}
 	callee := call.Common().StaticCallee()
 	if callee == nil || callee.Blocks == nil {
-		return fallback
+		return
 	}
 	ifn := visit.intp.funcs[callee]
 	if ifn == nil || ifn.Recover != nil || ifn.canRunMixed(len(call.Common().Args), nil) {
-		return fallback
+		return
 	}
 	_, args, bindings := getCallIndex(pfn, call.Common())
 	args = append(args, bindings...)
@@ -73,10 +79,7 @@ func (visit *visitor) deferMixedCall(pfn *function, call *ssa.Call, fallback fun
 			}
 		}
 	}
-	// Patch inside tracing and memo wrappers without replacing those wrappers.
-	run := fallback
-	visit.mixedCalls = append(visit.mixedCalls, mixedCallPatch{ifn, args, dests, &run})
-	return func(fr *frame) { run(fr) }
+	visit.mixedCalls = append(visit.mixedCalls, mixedCallPatch{pfn, ifn, index, args, dests})
 }
 
 // Recursive callees finish before their ancestors install memo wrappers.
@@ -94,9 +97,10 @@ func (visit *visitor) installMixedRunners() {
 		}
 	}
 	for _, patch := range visit.mixedCalls {
-		if patch.callee.Recover == nil && patch.callee.canRunMixed(len(patch.args), nil) {
+		// Memo installation may have wrapped the caller instruction.
+		if patch.caller.memoFlags == 0 && patch.callee.Recover == nil && patch.callee.canRunMixed(len(patch.args), nil) {
 			if run := makeCallSpecializerInstr(visit.intp, patch.callee, patch.args, patch.dests); run != nil {
-				*patch.run = run
+				patch.caller.Instrs[patch.index] = run
 			}
 		}
 	}
@@ -138,6 +142,20 @@ func (pfn *function) runMixed(args []value, env []value) (value, bool) {
 	}
 	if runner, ok := pfn.mixedRunner.(TypedArgumentsRunner); ok {
 		return runner.RunArgs(args), true
+	}
+	return pfn.mixedRunner.Run(args[0]), true
+}
+
+// runMixedBorrowed keeps the caller's argument slice private. Public runners
+// may retain RunArgs slices after returning.
+func (pfn *function) runMixedBorrowed(args []value, env []value) (value, bool) {
+	if !pfn.canRunMixed(len(args), env) {
+		return nil, false
+	}
+	if runner, ok := pfn.mixedRunner.(TypedArgumentsRunner); ok {
+		values := make([]value, len(args))
+		copy(values, args)
+		return runner.RunArgs(values), true
 	}
 	return pfn.mixedRunner.Run(args[0]), true
 }

@@ -1445,13 +1445,8 @@ func elideCallExtracts(pfn *function, instr ssa.Value, nres int) []register {
 }
 
 func makeCallSpecializerInstr(interp *Interp, ifn *function, ia, dests []register) func(*frame) {
-	if len(dests) != ifn.nres {
+	if len(dests) != ifn.nres || len(dests) == 1 && dests[0] < 0 {
 		return nil
-	}
-	for _, dest := range dests {
-		if dest < 0 {
-			return nil
-		}
 	}
 	if ifn.canRunMixed(len(ia), nil) {
 		return func(fr *frame) {
@@ -1467,9 +1462,16 @@ func makeCallSpecializerInstr(interp *Interp, ifn *function, ia, dests []registe
 			default:
 				values := result.(tuple)
 				for j, dest := range dests {
-					fr.setReg(dest, values[j])
+					if dest >= 0 {
+						fr.setReg(dest, values[j])
+					}
 				}
 			}
+		}
+	}
+	for _, dest := range dests {
+		if dest < 0 {
+			return nil
 		}
 	}
 	factory := callSpecializers[callSpecializerShape{len(ia), len(dests)}]

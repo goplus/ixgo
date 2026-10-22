@@ -3,6 +3,8 @@ package ixgo
 import (
 	"go/types"
 	"reflect"
+	"runtime"
+	"strings"
 	"testing"
 
 	"golang.org/x/tools/go/ssa"
@@ -239,5 +241,206 @@ func B(n int) int { if n == 0 { return 0 }; return A(n-1)+1 }
 				}
 			}
 		})
+	}
+}
+
+func TestDeferredMixedCallInstallation(t *testing.T) {
+	oldMemo, oldMixed := memoPlugin, mixedRunnerFactory
+	t.Cleanup(func() {
+		RegisterMemoPlugin(oldMemo)
+		RegisterMixedRunner(oldMixed)
+	})
+	for _, tc := range []struct {
+		name   string
+		setup  func(*Context)
+		accept bool
+		memo   bool
+		want   int
+	}{
+		{name: "installed", accept: true, want: 43},
+		{name: "rejected", want: 2},
+		{name: "memo", accept: true, memo: true, want: 2},
+		{name: "tracing", setup: func(ctx *Context) { ctx.Mode |= EnableTracing }, accept: true, want: 2},
+		{name: "evaluation", setup: func(ctx *Context) { ctx.evalCallFn = func(*Interp, *ssa.Call, ...interface{}) {} }, accept: true, want: 2},
+		{name: "hooks", setup: func(ctx *Context) { ctx.SetFuncHook(func(*FuncInfo) {}, func(*FuncInfo) {}) }, accept: true, want: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			RegisterMemoPlugin(nil)
+			RegisterMixedRunner(nil)
+			ctx := NewContext(0)
+			if tc.setup != nil {
+				tc.setup(ctx)
+			}
+			i, err := ctx.LoadInterp("deferred_mixed.go", `package main
+func A(n int) int { if n == 0 { return 0 }; return B(n-1)+1 }
+func B(n int) int { if n == 0 { return 0 }; return A(n-1)+1 }
+`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			i.funcs = make(map[*ssa.Function]*function)
+			if tc.memo {
+				RegisterMemoPlugin(func(p MemoInstaller, fn *ssa.Function) {
+					if fn.Name() == "B" {
+						p.InstallScalarMemo()
+					}
+				})
+			}
+			RegisterMixedRunner(func(fn *ssa.Function) TypedRunner {
+				if tc.accept && fn.Name() == "A" {
+					return testArgsRunner{42}
+				}
+				return nil
+			})
+			v := visitor{intp: i, prog: i.mainpkg.Prog, pkgs: map[*ssa.Package]bool{i.mainpkg: true}, seen: make(map[*ssa.Function]bool), base: fnBase}
+			v.function(i.mainpkg.Func("A"))
+			if len(v.mixedCalls) != 0 || len(v.mixedPending) != 0 {
+				t.Fatal("deferred installation state retained")
+			}
+			caller := i.funcs[i.mainpkg.Func("B")]
+			for index, instr := range caller.ssaInstrs {
+				if call, ok := instr.(*ssa.Call); ok && call.Common().StaticCallee() == i.mainpkg.Func("A") {
+					name := runtime.FuncForPC(reflect.ValueOf(caller.Instrs[index]).Pointer()).Name()
+					if strings.Contains(name, "deferMixedCall") {
+						t.Fatalf("retained deferred trampoline: %s", name)
+					}
+					if tc.name == "installed" && !strings.Contains(name, "makeCallSpecializerInstr") {
+						t.Fatalf("instruction was not replaced directly: %s", name)
+					}
+				}
+			}
+			got, err := i.RunFunc("B", 2)
+			if err != nil || got != tc.want {
+				t.Fatalf("B(2) = %v, %v; want %d", got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestDeferredMixedCallElidedResults(t *testing.T) {
+	old := mixedRunnerFactory
+	t.Cleanup(func() { RegisterMixedRunner(old) })
+	for _, body := range []string{
+		"a, b := A(n-1); return a, b",
+		"a, _ := A(n-1); return a, false",
+		"_, b := A(n-1); return 0, b",
+		"A(n-1); return 0, false",
+	} {
+		t.Run(body, func(t *testing.T) {
+			RegisterMixedRunner(nil)
+			i, err := NewContext(DisableMemo).LoadInterp("deferred_tuple.go", `package main
+func A(n int) (int, bool) { if n == 0 { return 0, false }; return B(n-1) }
+func B(n int) (int, bool) { `+body+` }
+`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			i.funcs = make(map[*ssa.Function]*function)
+			RegisterMixedRunner(func(fn *ssa.Function) TypedRunner {
+				if fn.Name() == "A" {
+					return testArgsRunner{tuple{42, true}}
+				}
+				return nil
+			})
+			v := visitor{intp: i, prog: i.mainpkg.Prog, pkgs: map[*ssa.Package]bool{i.mainpkg: true}, seen: make(map[*ssa.Function]bool), base: fnBase}
+			v.function(i.mainpkg.Func("A"))
+			got, err := i.RunFunc("B", 2)
+			want := tuple{42, true}
+			switch body {
+			case "a, _ := A(n-1); return a, false":
+				want[1] = false
+			case "_, b := A(n-1); return 0, b":
+				want[0] = 0
+			case "A(n-1); return 0, false":
+				want = tuple{0, false}
+			}
+			if err != nil || !reflect.DeepEqual(got, want) {
+				t.Fatalf("B(2) = %v, %v; want %v", got, err, want)
+			}
+		})
+	}
+}
+
+func TestRunFuncWithoutMixedArgumentAllocation(t *testing.T) {
+	oldMemo, oldMixed := memoPlugin, mixedRunnerFactory
+	t.Cleanup(func() {
+		RegisterMemoPlugin(oldMemo)
+		RegisterMixedRunner(oldMixed)
+	})
+	RegisterMemoPlugin(nil)
+	for _, tc := range []struct {
+		name    string
+		factory TypedRunnerFactory
+	}{
+		{name: "disabled"},
+		{name: "rejected", factory: func(*ssa.Function) TypedRunner { return nil }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			RegisterMixedRunner(tc.factory)
+			i, err := NewContext(DisableMemo).LoadInterp("identity.go", `package main
+func Identity(n int) int { return n }
+`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			allocs := testing.AllocsPerRun(1000, func() {
+				got, err := i.RunFunc("Identity", 7)
+				if err != nil || got != 7 {
+					t.Fatalf("Identity(7) = %v, %v", got, err)
+				}
+			})
+			if allocs > 1 {
+				t.Fatalf("RunFunc allocated %g times; want only the root frame allocation", allocs)
+			}
+		})
+	}
+}
+
+type testRetainingArgsRunner struct{ calls [][]Value }
+
+func (*testRetainingArgsRunner) Run(Value) Value { panic("RunArgs required") }
+func (r *testRetainingArgsRunner) RunArgs(args []Value) Value {
+	r.calls = append(r.calls, args)
+	return args
+}
+
+func TestMixedRunnerRetainedArguments(t *testing.T) {
+	old := mixedRunnerFactory
+	t.Cleanup(func() { RegisterMixedRunner(old) })
+	runner := new(testRetainingArgsRunner)
+	RegisterMixedRunner(func(fn *ssa.Function) TypedRunner {
+		if fn.Name() == "Identity" {
+			return runner
+		}
+		return nil
+	})
+	i, err := NewContext(DisableMemo).LoadInterp("retained_args.go", `package main
+func Identity(n int) int { return n }
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	args := []Value{7}
+	got, err := i.RunFunc("Identity", args...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args[0] = 9
+	if _, err := i.RunFunc("Identity", 11); err != nil {
+		t.Fatal(err)
+	}
+	pfn := i.funcs[i.mainpkg.Func("Identity")]
+	i.callFunctionDiscardsResult(&frame{}, pfn, args, nil)
+	args[0] = 13
+	runtime.GC()
+	if !reflect.DeepEqual(got, []Value{7}) {
+		t.Fatalf("returned arguments changed: %v", got)
+	}
+	if want := [][]Value{{7}, {11}, {9}}; !reflect.DeepEqual(runner.calls, want) {
+		t.Fatalf("retained arguments = %v, want %v", runner.calls, want)
 	}
 }
