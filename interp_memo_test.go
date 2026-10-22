@@ -1813,6 +1813,9 @@ func receive(ch chan int) int { x, _ := <-ch; return x }
 			if err != nil {
 				t.Fatal(err)
 			}
+			// This small source has no runtime.GC call to enable safepoints.
+			// Enable them explicitly to exercise the static-channel GC branches.
+			i.gcEnabled = true
 			pfn := i.funcs[i.mainpkg.Func("receive")]
 			var recv *ssa.UnOp
 			var pc int

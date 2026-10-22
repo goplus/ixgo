@@ -286,9 +286,9 @@ func (fr *frame) gc() {
 
 const maxEagerGCLivenessPCs = 1024
 
-// initGCLiveness moves the original runtime liveness walk to function load
-// time. Each entry contains registers that are dead after the instruction at
-// that PC and can therefore be released before invoking the host GC.
+// initGCLiveness precomputes dead registers for small functions at load time.
+// Large functions compute entries lazily per PC; both share one block-liveness
+// fixed point. Entries identify registers releasable after each instruction.
 func (pfn *function) initGCLiveness() {
 	if !pfn.hasGCRegs {
 		return
@@ -379,7 +379,7 @@ func (pfn *function) gcRegsAt(pc int) []register {
 		}
 		// Recovered panics resume in an otherwise disconnected SSA block.
 		// Its implicit named-result loads must survive every possible panic.
-		if pfn.Recover != nil && instr.Block() != pfn.Fn.Recover {
+		if pfn.Fn.Recover != nil && instr.Block() != pfn.Fn.Recover {
 			add(live, liveIn[pfn.Fn.Recover])
 		}
 	}
@@ -408,13 +408,14 @@ func (pfn *function) gcRegsAt(pc int) []register {
 		pfn.initClosureCaptures()
 		pfn.gcLiveIn = liveIn
 	})
-	// Published maps are immutable; each query owns its live set and operand scratch.
+	// After publication, liveOut and transfer only read liveIn. Each query
+	// owns its mutable live set and operand scratch, allowing concurrent queries.
 	liveIn = pfn.gcLiveIn
 	live := liveOut(block)
 	for j := len(block.Instrs) - 1; j >= 0 && block.Instrs[j] != cur; j-- {
 		transfer(live, block.Instrs[j])
 	}
-	if pfn.Recover != nil && block != pfn.Fn.Recover {
+	if pfn.Fn.Recover != nil && block != pfn.Fn.Recover {
 		add(live, liveIn[pfn.Fn.Recover])
 	}
 	for v := range live {
