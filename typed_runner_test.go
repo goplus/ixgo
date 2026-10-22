@@ -444,3 +444,40 @@ func Identity(n int) int { return n }
 		t.Fatalf("retained arguments = %v, want %v", runner.calls, want)
 	}
 }
+
+func TestDeferredMixedCallPreservesTuple(t *testing.T) {
+	old := mixedRunnerFactory
+	t.Cleanup(func() { RegisterMixedRunner(old) })
+	RegisterMixedRunner(nil)
+	i, err := NewContext(DisableMemo).LoadInterp("tuple.go", `package main
+func pair() (float32, int) { return 1, 2 }
+func caller() int { _, n := pair(); return n }
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	caller := i.funcs[i.mainpkg.Func("caller")]
+	var call *ssa.Call
+	for _, instr := range caller.ssaInstrs {
+		if c, ok := instr.(*ssa.Call); ok {
+			call = c
+			break
+		}
+	}
+	if call == nil {
+		t.Fatal("missing pair call")
+	}
+	// Model a caller compiled through the tuple-producing path before the
+	// callee's mixed runner becomes available.
+	caller.elidedExtract = nil
+	v := visitor{intp: i}
+	v.deferMixedCall(caller, call, 0)
+	if len(v.mixedCalls) != 0 {
+		t.Fatal("tuple-producing call queued for direct-result replacement")
+	}
+	got, err := i.RunFunc("caller")
+	if err != nil || got != 2 {
+		t.Fatalf("caller: %v, %v", got, err)
+	}
+}

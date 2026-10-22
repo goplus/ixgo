@@ -71,10 +71,18 @@ func (visit *visitor) deferMixedCall(pfn *function, call *ssa.Call, index int) {
 		}
 		if refs := call.Referrers(); refs != nil {
 			for _, ref := range *refs {
-				if ex, ok := ref.(*ssa.Extract); ok {
-					if _, elided := pfn.elidedExtract[ex]; elided && ex.Referrers() != nil && len(*ex.Referrers()) > 0 {
+				switch ex := ref.(type) {
+				case *ssa.Extract:
+					if _, elided := pfn.elidedExtract[ex]; !elided {
+						// The original instruction still produces a tuple for Extract.
+						return
+					}
+					if ex.Referrers() != nil && len(*ex.Referrers()) > 0 {
 						dests[ex.Index] = pfn.regIndex(ex)
 					}
+				case *ssa.DebugRef:
+				default:
+					return
 				}
 			}
 		}
