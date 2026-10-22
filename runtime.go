@@ -354,3 +354,13 @@ func (fr *Frame) CallerFrames() (frames []runtime.Frame) {
 	}
 	return
 }
+
+// gcFrames releases dead roots before channel synchronization.
+func (fr *frame) gcFrames() {
+	for ; fr.valid(); fr = fr.caller {
+		// Match gc's SSA registers, hidden caches and Phi scratch clears.
+		if fr.pfn.hasGCRegs || len(fr.pfn.cacheRegs) != 0 || len(fr.phiVals) != 0 {
+			fr.gc()
+		}
+	}
+}

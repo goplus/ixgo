@@ -90,6 +90,9 @@ func makeUnOpARROW(pfn *function, instr *ssa.UnOp) func(fr *frame) {
 		x := reflect.ValueOf(vx)
 		if instr.CommaOk {
 			return func(fr *frame) {
+				if pfn.Interp.gcEnabled {
+					fr.gcFrames()
+				}
 				v, ok := x.Recv()
 				if !ok {
 					v = reflect.New(typ).Elem()
@@ -98,6 +101,9 @@ func makeUnOpARROW(pfn *function, instr *ssa.UnOp) func(fr *frame) {
 			}
 		}
 		return func(fr *frame) {
+			if pfn.Interp.gcEnabled {
+				fr.gcFrames()
+			}
 			v, ok := x.Recv()
 			if !ok {
 				v = reflect.New(typ).Elem()
@@ -108,6 +114,9 @@ func makeUnOpARROW(pfn *function, instr *ssa.UnOp) func(fr *frame) {
 	if instr.CommaOk {
 		return func(fr *frame) {
 			x := reflect.ValueOf(fr.reg(ix))
+			if pfn.Interp.gcEnabled {
+				fr.gcFrames()
+			}
 			v, ok := x.Recv()
 			if !ok {
 				v = reflect.New(typ).Elem()
@@ -117,6 +126,9 @@ func makeUnOpARROW(pfn *function, instr *ssa.UnOp) func(fr *frame) {
 	}
 	return func(fr *frame) {
 		x := reflect.ValueOf(fr.reg(ix))
+		if pfn.Interp.gcEnabled {
+			fr.gcFrames()
+		}
 		v, ok := x.Recv()
 		if !ok {
 			v = reflect.New(typ).Elem()

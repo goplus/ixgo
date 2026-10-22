@@ -4734,3 +4734,178 @@ func main() {
 		t.Fatal(err)
 	}
 }
+
+func TestGCChannelLoopLiveness(t *testing.T) {
+	const source = `package main
+import "runtime"
+func main() {
+	p := new(int)
+	*p = 42
+	ch := make(chan bool, 1)
+	for i := 0; i < 3; i++ {
+		if *p != 42 { panic("live loop pointer cleared") }
+		ch <- true
+		<-ch
+		select { case ch <- true: }
+		select { case <-ch: }
+		runtime.GC()
+	}
+}
+`
+	if _, err := ixgo.NewContext(ixgo.ExperimentalSupportGC).RunFile("main.go", source, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGCChannelSafepoints(t *testing.T) {
+	for _, park := range []string{
+		`<-release`,
+		`_, _ = <-release`,
+		`release <- true`,
+		`select { case <-release: }`,
+	} {
+		t.Run(park, func(t *testing.T) {
+			source := fmt.Sprintf(`package main
+import ("runtime"; "time")
+type receiver struct { values chan int; padding [32]byte }
+func (r *receiver) next() int { return <-r.values }
+func park(release chan bool) { %s }
+func main() {
+	values := make(chan int)
+	ready := make(chan bool)
+	release := make(chan bool)
+	exited := make(chan bool)
+	finalized := make(chan bool)
+	r := &receiver{values: values}
+	runtime.SetFinalizer(r, func(*receiver) { close(finalized) })
+	go func() {
+		if r.next() != 42 { panic("receive") }
+		close(ready)
+		park(release)
+		close(exited)
+	}()
+	values <- 42
+	<-ready
+	// The receiver must be dead even while its goroutine is parked.
+	deadline := time.NewTimer(5*time.Second)
+	defer deadline.Stop()
+waitFinalizer:
+	for {
+		runtime.GC()
+		select {
+		case <-finalized: break waitFinalizer
+		case <-deadline.C: panic("receiver retained by parked frame")
+		default: time.Sleep(time.Millisecond)
+		}
+	}
+	close(release)
+	<-exited
+}
+`, park)
+			// A send needs a matching receive rather than a closed channel.
+			if park == `release <- true` {
+				source = strings.Replace(source, "close(release)", "<-release", 1)
+			}
+			ctx := ixgo.NewContext(ixgo.ExperimentalSupportGC)
+			if _, err := ctx.RunFile("main.go", source, nil); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestGCRecoveredNamedResults(t *testing.T) {
+	const source = `package main
+import "runtime"
+var sink *[20]byte
+func result(explicit bool) (x [20]byte) {
+	for i := range x { x[i] = byte(i) }
+	sink = &x
+	sink = nil
+	defer func() { recover() }()
+	runtime.GC()
+	if explicit { panic("recover") }
+	var p *int
+	for { _ = *p }
+}
+func main() {
+	for i := 0; i < 3; i++ {
+		for _, explicit := range []bool{true, false} {
+			x := result(explicit)
+			for j, v := range x {
+				if v != byte(j) { panic("recovered named array result was cleared") }
+			}
+		}
+	}
+}
+`
+	if _, err := ixgo.NewContext(ixgo.ExperimentalSupportGC).RunFile("main.go", source, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGCLoopValueReclamation(t *testing.T) {
+	const source = `package main
+import ("runtime"; "time")
+func allocate(finalized chan bool) []byte {
+	p := new([10<<20]byte)
+	p[0] = 42
+	runtime.SetFinalizer(p, func(*[10<<20]byte) { close(finalized) })
+	return p[:]
+}
+func collected(finalized chan bool) {
+	deadline := time.NewTimer(5*time.Second)
+	defer deadline.Stop()
+	for {
+		runtime.GC()
+		select {
+		case <-finalized: return
+		case <-deadline.C: panic("dead loop value retained")
+		default:
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+func check(c chan []byte, finalized chan bool, ranged bool) {
+	if ranged {
+		for x := range c {
+			runtime.GC()
+			select {
+			case <-finalized: panic("range value collected while live")
+			default:
+			}
+			if len(x) != 10<<20 || x[0] != 42 { panic("range value") }
+			x = nil
+			collected(finalized)
+			if x != nil { panic("nil assignment") }
+		}
+	} else {
+		for {
+			x, ok := <-c
+			if !ok { break }
+			runtime.GC()
+			select {
+			case <-finalized: panic("received value collected while live")
+			default:
+			}
+			if len(x) != 10<<20 || x[0] != 42 { panic("received value") }
+			x = nil
+			collected(finalized)
+			if x != nil { panic("nil assignment") }
+		}
+	}
+}
+func main() {
+	for _, ranged := range []bool{true, false} {
+		finalized := make(chan bool)
+		c := make(chan []byte, 1)
+		c <- allocate(finalized)
+		close(c)
+		check(c, finalized, ranged)
+	}
+}
+`
+	if _, err := ixgo.NewContext(ixgo.ExperimentalSupportGC).RunFile("main.go", source, nil); err != nil {
+		t.Fatal(err)
+	}
+}

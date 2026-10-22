@@ -2,6 +2,7 @@ package ixgo
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"sync"
@@ -126,7 +127,7 @@ func Work(n int) int {
 	if len(pfn.ssaInstrs) <= maxEagerGCLivenessPCs {
 		t.Fatalf("instructions = %d, want more than %d", len(pfn.ssaInstrs), maxEagerGCLivenessPCs)
 	}
-	if pfn.gcReady == nil || pfn.gcReady[0].Load() {
+	if pfn.gcReady == nil || pfn.gcReady[0].Load() || pfn.gcLiveIn != nil {
 		t.Fatal("large function liveness was eagerly computed")
 	}
 	var wg sync.WaitGroup
@@ -138,7 +139,7 @@ func Work(n int) int {
 		}()
 	}
 	wg.Wait()
-	if !pfn.gcReady[0].Load() {
+	if !pfn.gcReady[0].Load() || len(pfn.gcLiveIn) != len(fn.Blocks) {
 		t.Fatal("liveness was not cached after first GC")
 	}
 
@@ -223,4 +224,123 @@ func TestInitClosureCapturesNilFn(t *testing.T) {
 		t.Fatal("expected empty non-nil slice")
 	}
 	pfn.initClosureCaptures()
+}
+
+func TestGCLivenessLoopDefinitionsAndPhiEdges(t *testing.T) {
+	const source = `package main
+import "runtime"
+func consume(p *int) { if *p != 42 { panic("value") } }
+func loop(ch chan *int) {
+	for p := range ch {
+		consume(p)
+		p = nil
+		runtime.GC()
+	}
+}
+func phi(first, second *int, choose bool) {
+	p := first
+	if choose {
+		runtime.GC()
+	} else {
+		p = second
+		runtime.GC()
+	}
+	consume(p)
+}
+`
+	interp, err := NewContext(ExperimentalSupportGC).LoadInterp("main.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer interp.UnsafeRelease()
+	loop := interp.funcs[interp.mainpkg.Func("loop")]
+	var received ssa.Value
+	for _, block := range loop.Fn.Blocks {
+		for _, instr := range block.Instrs {
+			if extract, ok := instr.(*ssa.Extract); ok && extract.Index == 0 {
+				received = extract
+			}
+		}
+	}
+	if received == nil {
+		t.Fatal("missing received pointer")
+	}
+	checked := 0
+	for pc, instr := range loop.ssaInstrs {
+		if call, ok := instr.(*ssa.Call); ok && isRuntimeGCFunction(call.Common().StaticCallee()) {
+			checked++
+			if !slices.Contains(loop.gcRegsForPC(pc), loop.regIndex(received)) {
+				t.Error("previous loop iteration's received pointer is retained")
+			}
+		}
+	}
+	phi := interp.funcs[interp.mainpkg.Func("phi")]
+	for pc, instr := range phi.ssaInstrs {
+		call, ok := instr.(*ssa.Call)
+		if !ok || !isRuntimeGCFunction(call.Common().StaticCallee()) {
+			continue
+		}
+		checked++
+		liveParam := 0
+		if strings.Contains(instr.Block().Comment, "else") {
+			liveParam = 1
+		}
+		for i, param := range phi.Fn.Params[:2] {
+			dead := slices.Contains(phi.gcRegsForPC(pc), phi.regIndex(param))
+			if dead == (i == liveParam) {
+				t.Errorf("%s: parameter %s dead = %v", instr.Block(), param.Name(), dead)
+			}
+		}
+	}
+	if checked != 3 {
+		t.Fatalf("checked %d GC points, want 3", checked)
+	}
+}
+
+func TestGCLivenessCacheConcurrent(t *testing.T) {
+	pfn := loadGCLivenessFunction(t, ExperimentalSupportGC)
+	want := make([][]register, len(pfn.gcRegs))
+	for pc, regs := range pfn.gcRegs {
+		want[pc] = slices.Clone(regs)
+		slices.Sort(want[pc])
+	}
+	// Exercise concurrent first use independently of eager per-PC initialization.
+	pfn.gcLiveOnce = sync.Once{}
+	pfn.gcLiveIn = nil
+	pfn.closureCaptures = nil
+	pfn.closureByResult = nil
+	check := func() {
+		var wg sync.WaitGroup
+		for worker := 0; worker < 16; worker++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for pc := range pfn.ssaInstrs {
+					got := pfn.gcRegsAt(pc)
+					slices.Sort(got)
+					if !slices.Equal(got, want[pc]) {
+						t.Errorf("GC point %d: dead registers = %v, want %v", pc, got, want[pc])
+					}
+				}
+			}()
+		}
+		wg.Wait()
+	}
+	check()
+	if len(pfn.gcLiveIn) != len(pfn.Fn.Blocks) {
+		t.Fatalf("cached blocks = %d, want %d", len(pfn.gcLiveIn), len(pfn.Fn.Blocks))
+	}
+	pfn.gcLiveOnce.Do(func() {
+		t.Error("block liveness was not initialized through sync.Once")
+	})
+	snapshot := make(map[*ssa.BasicBlock]map[ssa.Value]bool)
+	for block, live := range pfn.gcLiveIn {
+		snapshot[block] = maps.Clone(live)
+	}
+	check()
+	for block, live := range snapshot {
+		if !maps.Equal(pfn.gcLiveIn[block], live) {
+			t.Errorf("cached live-in set for %s changed during concurrent queries", block)
+		}
+	}
 }
