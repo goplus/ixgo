@@ -140,6 +140,7 @@ type function struct {
 	childFrameReg  register                  // first unused tuple slot for a returned child; -1 if absent
 	elidedTuples   []register                // tuple slots bypassed by direct Extract writes
 	elidedExtract  map[*ssa.Extract]struct{} // Extracts skipped after dests write
+	numberSlots    int                       // nonzero when instruction closures use numeric slots
 	memoFlags      uint8
 }
 

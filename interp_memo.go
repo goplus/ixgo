@@ -21,6 +21,7 @@ type interpreterMemoState struct {
 	memo        *interpreterMemo
 	accumulator *interpreterAccumulatorState
 	receiver    *interpreterReceiverState
+	numberSlots []uint64
 }
 
 type interpreterAccumulatorState struct {

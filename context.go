@@ -85,6 +85,9 @@ type MethodChecker func(ctx *Context, prog *ssa.Program) func(typ reflect.Type, 
 
 // Context ssa context
 type Context struct {
+	// NumberSlots enables experimental numeric slots for supported leaf functions.
+	// Set before loading; the default is false.
+	NumberSlots   bool
 	Loader        Loader                                                   // types loader
 	BuildContext  build.Context                                            // build context, default build.Default
 	RunContext    context.Context                                          // run context, default unset

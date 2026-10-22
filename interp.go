@@ -194,14 +194,15 @@ type _defer struct {
 }
 
 type frame struct {
-	pfn       *function
-	caller    *frame
-	callee    *frame
-	_defer    *_defer
-	_panic    *_panic
-	block     *ssa.BasicBlock
-	stack     []value // result args env datas
-	phiVals   []value // temporary values for parallel phi assignments
+	pfn     *function
+	caller  *frame
+	callee  *frame
+	_defer  *_defer
+	_panic  *_panic
+	block   *ssa.BasicBlock
+	stack   []value // result args env datas
+	phiVals []value // temporary values for parallel phi assignments
+
 	ipc       int32
 	pred      int32
 	deferid   uint64
