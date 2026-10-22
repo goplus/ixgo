@@ -1872,3 +1872,37 @@ func TestGCFramesSkipsOnlyEmptyRoots(t *testing.T) {
 		t.Fatal("empty child frame skipped cleanup of its caller")
 	}
 }
+
+func TestDisableMemo(t *testing.T) {
+	old := memoPlugin
+	t.Cleanup(func() { RegisterMemoPlugin(old) })
+	calls := 0
+	RegisterMemoPlugin(func(installer MemoInstaller, fn *ssa.Function) {
+		if fn.Name() == "fib" {
+			calls++
+			installer.InstallScalarMemo()
+		}
+	})
+	for _, mode := range []Mode{0, DisableMemo, 0} {
+		before := calls
+		i, err := NewContext(mode).LoadInterp("memo.go", `package main
+func fib(n int) int { if n < 2 { return n }; return fib(n-1)+fib(n-2) }
+`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pfn := i.funcs[i.mainpkg.Func("fib")]
+		enabled := mode&DisableMemo == 0
+		if (calls > before) != enabled || (pfn.memoFlags != 0) != enabled {
+			t.Fatalf("mode %v: plugin calls=%d, flags=%d", mode, calls-before, pfn.memoFlags)
+		}
+		got, err := i.RunFunc("fib", 10)
+		i.UnsafeRelease()
+		if err != nil || got != 55 {
+			t.Fatalf("mode %v: %v, %v", mode, got, err)
+		}
+	}
+	if EnableCachedReg != 1<<14 || LastMode != DisableMemo || DisableMemo != EnableCachedReg<<1 {
+		t.Fatal("unexpected mode bit allocation")
+	}
+}
