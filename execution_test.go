@@ -24,7 +24,6 @@ import (
 	"reflect"
 	"runtime"
 	"slices"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -950,52 +949,6 @@ func TestExecutionTrackerReplPreservesValues(t *testing.T) {
 					t.Errorf("Eval(%q) left its final position visible: %v", step.source, events)
 				}
 				recorder.check(t)
-			}
-		})
-	}
-}
-
-func TestReplRejectsLateDebugMetadata(t *testing.T) {
-	for _, test := range []struct {
-		name       string
-		enable     func(*Context)
-		inCallback bool
-	}{
-		{"tracker", func(ctx *Context) { ctx.SetExecutionTracker(NewExecutionTracker(nil, ExecutionOptions{})) }, false},
-		{"debug", func(ctx *Context) { ctx.SetDebug(func(*DebugInfo) {}) }, false},
-		{"debug_in_callback", func(ctx *Context) { ctx.SetDebug(func(*DebugInfo) {}) }, true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			ctx := NewContext(0)
-			var calls int
-			ctx.RegisterExternal("main.Tick", func() int {
-				calls++
-				if test.inCallback {
-					test.enable(ctx)
-				}
-				return calls
-			})
-			repl := NewRepl(ctx)
-			for _, source := range []string{"func Tick() int", "n := Tick()"} {
-				if _, _, err := repl.Eval(source); err != nil {
-					t.Fatalf("Eval(%q): %v", source, err)
-				}
-			}
-			if calls != 1 {
-				t.Fatalf("initial host calls = %d, want 1", calls)
-			}
-			source, interp := repl.Source(), repl.Interp()
-			if !test.inCallback {
-				test.enable(ctx)
-			}
-			if _, _, err := repl.Eval("n += Tick()"); err == nil || !strings.Contains(err.Error(), "debug") {
-				t.Errorf("Eval after enabling debug metadata = %v, want a debug-mode error", err)
-			}
-			if calls != 1 {
-				t.Errorf("rejected Eval executed host code: calls=%d, want 1", calls)
-			}
-			if repl.Source() != source || repl.Interp() != interp {
-				t.Error("rejected Eval changed the committed source or interpreter")
 			}
 		})
 	}

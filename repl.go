@@ -50,7 +50,6 @@ type Repl struct {
 	interp     *Interp                   // last interp
 	fsInit     *fnState                  // func init
 	fsMain     *fnState                  // func main
-	debug      bool                      // debug metadata mode of saved frames
 	globalMap  map[string]interface{}    // keep repl global map
 	importPkgs map[string]*types.Package // checked imports
 	fileName   string                    // file.go or file.gop
@@ -93,8 +92,7 @@ func toResultEval(interp *Interp, vs []interface{}, rs *types.Tuple) (eval []*Ev
 	return
 }
 
-// NewRepl creates a REPL. Call SetDebug or SetExecutionTracker before the first
-// Eval to enable debugging; saved frames require a stable metadata layout.
+// NewRepl creates a REPL.
 func NewRepl(ctx *Context) *Repl {
 	r := &Repl{
 		ctx:        ctx,
@@ -136,9 +134,6 @@ func (r *Repl) SetFileName(filename string) {
 
 func (r *Repl) Eval(expr string) (tok token.Token, dump []*Eval, err error) {
 	r.lastEval = nil
-	if r.interp != nil && r.debug != (r.ctx.BuilderMode&ssa.GlobalDebug != 0) {
-		return token.ILLEGAL, nil, fmt.Errorf("cannot change REPL debug metadata after evaluation; enable debugging before the first Eval")
-	}
 	tok = r.firstToken(expr)
 	err = r.eval(tok, expr)
 	return tok, r.lastEval, err
@@ -174,7 +169,6 @@ func main() {
 }
 
 func (r *Repl) eval(tok token.Token, expr string) (err error) {
-	debug := r.ctx.BuilderMode&ssa.GlobalDebug != 0
 	var src string
 	var inMain bool
 	var evalConst bool
@@ -339,7 +333,6 @@ func (r *Repl) eval(tok token.Token, expr string) (err error) {
 		return nil
 	}
 	r.interp = i
-	r.debug = debug
 	r.fsInit = rinit
 	r.fsMain = rmain
 	for k, v := range i.globals {
