@@ -103,11 +103,27 @@ func TestMixedFrameReferences(t *testing.T) {
 	if numeric.refSlots != 0 || len(numeric.refParams) != 0 {
 		t.Fatal("numeric runner requires reference storage")
 	}
+	if !numeric.numeric {
+		t.Fatal("numeric graph did not select the numeric loop")
+	}
+	for _, fast := range []bool{true, false} {
+		numeric.numeric = fast
+		if got := numeric.RunArgs([]ixgo.Value{32}); got != 33 {
+			t.Fatalf("numeric loop %v: got %v, want 33", fast, got)
+		}
+	}
+	numeric.numeric = true
+	if size := reflect.TypeOf(mixedNumericFrame{}).Size(); size > mixedArgsLimit*8+64 {
+		t.Fatalf("numeric frame is too large: %d bytes", size)
+	}
 	// A numeric frame needs only its registers and small call metadata.
 	if size := reflect.TypeOf(mixedFrame{}).Size(); size > mixedArgsLimit*8+128 {
 		t.Fatalf("numeric frame is too large: %d bytes", size)
 	}
 	r := MakeRunner(pkg.Func("recurse")).(*mixedTypedRunner)
+	if r.numeric {
+		t.Fatal("receiver graph selected the numeric loop")
+	}
 	for _, node := range r.graph {
 		if node.refSlots > len(node.constants) {
 			t.Fatal("reference storage exceeds register count")

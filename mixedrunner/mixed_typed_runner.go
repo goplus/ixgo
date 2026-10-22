@@ -5,6 +5,8 @@
 
 package mixedrunner
 
+//go:generate go run numeric_loop_gen.go
+
 import (
 	"go/constant"
 	"go/token"
@@ -112,6 +114,7 @@ type mixedTypedRunner struct {
 	params, results []types.BasicKind
 	paramTypes      []types.Type
 	runtimeTypes    []reflect.Type
+	numeric         bool
 	refSlots        int
 	refParams       []uint8
 	graph           map[*ssa.Function]*mixedTypedRunner
@@ -140,6 +143,13 @@ func MakeRunner(fn *ssa.Function) ixgo.TypedRunner {
 	c := mixedCompiler{compiled: make(map[*ssa.Function]*mixedTypedRunner)}
 	if r := c.build(fn); r != nil {
 		r.graph = c.compiled
+		r.numeric = true
+		for _, node := range c.compiled {
+			if node.refSlots != 0 {
+				r.numeric = false
+				break
+			}
+		}
 		return r
 	}
 	return nil
@@ -573,6 +583,9 @@ func (r *mixedTypedRunner) Run(input ixgo.Value) ixgo.Value { return r.RunArgs([
 func (r *mixedTypedRunner) RunArgs(args []ixgo.Value) ixgo.Value {
 	if len(args) != len(r.params) {
 		panic("ixgo: invalid mixed runner argument count")
+	}
+	if r.numeric {
+		return r.runNumeric(args)
 	}
 	var initial [3]mixedFrame
 	frames := initial[:]
