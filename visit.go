@@ -276,7 +276,7 @@ func (visit *visitor) function(fn *ssa.Function) {
 	}
 	pfn := visit.intp.loadFunction(fn)
 	entry, leave := visit.intp.ctx.entryFunc, visit.intp.ctx.leaveFunc
-	if leave != nil {
+	if leave != nil || visit.intp.execution != nil {
 		// Mark this before visiting callees, including recursive calls, so
 		// call compilation does not select a NoRecover execution path.
 		pfn.Recover = make([]func(*frame), 0)
@@ -286,6 +286,10 @@ func (visit *visitor) function(fn *ssa.Function) {
 	}
 	for _, p := range fn.FreeVars {
 		pfn.regIndex(p)
+	}
+	if visit.intp.execution != nil {
+		// Reserve tracking state after the fixed call slots.
+		pfn.stack = append(pfn.stack, nil)
 	}
 	var buf [32]*ssa.Value // avoid alloc in common case
 	for _, b := range fn.Blocks {
@@ -460,7 +464,9 @@ func (visit *visitor) function(fn *ssa.Function) {
 			first(fr)
 		}
 	}
-	if entry == nil && leave == nil && visit.intp.ctx.Mode&EnableTracing == 0 && visit.intp.ctx.evalCallFn == nil && visit.intp.ctx.debugFunc == nil {
+	if entry == nil && leave == nil && visit.intp.execution == nil &&
+		visit.intp.ctx.Mode&EnableTracing == 0 && visit.intp.ctx.BuilderMode&ssa.GlobalDebug == 0 &&
+		visit.intp.ctx.evalCallFn == nil && visit.intp.ctx.debugFunc == nil {
 		applyMemoPlugin(pfn, fn)
 	}
 	pfn.makeInstr = nil

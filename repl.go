@@ -92,6 +92,7 @@ func toResultEval(interp *Interp, vs []interface{}, rs *types.Tuple) (eval []*Ev
 	return
 }
 
+// NewRepl creates a REPL.
 func NewRepl(ctx *Context) *Repl {
 	r := &Repl{
 		ctx:        ctx,
@@ -106,8 +107,11 @@ func NewRepl(ctx *Context) *Repl {
 	// reset runtime.GC to default
 	ctx.RegisterExternal("runtime.GC", runtime.GC)
 	ctx.evalCallFn = func(interp *Interp, call *ssa.Call, res ...interface{}) {
-		if len(*call.Referrers()) != 0 {
-			return
+		for _, ref := range *call.Referrers() {
+			// Debug metadata does not consume a result in the user's code.
+			if _, debug := ref.(*ssa.DebugRef); !debug {
+				return
+			}
 		}
 		v := call.Call.Value
 		if un, ok := v.(*ssa.UnOp); ok {
@@ -439,8 +443,20 @@ func (r *Repl) runFuncEx(i *Interp, pkg *ssa.Package, fnname string, fs *fnState
 	pfn := i.funcs[fn]
 	fr := pfn.allocFrame(&frame{})
 	if fs != nil {
-		copy(fr.stack, fs.fr.stack)
+		// init/main have no call slots; skip their leading tracking state.
+		dst, src := fr.stack, fs.fr.stack
+		if i.execution != nil {
+			dst = dst[int(fr.pfn.executionReg())+1:]
+		}
+		if fs.fr.pfn.Interp.execution != nil {
+			src = src[int(fs.fr.pfn.executionReg())+1:]
+		}
+		copy(dst, src)
 		fr.ipc = int32(fs.pc)
+	}
+	if tracker := i.execution; tracker != nil {
+		tracker.enter(fr)
+		defer tracker.leave(fr)
 	}
 	var pc int
 	for fr.ipc != -1 {

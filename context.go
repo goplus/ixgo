@@ -96,6 +96,7 @@ type Context struct {
 	debugFunc     func(*DebugInfo)                                         // debug func
 	entryFunc     func(*FuncInfo)                                          // hook func entry
 	leaveFunc     func(*FuncInfo)                                          // hook func leave
+	execution     *ExecutionTracker                                        // optional execution tracking session
 	panicFunc     func(*PanicInfo)                                         // panic func
 	pkgs          map[string]*SourcePackage                                // imports
 	override      sync.Map                                                 // map[string]reflect.Value, override function
@@ -260,9 +261,26 @@ func (ctx *Context) SetLeastCallForEnablePool(count int) {
 	ctx.callForPool = count
 }
 
+// SetDebug enables debug metadata and sets its callback. For compiled code with
+// metadata, the callback can be replaced or cleared without recompilation.
 func (ctx *Context) SetDebug(fn func(*DebugInfo)) {
-	ctx.BuilderMode |= ssa.GlobalDebug
 	ctx.debugFunc = fn
+	ctx.enableDebug()
+}
+
+// SetExecutionTracker binds a tracker to subsequently compiled interpreters.
+// Set it before loading code, never concurrently with compilation. Nil disables
+// tracking but leaves existing debug metadata enabled. SetDebug and SetFuncHook
+// remain independent.
+func (ctx *Context) SetExecutionTracker(tracker *ExecutionTracker) {
+	ctx.execution = tracker
+	if tracker != nil {
+		ctx.enableDebug()
+	}
+}
+
+func (ctx *Context) enableDebug() {
+	ctx.BuilderMode |= ssa.GlobalDebug
 	if ctx.Builder != nil {
 		ctx.Builder.Reset()
 	}

@@ -304,6 +304,10 @@ func (p *function) deleteFrameToCaller(caller *frame, fr *frame) {
 // index loop classifies them.
 func (p *function) planCleanup() {
 	keep := make([]bool, len(p.stack))
+	if p.Interp.execution != nil {
+		// The tracker clears references on leave; retain its state for reuse.
+		keep[p.executionReg()] = true
+	}
 	if res := p.Fn.Signature.Results(); res != nil {
 		for i := 0; i < res.Len(); i++ {
 			if !typesMayRef(res.At(i).Type()) {
@@ -1317,25 +1321,40 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 			setMapIndex(vm, fr.reg(ik), fr.reg(iv))
 		}
 	case *ssa.DebugRef:
-		if v, ok := instr.Object().(*types.Var); ok {
-			ix := pfn.regIndex(instr.X)
-			return func(fr *frame) {
-				ref := &DebugInfo{DebugRef: instr, fset: interp.ctx.FileSet}
-				ref.toValue = func() (*types.Var, interface{}, bool) {
-					return v, fr.reg(ix), true
-				}
-				interp.ctx.debugFunc(ref)
-			}
-		}
-		return func(fr *frame) {
-			ref := &DebugInfo{DebugRef: instr, fset: interp.ctx.FileSet}
-			ref.toValue = func() (*types.Var, interface{}, bool) {
-				return nil, nil, false
-			}
-			interp.ctx.debugFunc(ref)
-		}
+		return makeDebugRef(interp, pfn, instr)
 	default:
 		panic(fmt.Errorf("unreachable %T", instr))
+	}
+}
+
+func makeDebugRef(interp *Interp, pfn *function, instr *ssa.DebugRef) func(*frame) {
+	v, _ := instr.Object().(*types.Var)
+	var ix register
+	if v != nil {
+		// SetDebug can install or replace its callback after compilation.
+		ix = pfn.regIndex(instr.X)
+	}
+	fset := interp.ctx.FileSet
+	pos := fset.Position(instr.Pos())
+	tracker := interp.execution
+	if tracker != nil && !tracker.accepts(pos) {
+		tracker = nil
+	}
+	return func(fr *frame) {
+		if tracker != nil {
+			tracker.setPosition(fr, pos)
+		}
+		debug := interp.ctx.debugFunc
+		if debug == nil {
+			return
+		}
+		info := &DebugInfo{DebugRef: instr, fset: fset}
+		if v != nil {
+			info.toValue = func() (*types.Var, interface{}, bool) {
+				return v, fr.reg(ix), true
+			}
+		}
+		debug(info)
 	}
 }
 
