@@ -394,3 +394,44 @@ func builtin(x int) int {return min(x,2)}
 		})
 	}
 }
+
+func TestMixedParallelPhiCycles(t *testing.T) {
+	pkg, err := ixgo.NewContext(ixgo.DisableMemo).LoadFile("cycles.go", `package main
+func rotate(n int) int {
+ a,b,c:=1,2,3
+ for j:=0;j<n;j++ { a,b,c=b,c,a }
+ return 100*a+10*b+c
+}
+func disjoint(n int) int {
+ a,b,c,d:=1,2,3,4
+ for j:=0;j<n;j++ { a,b,c,d=b,a,d,c }
+ return 1000*a+100*b+10*c+d
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"rotate", "disjoint"} {
+		r := MakeRunner(pkg.Func(name)).(*mixedTypedRunner)
+		for n := 0; n < 12; n++ {
+			a, b, c, d := 1, 2, 3, 4
+			for j := 0; j < n; j++ {
+				if name == "rotate" {
+					a, b, c = b, c, a
+				} else {
+					a, b, c, d = b, a, d, c
+				}
+			}
+			want := 100*a + 10*b + c
+			if name == "disjoint" {
+				want = 1000*a + 100*b + 10*c + d
+			}
+			for _, numeric := range []bool{false, true} {
+				r.numeric = numeric
+				if got := r.RunArgs([]ixgo.Value{n}); got != want {
+					t.Fatalf("%s(%d), numeric=%v: %v, want %d", name, n, numeric, got, want)
+				}
+			}
+		}
+	}
+}

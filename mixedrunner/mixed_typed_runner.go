@@ -98,6 +98,16 @@ const (
 	mixedFieldAddr
 	mixedLoad
 	mixedStore
+	mixedMoveJump
+	mixedAnd
+	mixedXor
+	mixedAndNot
+	mixedComplement
+	mixedMul
+	mixedUnsignedQuo
+	mixedSignedQuo
+	mixedUnsignedRem
+	mixedSignedRem
 )
 
 // Every register carries raw bits; the instruction supplies its numeric kind.
@@ -473,17 +483,56 @@ func (c *mixedCompiler) build(fn *ssa.Function) *mixedTypedRunner {
 			return 0, false
 		}
 		pc := len(r.code)
-		for i, phi := range phis[to] {
+		type move struct{ dst, src uint8 }
+		moves := make([]move, 0, len(phis[to]))
+		for _, phi := range phis[to] {
 			x, ok := reg(phi.Edges[pred])
 			if !ok {
 				return 0, false
 			}
-			r.code = append(r.code, mixedOp{mixedBaseOp: mixedBaseOp{kind: mixedBaseMove, dst: uint8(scratch + i), x: x}})
+			if dst := regs[phi]; dst != x {
+				moves = append(moves, move{dst, x})
+			}
 		}
-		for i, phi := range phis[to] {
-			r.code = append(r.code, mixedOp{mixedBaseOp: mixedBaseOp{kind: mixedBaseMove, dst: regs[phi], x: uint8(scratch + i)}})
+		emit := func(dst, src uint8) {
+			r.code = append(r.code, mixedOp{mixedBaseOp: mixedBaseOp{kind: mixedBaseMove, dst: dst, x: src}})
 		}
-		r.code = append(r.code, mixedOp{mixedBaseOp: mixedBaseOp{kind: mixedBaseJump, target: blockPC[to]}})
+		for len(moves) != 0 {
+			ready := -1
+			for i, m := range moves {
+				used := false
+				for _, other := range moves {
+					if other.src == m.dst {
+						used = true
+						break
+					}
+				}
+				if !used {
+					ready = i
+					break
+				}
+			}
+			if ready >= 0 {
+				m := moves[ready]
+				emit(m.dst, m.src)
+				moves = append(moves[:ready], moves[ready+1:]...)
+				continue
+			}
+			// Break a parallel-copy cycle with one scratch register.
+			src := moves[0].src
+			emit(uint8(scratch), src)
+			for i := range moves {
+				if moves[i].src == src {
+					moves[i].src = uint8(scratch)
+				}
+			}
+		}
+		if len(r.code) > pc && r.code[len(r.code)-1].kind == mixedBaseMove {
+			last := &r.code[len(r.code)-1]
+			last.kind, last.target = mixedMoveJump, blockPC[to]
+		} else {
+			r.code = append(r.code, mixedOp{mixedBaseOp: mixedBaseOp{kind: mixedBaseJump, target: blockPC[to]}})
+		}
 		return pc, true
 	}
 	for _, p := range patches {
@@ -530,6 +579,28 @@ func specializeMixedOp(op *mixedOp) {
 		op.kind = mixedAdd
 	case mixedBaseSub:
 		op.kind = mixedSub
+	case mixedBaseAnd:
+		op.kind = mixedAnd
+	case mixedBaseXor:
+		op.kind = mixedXor
+	case mixedBaseAndNot:
+		op.kind = mixedAndNot
+	case mixedBaseComplement:
+		op.kind = mixedComplement
+	case mixedBaseMul:
+		op.kind = mixedMul
+	case mixedBaseQuo:
+		if signed {
+			op.kind = mixedSignedQuo
+		} else {
+			op.kind = mixedUnsignedQuo
+		}
+	case mixedBaseRem:
+		if signed {
+			op.kind = mixedSignedRem
+		} else {
+			op.kind = mixedUnsignedRem
+		}
 	case mixedBaseOr:
 		op.kind = mixedOr
 	case mixedBaseEqual:
@@ -625,6 +696,24 @@ func (r *mixedTypedRunner) RunArgs(args []ixgo.Value) ixgo.Value {
 			regs[op.dst] = regs[op.x] + regs[op.y]
 		case mixedSub:
 			regs[op.dst] = regs[op.x] - regs[op.y]
+		case mixedAnd:
+			regs[op.dst] = regs[op.x] & regs[op.y]
+		case mixedXor:
+			regs[op.dst] = regs[op.x] ^ regs[op.y]
+		case mixedAndNot:
+			regs[op.dst] = regs[op.x] &^ regs[op.y]
+		case mixedComplement:
+			regs[op.dst] = ^regs[op.x]
+		case mixedMul:
+			regs[op.dst] = regs[op.x] * regs[op.y]
+		case mixedUnsignedQuo:
+			regs[op.dst] = regs[op.x] / regs[op.y]
+		case mixedSignedQuo:
+			regs[op.dst] = uint64(int64(regs[op.x]) / int64(regs[op.y]))
+		case mixedUnsignedRem:
+			regs[op.dst] = regs[op.x] % regs[op.y]
+		case mixedSignedRem:
+			regs[op.dst] = uint64(int64(regs[op.x]) % int64(regs[op.y]))
 		case mixedOr:
 			regs[op.dst] = regs[op.x] | regs[op.y]
 		case mixedShl:
@@ -665,6 +754,10 @@ func (r *mixedTypedRunner) RunArgs(args []ixgo.Value) ixgo.Value {
 			} else {
 				pc = op.falsePC
 			}
+			continue
+		case mixedMoveJump:
+			regs[op.dst] = regs[op.x]
+			pc = op.target
 			continue
 		case mixedBaseJump:
 			pc = op.target

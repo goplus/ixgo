@@ -24,6 +24,24 @@ func (r *mixedTypedRunner) runNumeric(args []ixgo.Value) ixgo.Value {
 			regs[op.dst] = regs[op.x] + regs[op.y]
 		case mixedSub:
 			regs[op.dst] = regs[op.x] - regs[op.y]
+		case mixedAnd:
+			regs[op.dst] = regs[op.x] & regs[op.y]
+		case mixedXor:
+			regs[op.dst] = regs[op.x] ^ regs[op.y]
+		case mixedAndNot:
+			regs[op.dst] = regs[op.x] &^ regs[op.y]
+		case mixedComplement:
+			regs[op.dst] = ^regs[op.x]
+		case mixedMul:
+			regs[op.dst] = regs[op.x] * regs[op.y]
+		case mixedUnsignedQuo:
+			regs[op.dst] = regs[op.x] / regs[op.y]
+		case mixedSignedQuo:
+			regs[op.dst] = uint64(int64(regs[op.x]) / int64(regs[op.y]))
+		case mixedUnsignedRem:
+			regs[op.dst] = regs[op.x] % regs[op.y]
+		case mixedSignedRem:
+			regs[op.dst] = uint64(int64(regs[op.x]) % int64(regs[op.y]))
 		case mixedOr:
 			regs[op.dst] = regs[op.x] | regs[op.y]
 		case mixedShl:
@@ -64,6 +82,10 @@ func (r *mixedTypedRunner) runNumeric(args []ixgo.Value) ixgo.Value {
 			} else {
 				pc = op.falsePC
 			}
+			continue
+		case mixedMoveJump:
+			regs[op.dst] = regs[op.x]
+			pc = op.target
 			continue
 		case mixedBaseJump:
 			pc = op.target
