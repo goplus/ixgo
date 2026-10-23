@@ -141,6 +141,7 @@ type function struct {
 	elidedTuples   []register                // tuple slots bypassed by direct Extract writes
 	elidedExtract  map[*ssa.Extract]struct{} // Extracts skipped after dests write
 	memoFlags      uint8
+	mixedRunner    TypedRunner // optional boxed-free scalar runner
 }
 
 const (
@@ -180,6 +181,7 @@ func (p *function) UnsafeRelease() {
 	p.Main = nil
 	p.clearRanges = nil
 	p.localRefs = nil
+	p.mixedRunner = nil
 }
 
 func (p *function) initPool() {
@@ -1443,8 +1445,29 @@ func elideCallExtracts(pfn *function, instr ssa.Value, nres int) []register {
 }
 
 func makeCallSpecializerInstr(interp *Interp, ifn *function, ia, dests []register) func(*frame) {
-	if len(dests) != ifn.nres {
+	if len(dests) != ifn.nres || len(dests) == 1 && dests[0] < 0 {
 		return nil
+	}
+	if ifn.canRunMixed(len(ia), nil) {
+		return func(fr *frame) {
+			args := make([]Value, len(ia))
+			for j, reg := range ia {
+				args[j] = fr.reg(reg)
+			}
+			result, _ := ifn.runMixed(args, nil)
+			switch len(dests) {
+			case 0:
+			case 1:
+				fr.setReg(dests[0], result)
+			default:
+				values := result.(tuple)
+				for j, dest := range dests {
+					if dest >= 0 {
+						fr.setReg(dest, values[j])
+					}
+				}
+			}
+		}
 	}
 	for _, dest := range dests {
 		if dest < 0 {

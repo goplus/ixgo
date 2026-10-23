@@ -1902,7 +1902,7 @@ func fib(n int) int { if n < 2 { return n }; return fib(n-1)+fib(n-2) }
 			t.Fatalf("mode %v: %v, %v", mode, got, err)
 		}
 	}
-	if EnableCachedReg != 1<<14 || LastMode != DisableMemo || DisableMemo != EnableCachedReg<<1 {
+	if EnableCachedReg != 1<<14 || LastMode != DisableMixedRunner || DisableMemo != EnableCachedReg<<1 {
 		t.Fatal("unexpected mode bit allocation")
 	}
 }

@@ -126,6 +126,7 @@ Optional optimization packages can be enabled with blank imports:
 | --- | --- |
 | [directcall](directcall/README.md) | Speeds up calls to supported standard-library functions with direct-call adapters. Import `ixgo/pkg` or individual export packages separately as needed. |
 | [directfunc](directfunc/README.md) | Speeds up calls to interpreted closures and function values with supported signatures, including repeated calls inside loops. |
+| [mixedrunner](mixedrunner/README.md) | Accelerates supported numeric loops, conversions, and static call graphs. |
 | [memo](memo/README.md) | Caches results and supported state transformations for eligible recursive functions and receiver methods. Use `ixgo.DisableMemo` to disable installation for a Context. |
 
 ```go
@@ -133,6 +134,7 @@ import (
 	_ "github.com/goplus/ixgo/directcall"
 	_ "github.com/goplus/ixgo/directfunc"
 	_ "github.com/goplus/ixgo/memo"
+	_ "github.com/goplus/ixgo/mixedrunner"
 )
 ```
 

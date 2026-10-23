@@ -709,3 +709,40 @@ func BenchmarkDirectCall(b *testing.B) {
 		})
 	})
 }
+
+type mixedEntryTestRunner struct {
+	calls  int
+	result Value
+}
+
+func (r *mixedEntryTestRunner) Run(Value) Value       { panic("RunArgs required") }
+func (r *mixedEntryTestRunner) RunArgs([]Value) Value { r.calls++; return r.result }
+
+func TestMixedEntryHelpers(t *testing.T) {
+	i := &Interp{}
+	r := &mixedEntryTestRunner{result: Tuple{true, float64(2)}}
+	pfn := &function{mixedRunner: r, narg: 0, nres: 2}
+	if got := i.callFunction(nil, pfn, nil, nil); !reflect.DeepEqual(got, r.result) {
+		t.Fatal(got)
+	}
+	i.callFunctionDiscardsResult(nil, pfn, nil, nil)
+	out := i.callFunctionByReflect(nil, pfn, reflect.TypeOf(func() (bool, float64) { return false, 0 }), nil, nil)
+	if len(out) != 2 || !out[0].Bool() || out[1].Float() != 2 || r.calls != 3 {
+		t.Fatalf("results %v calls %d", out, r.calls)
+	}
+	pfn.nres = 0
+	r.result = nil
+	if out := i.callFunctionByReflect(nil, pfn, reflect.TypeOf(func() {}), nil, nil); len(out) != 0 {
+		t.Fatal(out)
+	}
+	if pfn.canRunMixed(1, nil) || pfn.canRunMixed(0, []value{}) {
+		t.Fatal("invalid arguments/environment accepted")
+	}
+	pfn.nenv = 1
+	if _, ok := pfn.runMixed(nil, nil); ok {
+		t.Fatal("closure accepted")
+	}
+	if run := makeCallSpecializerInstr(i, pfn, nil, nil); run != nil {
+		t.Fatal("closure specialized")
+	}
+}
