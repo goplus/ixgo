@@ -32,6 +32,7 @@ import (
 	"testing"
 	"time"
 
+	_ "github.com/goplus/ixgo/memo"
 	"golang.org/x/tools/go/loader"
 
 	"github.com/goplus/ixgo"
@@ -4758,6 +4759,9 @@ func main() {
 }
 
 func TestGCChannelSafepoints(t *testing.T) {
+	if ixgo.IsLLGo {
+		t.Skip("skip llgo: finalizer scheduling is runtime-dependent")
+	}
 	for _, park := range []string{
 		`<-release`,
 		`_, _ = <-release`,
