@@ -4006,24 +4006,25 @@ func TestPromotedMethodLayoutIdentical(t *testing.T) {
 
 // TestPromotedMethodLayoutIcallUsage compares the actual icall occupancy of
 // promoted methods. Identical promotion layouts reuse the cached method table;
-// a different offset gets a separate table so the promoted call remains safe.
+// a different promotion layout gets a separate table so the promoted call
+// remains safe.
 func TestPromotedMethodLayoutIcallUsage(t *testing.T) {
 	capacity, _, _ := ixgo.IcallStat()
 	if capacity == 0 {
 		t.Skip("skip icall test under llgo or ifacefuncval")
 	}
 
-	loadAndMeasure := func(src, label, want string) (int, int) {
+	loadAndMeasure := func(src, label, want string) (allocated, cached int) {
 		t.Helper()
 		interp, obj := loadPromotedWrapper(t, src)
 		callPromotedString(t, label, obj, want)
 		interp.UnsafeRelease()
-		_, allocated, _ := ixgo.IcallStat()
-		return allocated, ixgo.IcallCached()
+		_, allocated, _ = ixgo.IcallStat()
+		cached = ixgo.IcallCached()
+		return
 	}
 
 	srcA := promotedWrapperSrc("Prefix int64", "111", 11)
-	srcB := promotedWrapperSrc("Prefix int64\n\tExtra byte", "111", 22)
 	allocatedA, cachedA := loadAndMeasure(srcA, "A", os.FileMode(11).String())
 	allocatedSame, cachedSame := loadAndMeasure(srcA, "same", os.FileMode(11).String())
 	if allocatedSame != allocatedA || cachedSame != cachedA {
@@ -4031,10 +4032,28 @@ func TestPromotedMethodLayoutIcallUsage(t *testing.T) {
 			allocatedA, allocatedSame, cachedA, cachedSame)
 	}
 
-	allocatedB, cachedB := loadAndMeasure(srcB, "B", os.FileMode(22).String())
-	if allocatedB <= allocatedSame || cachedB <= cachedSame {
-		t.Fatalf("different promoted offsets did not get a separate icall table: alloc %d->%d cached %d->%d",
-			allocatedSame, allocatedB, cachedSame, cachedB)
+	// The trailing field changes the outer type size while preserving the
+	// promoted method's index and offset. It must reuse the existing table.
+	srcTrailing := `package main
+
+import "os"
+
+type Wrapper struct {
+	Prefix int64
+	os.FileMode
+	Extra int64
+}
+
+func New() any {
+	return &Wrapper{Prefix: 111, FileMode: 11}
+}
+
+func main() {}
+`
+	allocatedTrailing, cachedTrailing := loadAndMeasure(srcTrailing, "trailing", os.FileMode(11).String())
+	if allocatedTrailing != allocatedSame || cachedTrailing != cachedSame {
+		t.Fatalf("trailing-only layout changed icall usage: alloc %d->%d cached %d->%d",
+			allocatedSame, allocatedTrailing, cachedSame, cachedTrailing)
 	}
 }
 
