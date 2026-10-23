@@ -26,7 +26,7 @@ const minNumberSlotInstructions = 16
 
 func (p *function) compileNumberSlots() {
 	ctx := p.Interp.ctx
-	if !ctx.NumberSlots || (memoPlugin != nil && ctx.Mode&DisableMemo == 0) || p.memoFlags != 0 || p.Interp.execution != nil || ctx.execution != nil || ctx.evalMode || ctx.evalCallFn != nil || ctx.debugFunc != nil || ctx.entryFunc != nil || ctx.leaveFunc != nil || ctx.panicFunc != nil || ctx.Mode&EnableTracing != 0 || ctx.BuilderMode&ssa.GlobalDebug != 0 || len(p.Fn.FreeVars) != 0 || p.Fn.Recover != nil {
+	if ctx.Mode&EnableNumberSlots == 0 || (memoPlugin != nil && ctx.Mode&DisableMemo == 0) || p.extFlags&(extMemoScalar|extMemoAccumulator|extMemoReceiver) != 0 || p.Interp.execution != nil || ctx.execution != nil || ctx.evalMode || ctx.evalCallFn != nil || ctx.debugFunc != nil || ctx.entryFunc != nil || ctx.leaveFunc != nil || ctx.panicFunc != nil || ctx.Mode&EnableTracing != 0 || ctx.BuilderMode&ssa.GlobalDebug != 0 || len(p.Fn.FreeVars) != 0 || p.Fn.Recover != nil {
 		return
 	}
 	instructions := 0
@@ -228,21 +228,21 @@ func (p *function) compileNumberSlots() {
 		first(fr)
 	}
 	p.Instrs, p.ssaInstrs, p.Blocks = code, source, blocks
-	p.numberSlots = len(values)
+	p.extFlags |= extNumberSlots
 }
 
 func (fr *frame) numberSlots() []uint64 {
-	if fr.memoState == nil {
-		fr.memoState = &interpreterMemoState{}
+	if fr.ext == nil {
+		fr.ext = &frameExtension{}
 	}
-	return fr.memoState.numberSlots
+	return fr.ext.numberSlots
 }
 
 func (fr *frame) setNumberSlots(values []uint64) {
-	if fr.memoState == nil {
-		fr.memoState = &interpreterMemoState{}
+	if fr.ext == nil {
+		fr.ext = &frameExtension{}
 	}
-	fr.memoState.numberSlots = values
+	fr.ext.numberSlots = values
 }
 
 func numberBinary(op token.Token, kind, rhs types.BasicKind) func(uint64, uint64) uint64 {

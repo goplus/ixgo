@@ -24,8 +24,11 @@ func numberDivmodSource(tb testing.TB) string {
 }
 func numberInterp(tb testing.TB, enabled bool, source string) *Interp {
 	tb.Helper()
-	ctx := NewContext(DisableMemo)
-	ctx.NumberSlots = enabled
+	mode := DisableMemo
+	if enabled {
+		mode |= EnableNumberSlots
+	}
+	ctx := NewContext(mode)
 	ctx.SetLeastCallForEnablePool(0)
 	i, err := ctx.LoadInterp("numbers.go", source)
 	if err != nil {
@@ -37,7 +40,7 @@ func numberInterp(tb testing.TB, enabled bool, source string) *Interp {
 func numberSelected(i *Interp, name string) int {
 	for fn, p := range i.funcs {
 		if fn.Name() == name {
-			return p.numberSlots
+			return p.extFlags & extNumberSlots
 		}
 	}
 	return 0
@@ -48,7 +51,7 @@ func TestNumberSlots(t *testing.T) {
 	for _, on := range []bool{false, true} {
 		t.Run(fmt.Sprint(on), func(t *testing.T) {
 			i := numberInterp(t, on, src)
-			t.Logf("NumberSlots=%v udiv=%d idiv=%d memo=%v", on, numberSelected(i, "udiv"), numberSelected(i, "idiv"), i.funcs[i.mainpkg.Func("udiv")] != nil && i.funcs[i.mainpkg.Func("udiv")].memoFlags != 0)
+			t.Logf("EnableNumberSlots=%v udiv=%d idiv=%d memo=%v", on, numberSelected(i, "udiv"), numberSelected(i, "idiv"), i.funcs[i.mainpkg.Func("udiv")] != nil && i.funcs[i.mainpkg.Func("udiv")].extFlags != 0)
 			if (numberSelected(i, "udiv") > 0) != on || numberSelected(i, "idiv") != 0 {
 				i.mainpkg.Func("udiv").WriteTo(os.Stderr)
 				t.Fatal("selection mismatch")
@@ -88,8 +91,7 @@ func TestNumberSlotsFallback(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			oldMemo := memoPlugin
 			defer func() { memoPlugin = oldMemo }()
-			ctx := NewContext(DisableMemo)
-			ctx.NumberSlots = true
+			ctx := NewContext(DisableMemo | EnableNumberSlots)
 			switch mode {
 			case "memo":
 				ctx.Mode &^= DisableMemo
@@ -212,16 +214,16 @@ func BenchmarkNumberSlots(b *testing.B) {
 				i.ctx.SetPrintOutput(&output)
 				var selected []string
 				for fn, p := range i.funcs {
-					if p.numberSlots > 0 {
-						selected = append(selected, fmt.Sprintf("%s:%d", fn.String(), p.numberSlots))
+					if p.extFlags&extNumberSlots != 0 {
+						selected = append(selected, fmt.Sprintf("%s", fn.String()))
 					}
-					if p.memoFlags != 0 {
+					if p.extFlags != 0 {
 						b.Fatal("optimizer unexpectedly active", fn)
 					}
 				}
 				sort.Strings(selected)
 				b.Logf("selected=%v", selected)
-				b.Logf("NumberSlots=%v target=%s slots=%d udiv=%d memo=%v", on, name, numberSelected(i, name), numberSelected(i, "udiv"), i.funcs[i.mainpkg.Func("udiv")] != nil && i.funcs[i.mainpkg.Func("udiv")].memoFlags != 0)
+				b.Logf("EnableNumberSlots=%v target=%s slots=%d udiv=%d memo=%v", on, name, numberSelected(i, name), numberSelected(i, "udiv"), i.funcs[i.mainpkg.Func("udiv")] != nil && i.funcs[i.mainpkg.Func("udiv")].extFlags != 0)
 				b.ReportAllocs()
 				b.ResetTimer()
 				for n := 0; n < b.N; n++ {
@@ -321,14 +323,13 @@ func TestNumberSlotsThreshold(t *testing.T) {
 			t.Fatalf("threshold mismatch: instructions=%d selected=%d", instructions, numberSelected(i, "leaf"))
 		}
 	}
-	if NewContext(0).NumberSlots {
+	if NewContext(0).Mode&EnableNumberSlots != 0 {
 		t.Fatal("number slots enabled by default")
 	}
 }
 
 func TestNumberSlotsGC(t *testing.T) {
-	ctx := NewContext(ExperimentalSupportGC | DisableMemo)
-	ctx.NumberSlots = true
+	ctx := NewContext(ExperimentalSupportGC | DisableMemo | EnableNumberSlots)
 	ctx.SetLeastCallForEnablePool(0)
 	i, err := ctx.LoadInterp("numbers.go", `package main
 import "runtime"
@@ -352,7 +353,7 @@ func TestNumberSlotsFrameReuse(t *testing.T) {
 func leaf(x uint64) uint64 { for n:=0;n<2;n++ { x=x*3+1; x=x^7; x=x^7; x=x+3; x=x-3; x=x^9; x=x^9 }; return x }
 `)
 	p := i.funcs[i.mainpkg.Func("leaf")]
-	if p.numberSlots == 0 {
+	if p.extFlags&extNumberSlots == 0 {
 		t.Fatal("leaf not selected")
 	}
 	fr := &frame{pfn: p, block: p.Main, stack: append([]value(nil), p.stack...)}

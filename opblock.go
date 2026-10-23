@@ -140,14 +140,14 @@ type function struct {
 	childFrameReg  register                  // first unused tuple slot for a returned child; -1 if absent
 	elidedTuples   []register                // tuple slots bypassed by direct Extract writes
 	elidedExtract  map[*ssa.Extract]struct{} // Extracts skipped after dests write
-	numberSlots    int                       // nonzero when instruction closures use numeric slots
-	memoFlags      uint8
+	extFlags       int                       // optional instruction extensions installed for this function
 }
 
 const (
-	interpreterMemoScalar uint8 = 1 << iota
-	interpreterMemoAccumulator
-	interpreterMemoReceiver
+	extMemoScalar = 1 << iota
+	extMemoAccumulator
+	extMemoReceiver
+	extNumberSlots
 )
 
 // closureCapture is one MakeClosure: its result register and captured
@@ -229,8 +229,8 @@ func (p *function) allocFrame(caller *frame) *frame {
 }
 
 func (p *function) deleteFrame(caller *frame, fr *frame) {
-	if p.memoFlags != 0 && fr.memoState != nil {
-		fr.memoState.reset()
+	if p.extFlags != 0 && fr.ext != nil {
+		fr.ext.reset()
 	}
 	p.Interp.trackDeferFrame(caller)
 	if caller.callee == fr {
@@ -277,8 +277,8 @@ func (p *function) deleteFrameToCaller(caller *frame, fr *frame) {
 		p.deleteFrame(caller, fr)
 		return
 	}
-	if p.memoFlags != 0 && fr.memoState != nil {
-		fr.memoState.reset()
+	if p.extFlags != 0 && fr.ext != nil {
+		fr.ext.reset()
 	}
 	if caller.deferid != 0 {
 		p.Interp.trackDeferFrame(caller)

@@ -203,10 +203,10 @@ type frame struct {
 	stack   []value // result args env datas
 	phiVals []value // temporary values for parallel phi assignments
 
-	ipc       int32
-	pred      int32
-	deferid   uint64
-	memoState *interpreterMemoState
+	ipc     int32
+	pred    int32
+	deferid uint64
+	ext     *frameExtension
 }
 
 func dumpBlock(block *ssa.BasicBlock, level int, pc ssa.Instruction) {
