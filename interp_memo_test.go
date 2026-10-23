@@ -71,7 +71,7 @@ func loadMainWithoutMemo(t testing.TB, source []byte) *Interp {
 	}
 	t.Cleanup(i.UnsafeRelease)
 	for _, p := range i.funcs {
-		if p.memoFlags != 0 {
+		if p.extFlags != 0 {
 			t.Fatal("memo enabled without plugin", p.Fn)
 		}
 	}
@@ -110,7 +110,7 @@ func TestInterpreterMemo(t *testing.T) {
 			}
 			baseline, i := loadMainMemoPair(t, src)
 			p := i.funcs[i.mainpkg.Func("f")]
-			if p.memoFlags&interpreterMemoScalar == 0 {
+			if p.extFlags&extMemoScalar == 0 {
 				t.Fatal("memo not enabled")
 			}
 			for n := 0; n <= 20; n++ {
@@ -146,7 +146,7 @@ func zero(x float64) float64 {if x==0{return x};z:=x-x;return 1/zero(z)+1/zero(-
 func divide(n int) int {if n<1{return 1/n};return divide(n-1)+divide(n-1)}
 func get() int {return count}
 `))
-	if i.funcs[i.mainpkg.Func("effects")].memoFlags&interpreterMemoScalar != 0 {
+	if i.funcs[i.mainpkg.Func("effects")].extFlags&extMemoScalar != 0 {
 		t.Fatal("effects memoized")
 	}
 	a, err := i.RunFunc("zero", float64(1))
@@ -174,7 +174,7 @@ func BenchmarkInterpreterMemo(b *testing.B) {
 			b.Fatal(err)
 		}
 		baseline, i := loadMainMemoPair(b, src)
-		if i.funcs[i.mainpkg.Func("f")].memoFlags&interpreterMemoScalar == 0 {
+		if i.funcs[i.mainpkg.Func("f")].extFlags&extMemoScalar == 0 {
 			b.Fatal("memo not enabled")
 		}
 		for pass, i := range []*Interp{baseline, i} {
@@ -218,7 +218,7 @@ func f(n int) int {if n<2{return n};return f(n-1)+f(n-2)}
 		if err != nil {
 			t.Fatal(err)
 		}
-		if i.funcs[i.mainpkg.Func("f")].memoFlags&interpreterMemoScalar != 0 {
+		if i.funcs[i.mainpkg.Func("f")].extFlags&extMemoScalar != 0 {
 			t.Fatal("instrumented function memoized")
 		}
 		if !tracing {
@@ -300,7 +300,7 @@ func acc(x int,a,b,p *int) {if x<2 {*p+=x;return};acc(x-1,a,b,p);acc(x-2,a,b,p)}
 	defer i.UnsafeRelease()
 	for _, name := range []string{"f", "acc"} {
 		p := i.funcs[i.mainpkg.Func(name)]
-		if p.memoFlags&interpreterMemoScalar != 0 || p.memoFlags&interpreterMemoAccumulator != 0 {
+		if p.extFlags&extMemoScalar != 0 || p.extFlags&extMemoAccumulator != 0 {
 			t.Fatal("debug function memoized", name)
 		}
 	}
@@ -319,7 +319,7 @@ func loadUglyMainMemo(t testing.TB) *Interp {
 	}
 	i := loadMainMemo(t, src)
 	for _, name := range []string{"f", "g", "h", "k"} {
-		if i.funcs[i.mainpkg.Func(name)].memoFlags&interpreterMemoAccumulator == 0 {
+		if i.funcs[i.mainpkg.Func(name)].extFlags&extMemoAccumulator == 0 {
 			t.Fatalf("%s not optimized", name)
 		}
 	}
@@ -375,7 +375,7 @@ func leaf(x int64,a,b,p *int64) { *p+=1;if *a==0 {*p+=2} }
 func root(x int64,a,b,p *int64) {leaf(x,a,b,p);leaf(x,a,b,p)}
 `))
 	for _, name := range []string{"root", "leaf"} {
-		if i.funcs[i.mainpkg.Func(name)].memoFlags&interpreterMemoAccumulator == 0 {
+		if i.funcs[i.mainpkg.Func(name)].extFlags&extMemoAccumulator == 0 {
 			t.Fatal("memo missing", name)
 		}
 	}
@@ -441,7 +441,7 @@ func TestInterpreterAccumulatorRejectsEffects(t *testing.T) {
 		src := `package main
 func f(x int,a,b,p *int) {if x<2 {*p+=x;return};` + body + `;f(x-1,a,b,p);f(x-2,a,b,p)}`
 		i := loadMainMemo(t, []byte(src))
-		if i.funcs[i.mainpkg.Func("f")].memoFlags&interpreterMemoAccumulator != 0 {
+		if i.funcs[i.mainpkg.Func("f")].extFlags&extMemoAccumulator != 0 {
 			t.Fatal("unsafe effects accepted", body)
 		}
 	}
@@ -452,7 +452,7 @@ func TestInterpreterAccumulatorUint8Overflow(t *testing.T) {
 func f(x uint8,a,b,p *uint8) {if x<2 {*p+=x;return};f(x-1,a,b,p);f(x-2,a,b,p)}
 `))
 	p := i.funcs[i.mainpkg.Func("f")]
-	if p.memoFlags&interpreterMemoAccumulator == 0 {
+	if p.extFlags&extMemoAccumulator == 0 {
 		t.Fatal("memo disabled")
 	}
 	var want uint8
@@ -488,11 +488,11 @@ func outer(n int,out *int,extra int) {inner(out,n);inner(out,extra)}
 func inner(out *int,n int) {*out+=n}
 `))
 	// Numerical conversions are supported by full-state caching.
-	if i.funcs[i.mainpkg.Func("mixed")].memoFlags&interpreterMemoAccumulator == 0 {
+	if i.funcs[i.mainpkg.Func("mixed")].extFlags&extMemoAccumulator == 0 {
 		t.Fatal("conversion rejected")
 	}
 	for _, name := range []string{"sum", "weighted", "widths", "outer", "inner"} {
-		if i.funcs[i.mainpkg.Func(name)].memoFlags&interpreterMemoAccumulator == 0 {
+		if i.funcs[i.mainpkg.Func(name)].extFlags&extMemoAccumulator == 0 {
 			t.Fatal("generic signature rejected", name)
 		}
 	}
@@ -522,7 +522,7 @@ func many(a *int,n int,out *int,b *int,c *int,weight int) {if n<2 {*out+=n*weigh
 func other(out *int,n int,c,b,a *int,weight int) {many(a,n,out,b,c,weight)}
 `))
 	for _, name := range []string{"many", "other"} {
-		if i.funcs[i.mainpkg.Func(name)].memoFlags&interpreterMemoAccumulator == 0 {
+		if i.funcs[i.mainpkg.Func(name)].extFlags&extMemoAccumulator == 0 {
 			t.Fatal(name)
 		}
 	}
@@ -547,7 +547,7 @@ func TestMemoRequiresRegistration(t *testing.T) {
 	}
 	i := loadMainWithoutMemo(t, src)
 	for _, fn := range i.funcs {
-		if fn.memoFlags&interpreterMemoScalar != 0 || fn.memoFlags&interpreterMemoReceiver != 0 || fn.memoFlags&interpreterMemoAccumulator != 0 {
+		if fn.extFlags&extMemoScalar != 0 || fn.extFlags&extMemoReceiver != 0 || fn.extFlags&extMemoAccumulator != 0 {
 			t.Fatal("memo enabled without plugin")
 		}
 	}
@@ -566,7 +566,7 @@ func f(n int,x %[1]s,p *%[1]s) {if n==0 {%[2]s;return};*p=7;f(n-1,x,p);*p=7;f(n-
 `, kind, op)
 				baseline, i := loadMainMemoPair(t, []byte(src))
 				p := i.funcs[i.mainpkg.Func("f")]
-				if p.memoFlags&interpreterMemoAccumulator == 0 {
+				if p.extFlags&extMemoAccumulator == 0 {
 					t.Fatal("state cache missing")
 				}
 				typ := reflect.TypeOf(int64(0))
@@ -628,7 +628,7 @@ func TestInterpreterStatePanic(t *testing.T) {
 		i := loadMainMemo(t, []byte(fmt.Sprintf(`package main
 func f(x int,p *int) {%s}
 `, op)))
-		if i.funcs[i.mainpkg.Func("f")].memoFlags&interpreterMemoAccumulator == 0 {
+		if i.funcs[i.mainpkg.Func("f")].extFlags&extMemoAccumulator == 0 {
 			t.Fatal(op)
 		}
 		x := 0
@@ -649,7 +649,7 @@ func BenchmarkInterpreterState(b *testing.B) {
 		baseline, i := loadMainMemoPair(b, []byte(fmt.Sprintf(`package main
 func f(n int,x %[1]s,p *%[1]s) {if n==0 {*p *= x;return};*p=7;f(n-1,x,p);*p=7;f(n-1,x,p)}
 `, kind)))
-		if i.funcs[i.mainpkg.Func("f")].memoFlags&interpreterMemoAccumulator == 0 {
+		if i.funcs[i.mainpkg.Func("f")].extFlags&extMemoAccumulator == 0 {
 			b.Fatal("state cache missing")
 		}
 		for pass, i := range []*Interp{baseline, i} {
@@ -680,7 +680,7 @@ func TestInterpreterStateAliasing(t *testing.T) {
 func f(n int,a,p *int) {if n==0 {*p *= *a;return};f(n-1,a,p);f(n-1,a,p)}
 `))
 	p := i.funcs[i.mainpkg.Func("f")]
-	if p.memoFlags&interpreterMemoAccumulator == 0 {
+	if p.extFlags&extMemoAccumulator == 0 {
 		t.Fatal("state cache missing")
 	}
 	var want int
@@ -716,14 +716,14 @@ func TestComposeReceiverParentRejectsIncompatiblePlans(t *testing.T) {
 	childPlan := &MemoReceiverPlan{Receiver: &MemoReceiverState{
 		Fields: [][]int{{0}}, Additive: []bool{false}, Affine: []bool{true}, Bitwise: []bool{false},
 	}}
-	parent := &frame{memoState: &interpreterMemoState{receiver: &interpreterReceiverState{
+	parent := &frame{ext: &frameExtension{receiver: &interpreterReceiverState{
 		memo: &interpreterReceiverMemo{plan: parentPlan, receiver: receiver}, fields: []reflect.Value{field}, affine: []receiverTransform{{a: 1}},
 	}}}
-	child := &frame{caller: parent, memoState: &interpreterMemoState{receiver: &interpreterReceiverState{
+	child := &frame{caller: parent, ext: &frameExtension{receiver: &interpreterReceiverState{
 		memo: &interpreterReceiverMemo{plan: childPlan, receiver: receiver}, fields: []reflect.Value{field},
 	}}}
 	composeReceiverParent(child, []receiverTransform{{a: 2, b: 3}})
-	if got := parent.memoState.receiver.affine[0]; got != (receiverTransform{a: 1}) {
+	if got := parent.ext.receiver.affine[0]; got != (receiverTransform{a: 1}) {
 		t.Fatalf("incompatible receiver plans composed transform: %#v", got)
 	}
 }
@@ -735,7 +735,7 @@ func TestInterpreterReceiverStateAndHits(t *testing.T) {
  func run(n int,x float64)(float64,float64,int,string){u:=42;p:=&state{value:3,unused:&u,spare:"untouched"};v:=p.step(n,x);return v,p.value,*p.unused,p.spare}
  `))
 	methods := receiverFunctions(i)
-	if len(methods) != 1 || methods[0].memoFlags&interpreterMemoReceiver == 0 {
+	if len(methods) != 1 || methods[0].extFlags&extMemoReceiver == 0 {
 		t.Fatal("receiver disabled")
 	}
 	p := methods[0]
@@ -745,8 +745,8 @@ func TestInterpreterReceiverStateAndHits(t *testing.T) {
 			ret := p.Instrs[j]
 			p.Instrs[j] = func(fr *frame) {
 				ret(fr)
-				if fr.memoState != nil && fr.memoState.receiver.memo != nil {
-					hits += fr.memoState.receiver.memo.hits
+				if fr.ext != nil && fr.ext.receiver.memo != nil {
+					hits += fr.ext.receiver.memo.hits
 				}
 			}
 		}
@@ -792,7 +792,7 @@ func run(n int)int{p:=&S{};a:=0;return p.f(n,&a)}
 `
 			i := loadMainMemo(t, []byte(src))
 			for _, p := range receiverFunctions(i) {
-				if p.memoFlags&interpreterMemoReceiver != 0 {
+				if p.extFlags&extMemoReceiver != 0 {
 					t.Fatal("unsafe method enabled")
 				}
 			}
@@ -805,7 +805,7 @@ func run(n int,alias bool)(int,int){p:=&S{v:2};a:=7;q:=&a;if alias{q=&p.v};v:=p.
 func nilrun(n int)int{var p *S;return p.f(n,nil)}
 `))
 	p := receiverFunctions(i)[0]
-	if p.memoFlags&interpreterMemoReceiver == 0 {
+	if p.extFlags&extMemoReceiver == 0 {
 		t.Fatal("safe method rejected")
 	}
 	for _, alias := range []bool{false, true} {
@@ -856,7 +856,7 @@ func run()int{return (&S{}).f(3)}`)
 			}
 			defer i.UnsafeRelease()
 			for _, p := range receiverFunctions(i) {
-				if p.memoFlags&interpreterMemoReceiver != 0 {
+				if p.extFlags&extMemoReceiver != 0 {
 					t.Fatal("instrumented method enabled")
 				}
 			}
@@ -875,7 +875,7 @@ func TestInterpreterReceiverNilAndGraphSharing(t *testing.T) {
  `))
 	methods := receiverFunctions(i)
 	for _, p := range methods {
-		if p.memoFlags&interpreterMemoReceiver == 0 {
+		if p.extFlags&extMemoReceiver == 0 {
 			t.Fatal(p.Fn)
 		}
 	}
@@ -911,7 +911,7 @@ func TestInterpreterReceiverFloat32AndNested(t *testing.T) {
  func run(n int,x float32)(float32,float32){p:=&S{};a:=p.f(n,x);return a,p.inner.x}
  `))
 	p := receiverFunctions(i)[0]
-	if p.memoFlags&interpreterMemoReceiver == 0 {
+	if p.extFlags&extMemoReceiver == 0 {
 		t.Fatal("nested state rejected")
 	}
 	for _, x := range []float32{math.Float32frombits(0x80000000), math.Float32frombits(0x7fc00123), 1.25} {
@@ -970,8 +970,8 @@ func receiverHits(methods []*function) *uint64 {
 				ret := p.Instrs[j]
 				p.Instrs[j] = func(fr *frame) {
 					ret(fr)
-					if fr.memoState != nil && fr.memoState.receiver.memo != nil {
-						*hits += fr.memoState.receiver.memo.hits
+					if fr.ext != nil && fr.ext.receiver.memo != nil {
+						*hits += fr.ext.receiver.memo.hits
 					}
 				}
 			}
@@ -991,7 +991,7 @@ func TestInterpreterReceiverMixedAdditive(t *testing.T) {
  func run(n int, x int8,y uint8,z int64,ro int)(int,int8,uint8,int64,int,int,float64,string){p:=&S{inner:inner{x,y},wide:z,ro:ro,state:5,floating:8,unused:"kept"};a:=p.f(n);return a,p.inner.sum,p.inner.sub,p.wide,p.ro,p.state,p.floating,p.unused}
  `))
 	methods := receiverFunctions(i)
-	if len(methods) != 1 || methods[0].memoFlags&interpreterMemoReceiver == 0 {
+	if len(methods) != 1 || methods[0].extFlags&extMemoReceiver == 0 {
 		t.Fatal("disabled")
 	}
 	hits := receiverHits(methods)
@@ -1033,7 +1033,7 @@ func TestInterpreterReceiverAdditiveRejections(t *testing.T) {
 			baseline, i := loadMainMemoPair(t, []byte(src))
 			methods := receiverFunctions(i)
 			for _, p := range methods {
-				if p.memoFlags&interpreterMemoReceiver == 0 {
+				if p.extFlags&extMemoReceiver == 0 {
 					t.Fatal("full-state fallback disabled", p.Fn)
 				}
 			}
@@ -1072,7 +1072,7 @@ func TestInterpreterReceiverAffine(t *testing.T) {
 			methods := receiverFunctions(i)
 			hits := receiverHits(methods)
 			for _, p := range methods {
-				if p.memoFlags&interpreterMemoReceiver == 0 {
+				if p.extFlags&extMemoReceiver == 0 {
 					t.Fatal("affine proof", p.Fn)
 				}
 			}
@@ -1140,7 +1140,7 @@ func TestInterpreterReceiverAffineRejections(t *testing.T) {
  func run(n,x,k int)(int,int,int){p:=&S{v:x,other:2};a:=p.f(n,k);return a,p.v,p.other}`))
 			methods := receiverFunctions(i)
 			for _, p := range methods {
-				if p.memoFlags&interpreterMemoReceiver == 0 {
+				if p.extFlags&extMemoReceiver == 0 {
 					t.Fatal("unsafe affine rejected", p.Fn)
 				}
 			}
@@ -1168,7 +1168,7 @@ func BenchmarkInterpreterReceiverAffine(b *testing.B) {
  func(p *S) f(n int,k int64){if n==0{p.x*=k;p.x+=3;p.y*=uint8(k);p.y-=7;return};p.f(n-1,k);p.x-=int64(n);p.f(n-1,k)}
  func run(n int)int64{p:=&S{x:7};p.f(n,-3);return p.x}`))
 	for _, p := range receiverFunctions(i) {
-		if p.memoFlags&interpreterMemoReceiver == 0 {
+		if p.extFlags&extMemoReceiver == 0 {
 			b.Fatal("disabled")
 		}
 	}
@@ -1198,7 +1198,7 @@ func TestInterpreterReceiverAffinePointerOperand(t *testing.T) {
 	methods := receiverFunctions(i)
 	hits := receiverHits(methods)
 	for _, p := range methods {
-		if p.memoFlags&interpreterMemoReceiver == 0 {
+		if p.extFlags&extMemoReceiver == 0 {
 			t.Fatal("pointer factor rejected", p.Fn)
 		}
 	}
@@ -1232,7 +1232,7 @@ func TestInterpreterReceiverAffineNonrecursiveHelper(t *testing.T) {
 	methods := receiverFunctions(i)
 	hits := receiverHits(methods)
 	for _, p := range methods {
-		if p.memoFlags&interpreterMemoReceiver == 0 {
+		if p.extFlags&extMemoReceiver == 0 {
 			t.Fatal("helper tracking disabled", p.Fn)
 		}
 	}
@@ -1273,7 +1273,7 @@ func TestInterpreterReceiverBitwise(t *testing.T) {
 			methods := receiverFunctions(i)
 			hits := receiverHits(methods)
 			for _, p := range methods {
-				if p.memoFlags&interpreterMemoReceiver == 0 {
+				if p.extFlags&extMemoReceiver == 0 {
 					t.Fatal("bitwise proof", p.Fn)
 				}
 			}
@@ -1347,7 +1347,7 @@ func TestInterpreterReceiverShiftNegation(t *testing.T) {
 			methods := receiverFunctions(i)
 			hits := receiverHits(methods)
 			for _, p := range methods {
-				if p.memoFlags&interpreterMemoReceiver == 0 {
+				if p.extFlags&extMemoReceiver == 0 {
 					t.Fatal("shift/negation proof", p.Fn)
 				}
 			}
@@ -1373,7 +1373,7 @@ func TestInterpreterReceiverNegativeShift(t *testing.T) {
  `))
 	methods := receiverFunctions(i)
 	for _, p := range methods {
-		if p.memoFlags&interpreterMemoReceiver == 0 {
+		if p.extFlags&extMemoReceiver == 0 {
 			t.Fatal("shift proof", p.Fn)
 		}
 	}
@@ -1399,7 +1399,7 @@ func TestInterpreterReceiverBitwiseSeparateGraphs(t *testing.T) {
 	methods := receiverFunctions(i)
 	hits := receiverHits(methods)
 	for _, p := range methods {
-		if p.memoFlags&interpreterMemoReceiver == 0 {
+		if p.extFlags&extMemoReceiver == 0 {
 			t.Fatal("separate graph proof", p.Fn)
 		}
 	}
@@ -1432,7 +1432,7 @@ func TestInterpreterReceiverTransformFallback(t *testing.T) {
 				if p.Fn.Name() != "f" {
 					continue
 				}
-				if p.memoFlags&interpreterMemoReceiver == 0 {
+				if p.extFlags&extMemoReceiver == 0 {
 					t.Fatal("unsafe transform", p.Fn)
 				}
 			}
@@ -1454,7 +1454,7 @@ func BenchmarkInterpreterReceiverOperators(b *testing.B) {
  func(p *S) f(n int,k int64){p.update(k);if n>0{p.f(n-1,k);p.update(int64(n));p.f(n-1,k)}}
  func run(n int)(int64,uint8){p:=&S{x:7,y:129};p.f(n,-3);return p.x,p.y}`))
 		for _, p := range receiverFunctions(i) {
-			if p.memoFlags&interpreterMemoReceiver == 0 {
+			if p.extFlags&extMemoReceiver == 0 {
 				b.Fatal("disabled")
 			}
 		}
@@ -1486,7 +1486,7 @@ func TestInterpreterReceiverExecutedShiftCounts(t *testing.T) {
 	methods := receiverFunctions(i)
 	hits := receiverHits(methods)
 	for _, p := range methods {
-		if p.memoFlags&interpreterMemoReceiver == 0 {
+		if p.extFlags&extMemoReceiver == 0 {
 			t.Fatal("variable-count proof", p.Fn)
 		}
 	}
@@ -1502,7 +1502,7 @@ func TestInterpreterReceiverExecutedShiftCounts(t *testing.T) {
 
 func assertReceiverFullState(t *testing.T, p *function, _ int) {
 	t.Helper()
-	if p.memoFlags&interpreterMemoReceiver == 0 {
+	if p.extFlags&extMemoReceiver == 0 {
 		t.Fatal("receiver full-state plan missing", p.Fn)
 	}
 }
@@ -1673,7 +1673,7 @@ func TestInterpreterMemoCacheBound(t *testing.T) {
 func f(n int) int { if n == 0 { return 0 }; return f(n-1)+1 }
 `))
 	p := i.funcs[i.mainpkg.Func("f")]
-	if p.memoFlags&interpreterMemoScalar == 0 {
+	if p.extFlags&extMemoScalar == 0 {
 		t.Fatal("memo disabled")
 	}
 	peak := 0
@@ -1682,8 +1682,8 @@ func f(n int) int { if n == 0 { return 0 }; return f(n-1)+1 }
 			ret := p.Instrs[j]
 			p.Instrs[j] = func(fr *frame) {
 				cache := (*interpreterMemo)(nil)
-				if fr.memoState != nil {
-					cache = fr.memoState.memo
+				if fr.ext != nil {
+					cache = fr.ext.memo
 				}
 				ret(fr)
 				if cache != nil {
@@ -1708,7 +1708,7 @@ func TestInterpreterAccumulatorCacheBound(t *testing.T) {
 func f(n int, p *int) { if n == 0 { *p += 1; return }; f(n-1, p) }
 `))
 	p := i.funcs[i.mainpkg.Func("f")]
-	if p.memoFlags&interpreterMemoAccumulator == 0 {
+	if p.extFlags&extMemoAccumulator == 0 {
 		t.Fatal("accumulator memo disabled")
 	}
 	peak := 0
@@ -1717,8 +1717,8 @@ func f(n int, p *int) { if n == 0 { *p += 1; return }; f(n-1, p) }
 			ret := p.Instrs[j]
 			p.Instrs[j] = func(fr *frame) {
 				cache := (*interpreterAccumulatorMemo)(nil)
-				if fr.memoState != nil {
-					cache = fr.memoState.accumulator.memo
+				if fr.ext != nil {
+					cache = fr.ext.accumulator.memo
 				}
 				ret(fr)
 				if cache != nil {
@@ -1747,7 +1747,7 @@ func TestInterpreterReceiverCacheBound(t *testing.T) {
  `))
 	methods := receiverFunctions(i)
 	p := methods[0]
-	if p.memoFlags&interpreterMemoReceiver == 0 {
+	if p.extFlags&extMemoReceiver == 0 {
 		t.Fatal("method disabled")
 	}
 	assertReceiverFullState(t, p, 1)
@@ -1758,8 +1758,8 @@ func TestInterpreterReceiverCacheBound(t *testing.T) {
 			ret := p.Instrs[j]
 			p.Instrs[j] = func(fr *frame) {
 				ret(fr)
-				if fr.memoState != nil {
-					if cache := fr.memoState.receiver.memo; cache != nil {
+				if fr.ext != nil {
+					if cache := fr.ext.receiver.memo; cache != nil {
 						if len(cache.values) > interpreterReceiverCacheLimit {
 							t.Fatal("cache exceeded limit", len(cache.values))
 						}
@@ -1797,7 +1797,7 @@ func TestInterpreterReceiverSaturatedTransforms(t *testing.T) {
  `))
 	methods := receiverFunctions(i)
 	for _, p := range methods {
-		if p.memoFlags&interpreterMemoReceiver == 0 {
+		if p.extFlags&extMemoReceiver == 0 {
 			t.Fatal("method disabled", p.Fn)
 		}
 	}
@@ -1893,8 +1893,8 @@ func fib(n int) int { if n < 2 { return n }; return fib(n-1)+fib(n-2) }
 		}
 		pfn := i.funcs[i.mainpkg.Func("fib")]
 		enabled := mode&DisableMemo == 0
-		if (calls > before) != enabled || (pfn.memoFlags != 0) != enabled {
-			t.Fatalf("mode %v: plugin calls=%d, flags=%d", mode, calls-before, pfn.memoFlags)
+		if (calls > before) != enabled || (pfn.extFlags != 0) != enabled {
+			t.Fatalf("mode %v: plugin calls=%d, flags=%d", mode, calls-before, pfn.extFlags)
 		}
 		got, err := i.RunFunc("fib", 10)
 		i.UnsafeRelease()
@@ -1902,7 +1902,7 @@ func fib(n int) int { if n < 2 { return n }; return fib(n-1)+fib(n-2) }
 			t.Fatalf("mode %v: %v, %v", mode, got, err)
 		}
 	}
-	if EnableCachedReg != 1<<14 || LastMode != DisableMemo || DisableMemo != EnableCachedReg<<1 {
+	if EnableCachedReg != 1<<14 || LastMode != EnableNumberSlots || EnableNumberSlots != DisableMemo<<1 {
 		t.Fatal("unexpected mode bit allocation")
 	}
 }
