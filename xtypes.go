@@ -207,16 +207,17 @@ type mfnValue struct {
 	id int
 }
 
-// indexsToString encodes the promotion path with outer size and field offsets,
-// e.g. "16.1@8.5". FuncId is reused as a reflectx method table entry, which
+// indexsToString encodes the promotion path and the offsets needed to walk it,
+// e.g. ".1@8.5". FuncId is reused as a reflectx method table entry, which
 // bakes in those offsets, so types that share a selection index but not a
-// layout must not share an id.
+// promotion layout must not share an id. The outer type size is excluded: it
+// does not affect this walk and would prevent reuse when only trailing fields
+// differ.
 func indexsToString(typ reflect.Type, index []int) string {
 	if typ.Kind() == reflect.Ptr {
 		typ = typ.Elem()
 	}
 	var sb strings.Builder
-	sb.WriteString(strconv.FormatUint(uint64(typ.Size()), 10))
 	last := len(index) - 1
 	for i, v := range index {
 		sb.WriteByte('.')

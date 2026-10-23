@@ -3981,26 +3981,60 @@ func TestPromotedMethodLayoutReverseOrder(t *testing.T) {
 
 func TestPromotedMethodLayoutIdentical(t *testing.T) {
 	capacity, _, _ := ixgo.IcallStat()
+	if capacity == 0 {
+		t.Skip("skip icall test under llgo or ifacefuncval")
+	}
 	src := promotedWrapperSrc("Prefix int64", "111", 11)
 	want := os.FileMode(11).String()
 
 	a, objA := loadPromotedWrapper(t, src)
-	defer a.UnsafeRelease()
 	callPromotedString(t, "A", objA, want)
+	a.UnsafeRelease()
 	_, allocA, _ := ixgo.IcallStat()
 	cachedA := ixgo.IcallCached()
 
 	b, objB := loadPromotedWrapper(t, src)
-	defer b.UnsafeRelease()
 	callPromotedString(t, "B", objB, want)
-	if capacity == 0 {
-		return
-	}
+	b.UnsafeRelease()
 	_, allocB, _ := ixgo.IcallStat()
 	cachedB := ixgo.IcallCached()
 	if allocB != allocA || cachedB != cachedA {
 		t.Fatalf("identical layouts should reuse icall slots: alloc %d->%d cached %d->%d",
 			allocA, allocB, cachedA, cachedB)
+	}
+}
+
+// TestPromotedMethodLayoutIcallUsage compares the actual icall occupancy of
+// promoted methods. Identical promotion layouts reuse the cached method table;
+// a different offset gets a separate table so the promoted call remains safe.
+func TestPromotedMethodLayoutIcallUsage(t *testing.T) {
+	capacity, _, _ := ixgo.IcallStat()
+	if capacity == 0 {
+		t.Skip("skip icall test under llgo or ifacefuncval")
+	}
+
+	loadAndMeasure := func(src, label, want string) (int, int) {
+		t.Helper()
+		interp, obj := loadPromotedWrapper(t, src)
+		callPromotedString(t, label, obj, want)
+		interp.UnsafeRelease()
+		_, allocated, _ := ixgo.IcallStat()
+		return allocated, ixgo.IcallCached()
+	}
+
+	srcA := promotedWrapperSrc("Prefix int64", "111", 11)
+	srcB := promotedWrapperSrc("Prefix int64\n\tExtra byte", "111", 22)
+	allocatedA, cachedA := loadAndMeasure(srcA, "A", os.FileMode(11).String())
+	allocatedSame, cachedSame := loadAndMeasure(srcA, "same", os.FileMode(11).String())
+	if allocatedSame != allocatedA || cachedSame != cachedA {
+		t.Fatalf("identical promoted layouts changed icall usage: alloc %d->%d cached %d->%d",
+			allocatedA, allocatedSame, cachedA, cachedSame)
+	}
+
+	allocatedB, cachedB := loadAndMeasure(srcB, "B", os.FileMode(22).String())
+	if allocatedB <= allocatedSame || cachedB <= cachedSame {
+		t.Fatalf("different promoted offsets did not get a separate icall table: alloc %d->%d cached %d->%d",
+			allocatedSame, allocatedB, cachedSame, cachedB)
 	}
 }
 
