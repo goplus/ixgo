@@ -624,6 +624,7 @@ func embedFunc(typ reflect.Type, name string, idx []int, pointer bool, indirect 
 // mfnMap and mfnId are process-global: they cache embed-func closures and
 // FuncIds across all Context instances. Entries are never evicted. Closures
 // stored here must not capture any per-Context state.
+// IDs become reflectx.Method.FuncId keys in reflectx's global method cache.
 var (
 	mfnId  int64
 	mfnMap sync.Map
@@ -639,8 +640,8 @@ func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 	numMethods := len(methods)
 	ms := make([]reflectx.Method, numMethods)
 	checkXGo := r.ctx.Mode&CheckGopOverloadFunc != 0
-	// Match reflectx.setupMethodTables: a struct containing just one pointer
-	// needs a different interface wrapper from a struct with additional fields.
+	// Only the struct case of reflectx.setupMethodTables applies to promoted
+	// methods: a struct containing just one pointer needs a distinct wrapper.
 	onePtr := typ.Kind() == reflect.Struct && typ.NumField() == 1 && typ.Field(0).Type.Kind() == reflect.Ptr
 	for i := 0; i < numMethods; i++ {
 		fn := methods[i].Obj().(*types.Func)
