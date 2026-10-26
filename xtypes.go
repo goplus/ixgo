@@ -200,6 +200,7 @@ type mfnKey struct {
 	indexs   string
 	pointer  bool
 	indirect bool
+	onePtr   bool
 }
 
 type mfnValue struct {
@@ -207,12 +208,9 @@ type mfnValue struct {
 	id int
 }
 
-// indexsToString encodes the promotion path and the offsets needed to walk it,
-// e.g. ".1@8.5". FuncId is reused as a reflectx method table entry, which
-// bakes in those offsets, so types that share a selection index but not a
-// promotion layout must not share an id. The outer type size is excluded: it
-// does not affect this walk and would prevent reuse when only trailing fields
-// differ.
+// indexsToString encodes promoted field indices and offsets, e.g. ".1@8.5".
+// Size is omitted so compatible trailing fields share method tables; onePtr
+// in mfnKey separately distinguishes interface receiver representations.
 func indexsToString(typ reflect.Type, index []int) string {
 	if typ.Kind() == reflect.Ptr {
 		typ = typ.Elem()
@@ -625,9 +623,8 @@ func embedFunc(typ reflect.Type, name string, idx []int, pointer bool, indirect 
 
 // mfnMap and mfnId are process-global: they cache embed-func closures and
 // FuncIds across all Context instances. Entries are never evicted. Closures
-// stored here must not capture any per-Context state. FuncId identifies a
-// reflectx method table entry, so indexs includes offsets along the
-// promotion path.
+// stored here must not capture any per-Context state.
+// IDs become reflectx.Method.FuncId keys in reflectx's global method cache.
 var (
 	mfnId  int64
 	mfnMap sync.Map
@@ -643,6 +640,9 @@ func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 	numMethods := len(methods)
 	ms := make([]reflectx.Method, numMethods)
 	checkXGo := r.ctx.Mode&CheckGopOverloadFunc != 0
+	// Only the struct case of reflectx.setupMethodTables applies to promoted
+	// methods: a struct containing just one pointer needs a distinct wrapper.
+	onePtr := typ.Kind() == reflect.Struct && typ.NumField() == 1 && typ.Field(0).Type.Kind() == reflect.Ptr
 	for i := 0; i < numMethods; i++ {
 		fn := methods[i].Obj().(*types.Func)
 		sig := methods[i].Type().(*types.Signature)
@@ -663,6 +663,7 @@ func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 				indexs:   indexsToString(typ, idx),
 				pointer:  pointer,
 				indirect: indirect,
+				onePtr:   onePtr,
 			}
 			actual, ok := mfnMap.Load(key)
 			if !ok {
