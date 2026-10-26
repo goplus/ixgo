@@ -468,6 +468,7 @@ func (visit *visitor) function(fn *ssa.Function) {
 		visit.intp.ctx.evalCallFn == nil && visit.intp.ctx.debugFunc == nil {
 		applyMemoPlugin(pfn, fn)
 	}
+	pfn.compileNumberSlots()
 	pfn.base = visit.base
 	visit.base += len(pfn.ssaInstrs) + 2
 	pfn.initPool()
