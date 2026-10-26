@@ -3901,11 +3901,7 @@ func main() {
 func loadPromotedWrapper(t *testing.T, src string) (*ixgo.Interp, any) {
 	t.Helper()
 	ctx := ixgo.NewContext(ixgo.SupportMultipleInterp)
-	pkg, err := ctx.LoadFile("main.go", src)
-	if err != nil {
-		t.Fatal(err)
-	}
-	interp, err := ctx.NewInterp(pkg)
+	interp, err := ctx.LoadInterp("main.go", src)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -4082,6 +4078,52 @@ func main() {}
 	b, objB := loadPromotedWrapper(t, srcTrailing)
 	defer b.UnsafeRelease()
 	callPromotedString(t, "trailing", objB, os.FileMode(22).String())
+}
+
+// Receiver layouts coexist in one interpreter: the single-pointer wrapper
+// needs its own interface adapter, while trailing-field variants can share one.
+func TestPromotedMethodReceiverStorage(t *testing.T) {
+	const source = `package main
+
+import (
+	"fmt"
+	"io"
+	"strings"
+)
+
+type Wrapped struct {
+	*strings.Reader
+}
+
+type Wrapped1 struct {
+	*strings.Reader
+	Extra [3]int64
+}
+
+type Wrapped2 struct {
+	*strings.Reader
+	Extra [5]int64
+}
+
+func main() {
+	for _, reader := range []io.Reader{
+		Wrapped{Reader: strings.NewReader("hello")},
+		&Wrapped{Reader: strings.NewReader("hello")},
+		Wrapped1{Reader: strings.NewReader("hello")},
+		&Wrapped1{Reader: strings.NewReader("hello")},
+		Wrapped2{Reader: strings.NewReader("hello")},
+		&Wrapped2{Reader: strings.NewReader("hello")},
+	} {
+		data, err := io.ReadAll(reader)
+		if err != nil || string(data) != "hello" {
+			panic(fmt.Sprintf("%T: ReadAll = %q, %v; want %q, nil", reader, data, err, "hello"))
+		}
+	}
+}
+`
+	if _, err := ixgo.NewContext(0).RunFile("main.go", source, nil); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestPrebuildSSA(t *testing.T) {

@@ -78,13 +78,13 @@ jobs:
         node-version: '24'
         package-manager-cache: false
 
-    - name: Test slice bounds, large initializers and GC on Wasm
+    - name: Test slice bounds, large initializers, GC and promoted methods on Wasm
       env:
         GOOS: js
         GOARCH: wasm
       run: >-
         go test -v -exec="$(go env GOROOT)/lib/wasm/go_js_wasm_exec"
-        -run '^(TestLargeVariadicInitializer|TestGCLiveness|TestIssue30116uBoundsMessages)' .
+        -run '^(TestLargeVariadicInitializer|TestGCLiveness|TestIssue30116uBoundsMessages|TestPromotedMethod)' .
 
   Test-IfaceFuncval:
     strategy:
