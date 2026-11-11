@@ -26,6 +26,10 @@ import (
 type ExecutionPosition struct {
 	GoroutineID uint64
 	Position    token.Position
+	// Stack is an owned snapshot of frames with their own accepted source
+	// positions, innermost first. It is populated only with TrackStack and is
+	// empty on clear.
+	Stack []token.Position
 	// Clear removes the location. Position is zero for clear events.
 	Clear bool
 	// Sequence increases within a tracker. Keep the latest per goroutine,
@@ -39,8 +43,12 @@ type ExecutionOptions struct {
 	// It must return consistent results and be safe for concurrent compilation.
 	Filter func(token.Position) bool
 	// ReportRepeated reports every accepted DebugRef position, even on the same
-	// line. Caller restores and clears remain deduplicated.
+	// line. Without TrackStack, caller restores and clears remain deduplicated.
 	ReportRepeated bool
+	// TrackStack includes frames that have reached their own accepted source
+	// position. Their first position and exit are reported even when the top
+	// line is unchanged; frames with only an inherited position are omitted.
+	TrackStack bool
 }
 
 // ExecutionTracker tracks each goroutine's source position, merging consecutive
@@ -138,9 +146,9 @@ func (t *ExecutionTracker) setPosition(fr *frame, pos token.Position) {
 	if f == nil || t.closed.Load() {
 		return
 	}
-	old := f.position
-	f.position = pos
-	if !t.options.ReportRepeated && sameLine(old, pos) {
+	old, hadOwnPosition := f.position, f.hasOwnPosition
+	f.position, f.hasOwnPosition = pos, true
+	if !t.options.ReportRepeated && sameLine(old, pos) && (!t.options.TrackStack || hadOwnPosition) {
 		return
 	}
 	t.mu.Lock()
@@ -169,7 +177,7 @@ func (t *ExecutionTracker) leave(fr *frame) {
 		} else {
 			delete(t.active, f.gid)
 		}
-		if !same {
+		if !same || (t.options.TrackStack && f.hasOwnPosition) {
 			event = t.updateLocked(f.gid, pos)
 		}
 	}
@@ -186,7 +194,16 @@ func (t *ExecutionTracker) updateLocked(goid uint64, pos token.Position) Executi
 	}
 	t.seq++
 	t.visible[goid] = t.seq
-	return ExecutionPosition{GoroutineID: goid, Position: pos, Clear: !pos.IsValid(), Sequence: t.seq}
+	event := ExecutionPosition{GoroutineID: goid, Position: pos, Clear: !pos.IsValid(), Sequence: t.seq}
+	if t.options.TrackStack && !event.Clear {
+		event.Stack = make([]token.Position, 0, 4)
+		for f := t.active[goid]; f != nil; f = f.parent {
+			if f.hasOwnPosition {
+				event.Stack = append(event.Stack, f.position)
+			}
+		}
+	}
+	return event
 }
 
 func (t *ExecutionTracker) notify(event ExecutionPosition) {
@@ -209,9 +226,10 @@ func (t *ExecutionTracker) notify(event ExecutionPosition) {
 // Host callbacks can lose frame.caller, so tracking keeps its own call chain.
 // Each frame's state belongs to its executing goroutine.
 type executionFrame struct {
-	parent   *executionFrame
-	gid      uint64
-	position token.Position
+	parent         *executionFrame
+	gid            uint64
+	position       token.Position
+	hasOwnPosition bool
 }
 
 // executionReg is the optional tracking slot after results, arguments and captures.

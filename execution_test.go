@@ -660,7 +660,7 @@ func TestExecutionTrackerCloseOrdersInFlightNotification(t *testing.T) {
 					t.Error(err)
 				}
 				events, active := recorder.snapshot()
-				if !slices.Equal(events, stopped) || len(active) != 0 {
+				if !reflect.DeepEqual(events, stopped) || len(active) != 0 {
 					t.Errorf("in-flight notification changed state after Close: stopped=%v events=%v active=%v", stopped, events, active)
 				}
 			})
@@ -701,7 +701,7 @@ func TestExecutionTrackerReentrantClear(t *testing.T) {
 						t.Errorf("reentrant clear did not supersede the pending clear: pending=%v events=%v active=%v", event, before, active)
 					}
 					recorder.record(event)
-					if after, _ := recorder.snapshot(); !slices.Equal(after, before) {
+					if after, _ := recorder.snapshot(); !reflect.DeepEqual(after, before) {
 						t.Errorf("older clear changed state after reentry: before=%v after=%v", before, after)
 					}
 				}, ExecutionOptions{ReportRepeated: repeated})
@@ -716,7 +716,7 @@ func Nested(n int) int { return n + 2 }
 				}
 				before, _ := recorder.snapshot()
 				tracker.Close()
-				if after, _ := recorder.snapshot(); !slices.Equal(after, before) {
+				if after, _ := recorder.snapshot(); !reflect.DeepEqual(after, before) {
 					t.Errorf("completed clear callbacks left positions to clear again: before=%v after=%v", before, after)
 				}
 			})
@@ -826,7 +826,7 @@ func Worker(n int) int {
 			}
 			runExecution(t, interp, "Worker", 4, 3)
 			mu.Lock()
-			unchanged := slices.Equal(raw, events)
+			unchanged := reflect.DeepEqual(raw, events)
 			mu.Unlock()
 			if !unchanged {
 				t.Error("execution emitted new events after Close")
