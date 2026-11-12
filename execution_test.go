@@ -24,6 +24,7 @@ import (
 	"reflect"
 	"runtime"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -660,7 +661,7 @@ func TestExecutionTrackerCloseOrdersInFlightNotification(t *testing.T) {
 					t.Error(err)
 				}
 				events, active := recorder.snapshot()
-				if !slices.Equal(events, stopped) || len(active) != 0 {
+				if !reflect.DeepEqual(events, stopped) || len(active) != 0 {
 					t.Errorf("in-flight notification changed state after Close: stopped=%v events=%v active=%v", stopped, events, active)
 				}
 			})
@@ -701,7 +702,7 @@ func TestExecutionTrackerReentrantClear(t *testing.T) {
 						t.Errorf("reentrant clear did not supersede the pending clear: pending=%v events=%v active=%v", event, before, active)
 					}
 					recorder.record(event)
-					if after, _ := recorder.snapshot(); !slices.Equal(after, before) {
+					if after, _ := recorder.snapshot(); !reflect.DeepEqual(after, before) {
 						t.Errorf("older clear changed state after reentry: before=%v after=%v", before, after)
 					}
 				}, ExecutionOptions{ReportRepeated: repeated})
@@ -716,7 +717,7 @@ func Nested(n int) int { return n + 2 }
 				}
 				before, _ := recorder.snapshot()
 				tracker.Close()
-				if after, _ := recorder.snapshot(); !slices.Equal(after, before) {
+				if after, _ := recorder.snapshot(); !reflect.DeepEqual(after, before) {
 					t.Errorf("completed clear callbacks left positions to clear again: before=%v after=%v", before, after)
 				}
 			})
@@ -826,7 +827,7 @@ func Worker(n int) int {
 			}
 			runExecution(t, interp, "Worker", 4, 3)
 			mu.Lock()
-			unchanged := slices.Equal(raw, events)
+			unchanged := reflect.DeepEqual(raw, events)
 			mu.Unlock()
 			if !unchanged {
 				t.Error("execution emitted new events after Close")
@@ -1536,3 +1537,132 @@ func concurrent(workers, n int) int {
 
 func singleLine(n int) int { s := 0; for i := 0; i < n; i++ { s += i }; return s }
 `
+
+func TestExecutionStackHostCallbacks(t *testing.T) {
+	const source = `package main
+//line Sprite.spx:10
+func Root() {
+ Host(func() { Child() })
+}
+func Host(callback func()) {}
+//line Stage.spx:20
+func Child() { Check() }
+func Check() {}
+`
+	ctx := NewContext(SupportMultipleInterp | EnableCachedReg)
+	var latest ExecutionPosition
+	var saved ExecutionPosition
+	tracker := NewExecutionTracker(func(event ExecutionPosition) { latest = event }, ExecutionOptions{
+		TrackStack: true,
+		Filter:     func(pos token.Position) bool { return strings.HasSuffix(pos.Filename, ".spx") },
+	})
+	defer tracker.Close()
+	ctx.SetExecutionTracker(tracker)
+	ctx.RegisterExternal("main.Host", func(callback func()) {
+		if latest.Position.Filename != "Sprite.spx" || latest.Position.Line != 11 {
+			t.Fatalf("host position = %v", latest)
+		}
+		callback()
+		if latest.Position.Filename != "Sprite.spx" || latest.Position.Line != 11 {
+			t.Fatalf("callback return = %v", latest)
+		}
+	})
+	ctx.RegisterExternal("main.Check", func() {
+		saved = latest
+		var got []string
+		for _, pos := range latest.Stack {
+			got = append(got, pos.Filename)
+		}
+		if !reflect.DeepEqual(got, []string{"Stage.spx", "Sprite.spx", "Sprite.spx"}) {
+			t.Fatalf("stack files = %v", got)
+		}
+		if latest.Stack[0].Line != 20 || latest.Stack[1].Line != 11 || latest.Stack[2].Line != 11 {
+			t.Fatalf("stack = %v", latest.Stack)
+		}
+	})
+	interp := loadExecution(t, ctx, source)
+	for range 2 {
+		runExecution(t, interp, "Root", nil)
+		if !latest.Clear || len(latest.Stack) != 0 {
+			t.Fatalf("root return = %v", latest)
+		}
+		// Stack snapshots must survive frame pooling and subsequent invocations.
+		if len(saved.Stack) != 3 || saved.Stack[0].Filename != "Stage.spx" {
+			t.Fatalf("retained stack = %v", saved.Stack)
+		}
+	}
+}
+
+func TestExecutionStackSameLineRecursion(t *testing.T) {
+	const source = `package main
+func Root(n int, check func(int)) { check(n); if n > 0 { Root(n-1, check) } }
+`
+	ctx := NewContext(EnableCachedReg)
+	ctx.SetLeastCallForEnablePool(0)
+	var latest ExecutionPosition
+	var snapshots []ExecutionPosition
+	tracker := NewExecutionTracker(func(event ExecutionPosition) { latest = event; snapshots = append(snapshots, event) }, ExecutionOptions{TrackStack: true})
+	defer tracker.Close()
+	ctx.SetExecutionTracker(tracker)
+	interp := loadExecution(t, ctx, source)
+	for range 2 {
+		runExecution(t, interp, "Root", nil, 3, func(n int) {
+			if len(latest.Stack) != 4-n {
+				t.Fatalf("depth at n=%d: %v", n, latest.Stack)
+			}
+		})
+		if !latest.Clear {
+			t.Fatal("root did not clear")
+		}
+	}
+	if len(snapshots[0].Stack) != 1 {
+		t.Fatal("later events mutated an earlier snapshot")
+	}
+}
+
+func TestExecutionStackWaitsForOwnPosition(t *testing.T) {
+	const source = `package main
+//line Sprite.spx:10
+func Root() { Host(Empty, Bridge) }
+func Host(empty func(), bridge func()) {}
+//line generated.go:1
+func Empty() {}
+func Bridge() { Child() }
+//line Sprite.spx:20
+func Child() { Check() }
+func Check() {}
+`
+	ctx := NewContext(SupportMultipleInterp | EnableCachedReg)
+	var latest ExecutionPosition
+	tracker := NewExecutionTracker(func(event ExecutionPosition) { latest = event }, ExecutionOptions{
+		TrackStack: true,
+		Filter:     func(pos token.Position) bool { return strings.HasSuffix(pos.Filename, ".spx") },
+	})
+	defer tracker.Close()
+	ctx.SetExecutionTracker(tracker)
+	checked := false
+	ctx.RegisterExternal("main.Host", func(empty func(), bridge func()) {
+		before := latest
+		if before.Clear || len(before.Stack) != 1 {
+			t.Fatalf("root position = %v", before)
+		}
+		empty()
+		if latest.Sequence != before.Sequence {
+			t.Fatalf("unlocated empty frame reported a change: %v", latest)
+		}
+		bridge()
+		if latest.Clear || !sameLine(latest.Position, before.Position) || len(latest.Stack) != 1 {
+			t.Fatalf("return through unlocated frame lost the caller: %v", latest)
+		}
+	})
+	ctx.RegisterExternal("main.Check", func() {
+		checked = true
+		if len(latest.Stack) != 2 || latest.Stack[0].Line != 20 || latest.Stack[1].Line != 10 {
+			t.Fatalf("expected only located child and root frames: %v", latest.Stack)
+		}
+	})
+	runExecution(t, loadExecution(t, ctx, source), "Root", nil)
+	if !checked || !latest.Clear || len(latest.Stack) != 0 {
+		t.Fatalf("checked=%v, final event=%v", checked, latest)
+	}
+}
