@@ -28,7 +28,9 @@ type ExecutionPosition struct {
 	Position    token.Position
 	// Stack is an owned snapshot of frames with their own accepted source
 	// positions, innermost first. It is populated only with TrackStack and is
-	// empty on clear.
+	// empty on clear. With TrackStack, Stack[0] equals Position for non-clear
+	// events. Unlocated frames inherit the nearest located ancestor's position
+	// and are omitted from the snapshot.
 	Stack []token.Position
 	// Clear removes the location. Position is zero for clear events.
 	Clear bool
@@ -43,7 +45,7 @@ type ExecutionOptions struct {
 	// It must return consistent results and be safe for concurrent compilation.
 	Filter func(token.Position) bool
 	// ReportRepeated reports every accepted DebugRef position, even on the same
-	// line. Without TrackStack, caller restores and clears remain deduplicated.
+	// line.
 	ReportRepeated bool
 	// TrackStack includes frames that have reached their own accepted source
 	// position. Their first position and exit are reported even when the top
@@ -52,7 +54,10 @@ type ExecutionOptions struct {
 }
 
 // ExecutionTracker tracks each goroutine's source position, merging consecutive
-// positions on the same line unless ReportRepeated is set.
+// positions on the same line unless ReportRepeated is set. With TrackStack,
+// a frame's first own position and exit are also reported when the top line
+// is unchanged. Without TrackStack, caller restores and clears remain
+// deduplicated regardless of ReportRepeated.
 // Calls inherit their caller's position and restore it after user defers;
 // the outermost call clears it on exit. Positions come from DebugRef metadata,
 // not a callback before every statement. Share a tracker across interpreters
