@@ -14,6 +14,7 @@ import (
 
 	foo "github.com/goplus/ixgo/testdata/foo/v2"
 	"github.com/goplus/ixgo/testdata/getpkg"
+	"github.com/goplus/ixgo/testdata/namedmap"
 	unknownpkg "github.com/goplus/ixgo/testdata/unknownpkg"
 )
 
@@ -42,6 +43,43 @@ func TestGetPackageLoadsRegistered(t *testing.T) {
 	}
 	if pkg.Scope().Lookup("Answer") == nil {
 		t.Fatal("registered const Answer was not installed")
+	}
+}
+
+func TestNamedMapMethodAssignFromSource(t *testing.T) {
+	const depPath = "github.com/goplus/ixgo/testdata/namedmap"
+	const srcPath = "ixgo.test/namedmapuser"
+	RegisterPackage(&Package{
+		Name: "namedmap",
+		Path: depPath,
+		NamedTypes: map[string]reflect.Type{
+			"Template": reflect.TypeOf((*namedmap.Template)(nil)).Elem(),
+			"Values":   reflect.TypeOf((*namedmap.Values)(nil)).Elem(),
+		},
+	})
+	RegisterPackage(&Package{
+		Name: "namedmapuser",
+		Path: srcPath,
+		Deps: map[string]string{
+			depPath: "namedmap",
+		},
+		Source: "package namedmapuser\n\n" +
+			"import \"github.com/goplus/ixgo/testdata/namedmap\"\n\n" +
+			"type App struct {\n" +
+			"	tmpl   namedmap.Template\n" +
+			"	values namedmap.Values\n" +
+			"}\n\n" +
+			"func (p *App) Load(uri string) {\n" +
+			"	p.values = p.tmpl.Match(uri)\n" +
+			"}\n",
+	})
+	ctx := NewContext(0)
+	pkg, err := ctx.Loader.Import(srcPath)
+	if err != nil {
+		t.Fatalf("import source package: %v", err)
+	}
+	if pkg.Scope().Lookup("App") == nil {
+		t.Fatal("missing type App")
 	}
 }
 
