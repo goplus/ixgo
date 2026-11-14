@@ -57,14 +57,15 @@ func init() {
 }
 
 type TypesLoader struct {
-	ctx       *Context
-	tcache    *typeutil.Map
-	curpkg    *Package
-	packages  map[string]*types.Package
-	installed map[string]*Package
-	pkgloads  map[string]func() error
-	rcache    sync.Map // map[reflect.Type]types.Type
-	mode      Mode
+	ctx        *Context
+	tcache     *typeutil.Map
+	curpkg     *Package
+	packages   map[string]*types.Package
+	installed  map[string]*Package
+	pkgloads   map[string]func() error
+	rcache     sync.Map // map[reflect.Type]types.Type
+	namedCache sync.Map // map[pkgPath\x00name]types.Type
+	mode       Mode
 }
 
 // NewTypesLoader install package and readonly
@@ -426,20 +427,39 @@ func (r *TypesLoader) toMethod(pkg *types.Package, recv *types.Var, inoff int, r
 	return types.NewSignature(recv, types.NewTuple(in...), types.NewTuple(out...), rt.IsVariadic())
 }
 
+func namedTypeKey(pkgPath, name string) string {
+	return pkgPath + "\x00" + name
+}
+
+func (r *TypesLoader) internNamed(pkgPath, name string, rt reflect.Type) (types.Type, bool) {
+	if t, ok := r.namedCache.Load(namedTypeKey(pkgPath, name)); ok {
+		typ := t.(types.Type)
+		r.rcache.Store(rt, typ)
+		return typ, true
+	}
+	if pkg, ok := r.packages[pkgPath]; ok {
+		if obj := pkg.Scope().Lookup(name); obj != nil {
+			typ := obj.Type()
+			r.namedCache.Store(namedTypeKey(pkgPath, name), typ)
+			r.rcache.Store(rt, typ)
+			return typ, true
+		}
+	}
+	return nil, false
+}
+
 func (r *TypesLoader) ToType(rt reflect.Type) types.Type {
 	if t, ok := r.rcache.Load(rt); ok {
 		return t.(types.Type)
 	}
 	var isNamed bool
 	var pkgPath string
-	// check complete pkg named type
+	// Reuse a named type by package path and name, even before
+	// MarkComplete. rcache keys on reflect.Type identity; under llgo a
+	// named map can miss that cache while the package is still installing.
 	if pkgPath = rt.PkgPath(); pkgPath != "" {
-		if pkg, ok := r.packages[pkgPath]; ok && pkg.Complete() {
-			if obj := pkg.Scope().Lookup(rt.Name()); obj != nil {
-				typ := obj.Type()
-				r.rcache.Store(rt, typ)
-				return typ
-			}
+		if typ, ok := r.internNamed(pkgPath, rt.Name(), rt); ok {
+			return typ
 		}
 		isNamed = true
 	}
@@ -538,10 +558,18 @@ func (r *TypesLoader) ToType(rt reflect.Type) types.Type {
 	}
 	var named *types.Named
 	if isNamed {
+		if existing, ok := r.internNamed(pkgPath, rt.Name(), rt); ok {
+			return existing
+		}
 		pkg := r.GetPackage(pkgPath)
 		obj := types.NewTypeName(token.NoPos, pkg, rt.Name(), nil)
 		named = types.NewNamed(obj, typ, nil)
 		typ = named
+		if actual, loaded := r.namedCache.LoadOrStore(namedTypeKey(pkgPath, rt.Name()), named); loaded {
+			typ = actual.(types.Type)
+			r.rcache.Store(rt, typ)
+			return typ
+		}
 		pkg.Scope().Insert(obj)
 	}
 	r.rcache.Store(rt, typ)
