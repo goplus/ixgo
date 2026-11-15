@@ -14,6 +14,7 @@ import (
 
 	foo "github.com/goplus/ixgo/testdata/foo/v2"
 	"github.com/goplus/ixgo/testdata/getpkg"
+	"github.com/goplus/ixgo/testdata/namedmap"
 	unknownpkg "github.com/goplus/ixgo/testdata/unknownpkg"
 )
 
@@ -42,6 +43,22 @@ func TestGetPackageLoadsRegistered(t *testing.T) {
 	}
 	if pkg.Scope().Lookup("Answer") == nil {
 		t.Fatal("registered const Answer was not installed")
+	}
+}
+
+func TestNamedMapRecursiveConversion(t *testing.T) {
+	loader := NewContext(0).Loader.(*TypesLoader)
+	rt := reflect.TypeOf(namedmap.Values(nil))
+
+	// Element.Back recursively converts Values before the outer call caches it.
+	got := loader.ToType(rt)
+	pkg, ok := loader.LookupPackage(rt.PkgPath())
+	if !ok {
+		t.Fatal("missing type package")
+	}
+	obj := pkg.Scope().Lookup(rt.Name())
+	if obj == nil || obj.Type() != got {
+		t.Fatal("recursive conversion created duplicate named types")
 	}
 }
 
