@@ -536,6 +536,10 @@ func (r *TypesLoader) ToType(rt reflect.Type) types.Type {
 	default:
 		panic("unreachable")
 	}
+	// Converting the underlying type can recursively populate rcache.
+	if cached, ok := r.rcache.Load(rt); ok {
+		return cached.(types.Type)
+	}
 	var named *types.Named
 	if isNamed {
 		pkg := r.GetPackage(pkgPath)
