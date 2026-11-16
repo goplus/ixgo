@@ -645,8 +645,14 @@ func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 	onePtr := typ.Kind() == reflect.Struct && typ.NumField() == 1 && typ.Field(0).Type.Kind() == reflect.Ptr
 	for i := 0; i < numMethods; i++ {
 		fn := methods[i].Obj().(*types.Func)
-		sig := methods[i].Type().(*types.Signature)
-		pointer := isPointer(sig.Recv().Type())
+		// Previously:
+		// sig := methods[i].Type().(*types.Signature)
+		// pointer := isPointer(sig.Recv().Type())
+		// ToType uses only parameters, results, and variadic status. Reuse the
+		// declaration signature to avoid copying the signature and receiver;
+		// Selection.Recv preserves the selected receiver's pointer semantics.
+		sig := fn.Type().(*types.Signature)
+		pointer := isPointer(methods[i].Recv())
 		mtyp, _ := r.ToType(sig)
 		var mfn func(args []reflect.Value) []reflect.Value
 		idx := methods[i].Index()
@@ -655,7 +661,7 @@ func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 			mid = -1
 		} else if len(idx) > 1 {
 			indirect := methods[i].Indirect()
-			rtyp := fn.Type().Underlying().(*types.Signature).Recv().Type()
+			rtyp := sig.Recv().Type()
 			rt, _ := r.ToType(rtyp)
 			key := mfnKey{
 				typ:      rt,
