@@ -18,6 +18,7 @@ package ixgo
 
 import (
 	"fmt"
+	"go/types"
 	"testing"
 )
 
@@ -179,6 +180,25 @@ func main() {
 				}
 				func() {
 					defer interp.UnsafeRelease()
+					for _, name := range []string{"Base", "Outer", "PointerOuter", "Nested", "IntOuter", "StringOuter"} {
+						typ := pkg.Type(name).Type()
+						for _, recv := range []types.Type{typ, types.NewPointer(typ)} {
+							mset := pkg.Prog.MethodSets.MethodSet(recv)
+							for j := 0; j < mset.Len(); j++ {
+								sel := mset.At(j)
+								selectedSig := sel.Type().(*types.Signature)
+								declaredSig := sel.Obj().Type().(*types.Signature)
+								selectedType, selectedNested := interp.record.ToType(selectedSig)
+								declaredType, declaredNested := interp.record.ToType(declaredSig)
+								if selectedType != declaredType || selectedNested != declaredNested {
+									t.Fatalf("%s: selected signature converts to (%v, %v), declaration to (%v, %v)", sel, selectedType, selectedNested, declaredType, declaredNested)
+								}
+								if isPointer(selectedSig.Recv().Type()) != isPointer(sel.Recv()) {
+									t.Fatalf("%s: selected receiver pointer flag differs from signature", sel)
+								}
+							}
+						}
+					}
 					if err := interp.RunInit(); err != nil {
 						t.Fatal(err)
 					}
