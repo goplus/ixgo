@@ -91,7 +91,7 @@ func init() {
 			gorootTestSkips["linkx_run.go"] = "skip link"
 		}
 		// if ver >= 26 {
-		// 	gorootTestSkips["rangegen.go"] = "needs x/tools v0.50: goto to range-over-func label restarts the iterator"
+		// 	gorootTestSkips["rangegen.go"] = "support by x/tools v0.50: goto to range-over-func label restarts the iterator"
 		// }
 		if ver >= 27 {
 			gorootTestSkips["genmeth1.go"] = "buld ssa package error: assertion failed"
