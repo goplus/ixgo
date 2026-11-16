@@ -872,6 +872,48 @@ func main() {
 	}
 }
 
+// Exercise both generic builtin dispatchers in addition to the compiled
+// instruction and deferred-call paths covered by TestMapNilInterfaces.
+func TestDeleteNilKeyBuiltinDispatch(t *testing.T) {
+	ctx := NewContext(0)
+	pkg, err := ctx.LoadFile("main.go", `package main
+func remove(m map[any]int) { delete(m, nil) }
+func main() {}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var builtin *ssa.Builtin
+findDelete:
+	for _, block := range pkg.Func("remove").Blocks {
+		for _, instr := range block.Instrs {
+			if call, ok := instr.(*ssa.Call); ok {
+				if candidate, ok := call.Common().Value.(*ssa.Builtin); ok && candidate.Name() == "delete" {
+					builtin = candidate
+					break findDelete
+				}
+			}
+		}
+	}
+	if builtin == nil {
+		t.Fatal("delete builtin not found")
+	}
+	// delete uses only the evaluated args, so an empty interpreter and nil
+	// frame and SSA args suffice.
+	inter := &Interp{}
+	for _, discard := range []bool{false, true} {
+		m := map[any]int{nil: 1, "keep": 2}
+		args := []value{m, nil}
+		if discard {
+			inter.callBuiltinDiscardsResult(nil, builtin, args, nil)
+		} else {
+			inter.callBuiltin(nil, builtin, args, nil)
+		}
+		if len(m) != 1 || m["keep"] != 2 {
+			t.Fatalf("discard=%v: delete result = %v", discard, m)
+		}
+	}
+}
+
 func TestUnsafeReleaseFindMethodAndChanRecv(t *testing.T) {
 	src := `package main
 type T struct{}
