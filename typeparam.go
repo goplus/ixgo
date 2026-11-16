@@ -42,7 +42,7 @@ func hasTypeParam(typ types.Type) bool {
 }
 
 func isGenericMethod(sel *types.Selection) bool {
-	return sel.Type().(*types.Signature).TypeParams().Len() > 0
+	return sel.Obj().Type().(*types.Signature).TypeParams().Len() > 0
 }
 
 type nestedStack struct {
