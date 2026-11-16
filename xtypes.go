@@ -661,7 +661,7 @@ func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 			mid = -1
 		} else if len(idx) > 1 {
 			indirect := methods[i].Indirect()
-			rtyp := fn.Type().Underlying().(*types.Signature).Recv().Type()
+			rtyp := sig.Recv().Type()
 			rt, _ := r.ToType(rtyp)
 			key := mfnKey{
 				typ:      rt,
