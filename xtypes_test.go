@@ -17,6 +17,7 @@
 package ixgo
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -97,5 +98,95 @@ func main() {
 	}
 	if _, err := interp.RunMain(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSetMethodsDeclarationSignature(t *testing.T) {
+	const src = `package main
+import "reflect"
+
+type Base struct { N int }
+func (b Base) Value(n int) int { return b.N + n }
+func (b *Base) Add(n int) int { b.N += n; return b.N }
+func (b Base) Sum(ns ...int) int {
+ result := b.N
+ for _, n := range ns { result += n }
+ return result
+}
+type Outer struct { Base }
+type PointerOuter struct { *Base }
+type Nested struct { Outer }
+type Box[T any] struct { V T }
+func (b Box[T]) Get() T { return b.V }
+func (b *Box[T]) Set(v T) { b.V = v }
+type IntOuter struct { Box[int] }
+type StringOuter struct { *Box[string] }
+
+func check(v bool) { if !v { panic("method signature regression") } }
+func value(v interface { Value(int) int }, n int) int { return v.Value(n) }
+func add(v interface { Add(int) int }, n int) int { return v.Add(n) }
+func main() {
+ b := Base{N: 1}
+ check(value(b, 2) == 3)
+ check(add(&b, 3) == 4)
+ o := Outer{Base{N: 10}}
+ check(value(o, 2) == 12)
+ check(add(&o, 3) == 13 && o.N == 13)
+ p := PointerOuter{&Base{N: 20}}
+ check(value(p, 2) == 22)
+ check(add(p, 3) == 23 && p.N == 23)
+ n := Nested{Outer{Base{N: 30}}}
+ check(value(n, 2) == 32)
+ check(add(&n, 3) == 33 && n.N == 33)
+ for index, v := range []interface{}{b, o, p, n} {
+  rv := reflect.ValueOf(v)
+  want := []int64{4, 13, 23, 33}[index]
+  check(rv.MethodByName("Value").Call([]reflect.Value{reflect.ValueOf(2)})[0].Int() == want + 2)
+  check(rv.MethodByName("Sum").CallSlice([]reflect.Value{reflect.ValueOf([]int{2, 3})})[0].Int() == want + 5)
+ }
+ check(reflect.ValueOf(&o).MethodByName("Add").Call([]reflect.Value{reflect.ValueOf(1)})[0].Int() == 14)
+ check(o.N == 14)
+ check(reflect.ValueOf(o).MethodByName("Add").IsValid() == false)
+ check(reflect.ValueOf(&o).MethodByName("Add").IsValid())
+ check(reflect.ValueOf(p).MethodByName("Add").IsValid())
+ i := IntOuter{Box[int]{V: 42}}
+ var ig interface { Get() int } = i
+ check(ig.Get() == 42)
+ var is interface { Set(int) } = &i
+ is.Set(43)
+ check(i.Get() == 43)
+ check(reflect.ValueOf(i).MethodByName("Get").Call(nil)[0].Int() == 43)
+ s := StringOuter{&Box[string]{V: "first"}}
+ var sg interface { Get() string } = s
+ check(sg.Get() == "first")
+ var ss interface { Set(string) } = s
+ ss.Set("second")
+ check(s.Get() == "second")
+ check(reflect.ValueOf(s).MethodByName("Get").Call(nil)[0].String() == "second")
+}
+`
+	for _, mode := range []Mode{0, SupportMultipleInterp, SupportMultipleInterp | CheckGopOverloadFunc} {
+		t.Run(fmt.Sprintf("mode_%d", mode), func(t *testing.T) {
+			ctx := NewContext(mode)
+			pkg, err := ctx.LoadFile("main.go", src)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for n := 0; n < 2; n++ {
+				interp, err := NewInterp(ctx, pkg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				func() {
+					defer interp.UnsafeRelease()
+					if err := interp.RunInit(); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := interp.RunMain(); err != nil {
+						t.Fatal(err)
+					}
+				}()
+			}
+		})
 	}
 }
