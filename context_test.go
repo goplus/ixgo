@@ -914,6 +914,42 @@ findDelete:
 	}
 }
 
+func TestDeferStackHead(t *testing.T) {
+	var d *_defer
+	head := &d
+
+	got, ok := deferStackHead(head)
+	if !ok || got != head {
+		t.Fatalf("**_defer: got %v ok=%v", got, ok)
+	}
+	if _, ok := deferStackHead((**_defer)(nil)); ok {
+		t.Fatal("nil **_defer")
+	}
+
+	got, ok = deferStackHead(unsafe.Pointer(head))
+	if !ok || got != head {
+		t.Fatalf("unsafe.Pointer: got %v ok=%v", got, ok)
+	}
+	if _, ok := deferStackHead(unsafe.Pointer(nil)); ok {
+		t.Fatal("nil unsafe.Pointer")
+	}
+	if _, ok := deferStackHead(nil); ok {
+		t.Fatal("nil token")
+	}
+
+	type namedDeferStack unsafe.Pointer
+	got, ok = deferStackHead(namedDeferStack(unsafe.Pointer(head)))
+	if !ok || got != head {
+		t.Fatalf("named unsafe.Pointer: got %v ok=%v", got, ok)
+	}
+	if _, ok := deferStackHead(namedDeferStack(nil)); ok {
+		t.Fatal("nil named unsafe.Pointer")
+	}
+	if _, ok := deferStackHead(0); ok {
+		t.Fatal("int token")
+	}
+}
+
 func TestUnsafeReleaseFindMethodAndChanRecv(t *testing.T) {
 	src := `package main
 type T struct{}
