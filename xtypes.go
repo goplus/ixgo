@@ -442,7 +442,7 @@ func (r *TypesRecord) extractMethodSet(T types.Type) (methods []*types.Selection
 				methods[i] = pmset.At(i)
 			}
 		} else {
-			mcache := make(map[string]*types.Selection)
+			mcache := make(map[string]*types.Selection, mcount)
 			for i := 0; i < mcount; i++ {
 				meth := mset.At(i)
 				mcache[meth.Obj().Id()] = meth
@@ -472,7 +472,7 @@ func (r *TypesRecord) extractMethodSet(T types.Type) (methods []*types.Selection
 			}
 			methods = methods[:pcount]
 		} else {
-			mcache := make(map[string]*types.Selection)
+			mcache := make(map[string]*types.Selection, mcount)
 			for i, n := 0, mcount; i < n; i++ {
 				meth := mset.At(i)
 				if isGenericMethod(meth) {
