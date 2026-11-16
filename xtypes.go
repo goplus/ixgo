@@ -22,6 +22,7 @@ import (
 	"go/types"
 	"log"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -248,17 +249,7 @@ type methodPathPrefixes []methodPathPrefix
 func (cache *methodPathPrefixes) encode(typ reflect.Type, index []int) string {
 	fields := index[:len(index)-1]
 	for _, entry := range *cache {
-		if len(fields) != len(entry.index) {
-			continue
-		}
-		same := true
-		for i, field := range fields {
-			if field != entry.index[i] {
-				same = false
-				break
-			}
-		}
-		if same {
+		if slices.Equal(fields, entry.index) {
 			return entry.prefix + strconv.Itoa(index[len(index)-1])
 		}
 	}
