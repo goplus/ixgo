@@ -244,19 +244,22 @@ type methodPathPrefix struct {
 
 // A cache belongs to one setMethods call so field offsets are always for the
 // same receiver type. Bound the cache to keep uncommon wide method sets cheap.
-type methodPathPrefixes []methodPathPrefix
+type methodPathPrefixes struct {
+	typ     reflect.Type
+	entries []methodPathPrefix
+}
 
-func (cache *methodPathPrefixes) encode(typ reflect.Type, index []int) string {
+func (cache *methodPathPrefixes) encode(index []int) string {
 	fields := index[:len(index)-1]
-	for _, entry := range *cache {
+	for _, entry := range cache.entries {
 		if slices.Equal(fields, entry.index) {
 			return entry.prefix + strconv.Itoa(index[len(index)-1])
 		}
 	}
-	encoded := indexsToString(typ, index)
-	if len(*cache) < maxMethodPathPrefixes {
+	encoded := indexsToString(cache.typ, index)
+	if len(cache.entries) < maxMethodPathPrefixes {
 		prefix := encoded[:strings.LastIndexByte(encoded, '.')+1]
-		*cache = append(*cache, methodPathPrefix{
+		cache.entries = append(cache.entries, methodPathPrefix{
 			index:  append([]int(nil), fields...),
 			prefix: prefix,
 		})
@@ -667,7 +670,7 @@ var (
 )
 
 func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
-	var pathPrefixes methodPathPrefixes
+	pathPrefixes := methodPathPrefixes{typ: typ}
 	numMethods := len(methods)
 	ms := make([]reflectx.Method, numMethods)
 	checkXGo := r.ctx.Mode&CheckGopOverloadFunc != 0
@@ -697,7 +700,7 @@ func (r *TypesRecord) setMethods(typ reflect.Type, methods []*types.Selection) {
 			key := mfnKey{
 				typ:      rt,
 				name:     fn.Name(),
-				indexs:   pathPrefixes.encode(typ, idx),
+				indexs:   pathPrefixes.encode(idx),
 				pointer:  pointer,
 				indirect: indirect,
 				onePtr:   onePtr,

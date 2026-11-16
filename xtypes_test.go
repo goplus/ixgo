@@ -225,13 +225,13 @@ func TestMethodPathPrefixes(t *testing.T) {
 		P   *middle
 	}
 	for _, typ := range []reflect.Type{reflect.TypeOf(outer{}), reflect.TypeOf(&outer{})} {
-		var cache methodPathPrefixes
+		cache := methodPathPrefixes{typ: typ}
 		for repeat := 0; repeat < 2; repeat++ {
 			for _, fields := range [][]int{{1}, {2}, {1, 1}, {1, 2}, {2, 1}, {2, 2}} {
 				for _, method := range []int{0, 1, 99, 100, 513} {
 					index := append(append([]int(nil), fields...), method)
 					want := indexsToString(typ, index)
-					if got := cache.encode(typ, index); got != want {
+					if got := cache.encode(index); got != want {
 						t.Fatalf("%v %v: got %q, want %q", typ, index, got, want)
 					}
 					// Selections may share index storage; the cache must own its copy.
@@ -239,8 +239,8 @@ func TestMethodPathPrefixes(t *testing.T) {
 				}
 			}
 		}
-		if len(cache) != 6 {
-			t.Fatalf("got %d prefixes, want 6", len(cache))
+		if len(cache.entries) != 6 {
+			t.Fatalf("got %d prefixes, want 6", len(cache.entries))
 		}
 	}
 	fields := make([]reflect.StructField, maxMethodPathPrefixes+2)
@@ -248,17 +248,43 @@ func TestMethodPathPrefixes(t *testing.T) {
 		fields[i] = reflect.StructField{Name: fmt.Sprintf("F%d", i), Type: reflect.TypeOf(leaf{})}
 	}
 	typ := reflect.StructOf(fields)
-	var cache methodPathPrefixes
+	cache := methodPathPrefixes{typ: typ}
 	for repeat := 0; repeat < 2; repeat++ {
 		for i := range fields {
 			index := []int{i, repeat}
-			if got, want := cache.encode(typ, index), indexsToString(typ, index); got != want {
+			if got, want := cache.encode(index), indexsToString(typ, index); got != want {
 				t.Fatalf("wide path %v: got %q, want %q", index, got, want)
 			}
 		}
 	}
-	if len(cache) != maxMethodPathPrefixes {
-		t.Fatalf("cache size = %d, want %d", len(cache), maxMethodPathPrefixes)
+	if len(cache.entries) != maxMethodPathPrefixes {
+		t.Fatalf("cache size = %d, want %d", len(cache.entries), maxMethodPathPrefixes)
+	}
+}
+
+func TestMethodPathPrefixesReceiverTypes(t *testing.T) {
+	type leaf struct{ N int }
+	type small struct {
+		Pad   byte
+		Value leaf
+	}
+	type large struct {
+		Pad   [128]byte
+		Value leaf
+	}
+	smallType, largeType := reflect.TypeOf(small{}), reflect.TypeOf(large{})
+	caches := []methodPathPrefixes{{typ: smallType}, {typ: largeType}}
+	if smallType.Field(1).Offset == largeType.Field(1).Offset {
+		t.Fatal("test requires different field offsets")
+	}
+	for repeat := 0; repeat < 2; repeat++ {
+		for i := range caches {
+			index := []int{1, repeat}
+			cache := &caches[i]
+			if got, want := cache.encode(index), indexsToString(cache.typ, index); got != want {
+				t.Fatalf("%v: got %q, want %q", cache.typ, got, want)
+			}
+		}
 	}
 }
 
@@ -273,12 +299,12 @@ func BenchmarkMethodPathPrefixes(b *testing.B) {
 		b.Run(fmt.Sprintf("reuse_%v", reuse), func(b *testing.B) {
 			b.ReportAllocs()
 			for n := 0; n < b.N; n++ {
-				var cache methodPathPrefixes
+				cache := methodPathPrefixes{typ: typ}
 				for method := 0; method < 500; method++ {
 					index := []int{1, method}
 					var encoded string
 					if reuse {
-						encoded = cache.encode(typ, index)
+						encoded = cache.encode(index)
 					} else {
 						encoded = indexsToString(typ, index)
 					}
