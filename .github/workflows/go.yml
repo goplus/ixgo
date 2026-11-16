@@ -10,7 +10,7 @@ jobs:
   Test:
     strategy:
       matrix:
-        go-version: [1.25.x, 1.26.x, 1.27.x]
+        go-version: [1.26.x, 1.27.x]
         os: [ubuntu-latest, windows-latest,macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
@@ -63,8 +63,7 @@ jobs:
   Test-Wasm:
     strategy:
       matrix:
-        # Keep the toolchain that exposed nil interface map-key corruption.
-        go-version: [1.25.x, 1.26.5, 1.27.x]
+        go-version: [1.26.5, 1.27.x]
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
@@ -90,7 +89,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
-        go-tag: [go1.25.14, go1.26.8, go1.27.1]
+        go-tag: [go1.26.8, go1.27.1]
     runs-on: ${{ matrix.os }}
     steps:
     - uses: actions/checkout@v6

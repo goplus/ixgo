@@ -738,6 +738,34 @@ func pushDeferAt(head **_defer, d *_defer) {
 	}
 }
 
+// deferStackHead recovers the owner's defer list from an ssa:deferstack token.
+// x/tools v0.49 typed the token as a pointer, so it stayed **_defer. v0.52
+// made tDeferStack a named unsafe.Pointer; Store/Load then boxes it as
+// unsafe.Pointer or a named type with that kind.
+func deferStackHead(v value) (**_defer, bool) {
+	switch h := v.(type) {
+	case **_defer:
+		return h, h != nil
+	case unsafe.Pointer:
+		if h == nil {
+			return nil, false
+		}
+		return (**_defer)(h), true
+	}
+	if v == nil {
+		return nil, false
+	}
+	rv := reflect.ValueOf(v)
+	if rv.Kind() == reflect.UnsafePointer {
+		p := rv.UnsafePointer()
+		if p == nil {
+			return nil, false
+		}
+		return (**_defer)(p), true
+	}
+	return nil, false
+}
+
 func (fr *frame) runDefers() {
 	interp := fr.pfn.Interp
 	atomic.AddInt32(&interp.deferCount, 1)

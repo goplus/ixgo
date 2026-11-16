@@ -8,7 +8,7 @@ A fast Go interpreter that supports all Go language features, including generics
 
 ### Go Version
 
-- Go 1.25 ~ 1.27
+- Go 1.26 ~ 1.27
 
 ### Compilers
 
@@ -95,14 +95,14 @@ reflectx stores an untagged `*makeFuncImpl` in `addReflectOff` and
 sets `tflagIfaceFuncval` (`1<<6`). A patched runtime tags `itab.Fun`
 (`makeFuncImpl*|1`) so interface calls unwrap.
 
-Needs a **patched Go 1.25.x, 1.26.x, or 1.27.x** and `-tags goplus.ifacefuncval`.
+Needs a **patched Go 1.26.x or 1.27.x** and `-tags goplus.ifacefuncval`.
 Supported `GOARCH`: wasm, arm64, amd64, 386.
 
 ```
 go install github.com/goplus/reflectx/cmd/iface_patch@latest
 ```
 ```shell
-iface_patch /path/to/go   # 1.25.x, 1.26.x, or 1.27.x
+iface_patch /path/to/go   # 1.26.x or 1.27.x
 cd /path/to/go/src && ./make.bash
 export GOROOT=/path/to/go
 export PATH="$GOROOT/bin:$PATH"

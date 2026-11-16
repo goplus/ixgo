@@ -1828,9 +1828,10 @@ func makeDefer(interp *Interp, pfn *function, instr *ssa.Defer) func(fr *frame) 
 		}
 		// ssa:deferstack token is &owner._defer, captured by the yield
 		// closure. Writing through it matches gc's deferprocat and works
-		// when yield runs on another goroutine.
-		head, ok := fr.reg(id).(**_defer)
-		if !ok || head == nil {
+		// when yield runs on another goroutine. After x/tools v0.52 the
+		// token may be boxed as unsafe.Pointer.
+		head, ok := deferStackHead(fr.reg(id))
+		if !ok {
 			panic("range-over-func defer: missing deferstack token")
 		}
 		pushDeferAt(head, d)
