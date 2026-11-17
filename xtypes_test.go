@@ -316,3 +316,32 @@ func BenchmarkMethodPathPrefixes(b *testing.B) {
 		})
 	}
 }
+
+// The SSA builder uses a synthetic type with this unqualified spelling.
+type testDeferStackType struct{ types.Type }
+
+func (testDeferStackType) String() string { return "deferStack" }
+
+func TestLoadTypeDeferStack(t *testing.T) {
+	elem := testDeferStackType{types.Typ[types.UnsafePointer]}
+	ptr := types.NewPointer(elem)
+	result := types.NewTuple(types.NewVar(0, nil, "", ptr))
+	sig := types.NewSignatureType(nil, nil, nil, nil, result, false)
+	pptr := types.NewPointer(ptr)
+	for _, typ := range []types.Type{sig, pptr} {
+		interp := &Interp{preloadTypes: make(map[types.Type]reflect.Type)}
+		interp.loadType(typ)
+		pt := reflect.TypeOf((*_defer)(nil))
+		if interp.preloadTypes[elem] != pt || interp.preloadTypes[ptr] != reflect.PointerTo(pt) {
+			t.Fatalf("%v: incorrect defer stack element or pointer mapping", typ)
+		}
+		want := reflect.PointerTo(reflect.PointerTo(pt))
+		if typ == sig {
+			want = reflect.FuncOf(nil, []reflect.Type{reflect.PointerTo(pt)}, false)
+		}
+		if got := interp.preloadTypes[typ]; got != want {
+			t.Fatalf("%v: got %v, want %v", typ, got, want)
+		}
+		interp.loadType(typ)
+	}
+}
