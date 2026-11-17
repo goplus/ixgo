@@ -1495,11 +1495,12 @@ func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{
 
 func (i *Interp) loadType(typ types.Type) {
 	if _, ok := i.preloadTypes[typ]; !ok {
-		switch typ.String() {
-		case "func() *deferStack":
-			if sig, ok := typ.(*types.Signature); ok && sig.Params() == nil && sig.Results().Len() == 1 {
+		switch t := typ.(type) {
+		case *types.Signature:
+			sig := t
+			if sig.Params() == nil && sig.Results().Len() == 1 {
 				if ptr, ok := sig.Results().At(0).Type().(*types.Pointer); ok {
-					if elem := ptr.Elem(); elem.String() == "deferStack" {
+					if elem := ptr.Elem(); elem.String() == "deferStack" && typ.String() == "func() *deferStack" {
 						pt := reflect.TypeOf((*_defer)(nil))
 						i.preloadTypes[elem] = pt
 						i.preloadTypes[ptr] = reflect.PtrTo(pt)
@@ -1509,16 +1510,14 @@ func (i *Interp) loadType(typ types.Type) {
 					}
 				}
 			}
-		case "**deferStack":
-			if pptr, ok := typ.(*types.Pointer); ok {
-				if ptr, ok := pptr.Elem().(*types.Pointer); ok {
-					if elem := ptr.Elem(); elem.String() == "deferStack" {
-						pt := reflect.TypeOf((*_defer)(nil))
-						i.preloadTypes[elem] = pt
-						i.preloadTypes[ptr] = reflect.PointerTo(pt)
-						i.preloadTypes[typ] = reflect.PtrTo(reflect.PointerTo(pt))
-						return
-					}
+		case *types.Pointer:
+			if ptr, ok := t.Elem().(*types.Pointer); ok {
+				if elem := ptr.Elem(); elem.String() == "deferStack" && typ.String() == "**deferStack" {
+					pt := reflect.TypeOf((*_defer)(nil))
+					i.preloadTypes[elem] = pt
+					i.preloadTypes[ptr] = reflect.PointerTo(pt)
+					i.preloadTypes[typ] = reflect.PtrTo(reflect.PointerTo(pt))
+					return
 				}
 			}
 		}
