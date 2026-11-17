@@ -1497,14 +1497,13 @@ func (i *Interp) loadType(typ types.Type) {
 	if _, ok := i.preloadTypes[typ]; !ok {
 		switch t := typ.(type) {
 		case *types.Signature:
-			sig := t
-			if sig.Params() == nil && sig.Results().Len() == 1 {
-				if ptr, ok := sig.Results().At(0).Type().(*types.Pointer); ok {
+			if t.Params() == nil && t.Results().Len() == 1 {
+				if ptr, ok := t.Results().At(0).Type().(*types.Pointer); ok {
 					if elem := ptr.Elem(); elem.String() == "deferStack" && typ.String() == "func() *deferStack" {
 						pt := reflect.TypeOf((*_defer)(nil))
 						i.preloadTypes[elem] = pt
-						i.preloadTypes[ptr] = reflect.PtrTo(pt)
-						rt := reflect.FuncOf(nil, []reflect.Type{reflect.PtrTo(pt)}, false)
+						i.preloadTypes[ptr] = reflect.PointerTo(pt)
+						rt := reflect.FuncOf(nil, []reflect.Type{reflect.PointerTo(pt)}, false)
 						i.preloadTypes[typ] = rt
 						return
 					}
@@ -1516,7 +1515,7 @@ func (i *Interp) loadType(typ types.Type) {
 					pt := reflect.TypeOf((*_defer)(nil))
 					i.preloadTypes[elem] = pt
 					i.preloadTypes[ptr] = reflect.PointerTo(pt)
-					i.preloadTypes[typ] = reflect.PtrTo(reflect.PointerTo(pt))
+					i.preloadTypes[typ] = reflect.PointerTo(reflect.PointerTo(pt))
 					return
 				}
 			}
