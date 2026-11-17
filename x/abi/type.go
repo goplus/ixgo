@@ -648,7 +648,7 @@ func (n Name) Name() string {
 		return ""
 	}
 	i, l := n.ReadVarint(1)
-	return unsafeString(n.DataChecked(1+i, "non-empty string"), l)
+	return unsafe.String(n.DataChecked(1+i, "non-empty string"), l)
 }
 
 // Tag returns the tag string for n, or empty if there is none.
@@ -658,7 +658,7 @@ func (n Name) Tag() string {
 	}
 	i, l := n.ReadVarint(1)
 	i2, l2 := n.ReadVarint(1 + i + l)
-	return unsafeString(n.DataChecked(1+i+l+i2, "non-empty string"), l2)
+	return unsafe.String(n.DataChecked(1+i+l+i2, "non-empty string"), l2)
 }
 
 func NewName(n, tag string, exported, embedded bool) Name {
@@ -762,7 +762,3 @@ const (
 // we raised the limit to 2048, so that even 32-bit systems are guaranteed to
 // use bitmaps for objects up to 64 kB in size.
 const MaxPtrmaskBytes = 2048
-
-func unsafeString(b *byte, l int) string {
-	return string(unsafe.Slice(b, l))
-}
