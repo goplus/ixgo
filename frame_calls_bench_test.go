@@ -1,7 +1,9 @@
 package ixgo
 
 import (
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -73,3 +75,90 @@ func fibish(x int) (int, int) {
 	return a + d, b + c
 }
 `
+
+// Compare identical workloads on main and the refactor with GOMAXPROCS=1,
+// -benchmem -benchtime=200ms -count=10, then analyze with benchstat.
+// BenchmarkExecutionDescription covers the call paths changed by execution
+// descriptions. DisableMemo keeps the loop workload on the interpreter backend.
+func BenchmarkExecutionDescription(b *testing.B) {
+	for _, name := range []string{"phi", "closure", "interfaceCall", "deferred", "recovered", "goroutine"} {
+		b.Run(name, func(b *testing.B) {
+			ctx := NewContext(DisableMemo)
+			ctx.SetLeastCallForEnablePool(0)
+			interp, err := ctx.LoadInterp("execution_bench.go", executionDescriptionSource)
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.Cleanup(interp.UnsafeRelease)
+			if got, err := interp.RunFunc(name); err != nil || got != 42 {
+				b.Fatalf("got %v, %v; want 42", got, err)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				if got, err := interp.RunFunc(name); err != nil || got != 42 {
+					b.Fatalf("got %v, %v; want 42", got, err)
+				}
+			}
+		})
+	}
+}
+
+const executionDescriptionSource = `package main
+type counter int
+func (c counter) Value() int { return int(c) }
+func phi() int {
+ a, b := 0, 1
+ for i := 0; i < 10; i++ { a, b = b, a+b }
+ return a-13
+}
+func closure() int {
+ n := 41
+ f := func() int { return n+1 }
+ return f()
+}
+func interfaceCall() int {
+ var v interface { Value() int } = counter(42)
+ return v.Value()
+}
+func deferred() (n int) { defer func() { n++ }(); return 41 }
+func recovered() (n int) { defer func() { recover(); n = 42 }(); panic("bench") }
+func goroutine() int {
+ ch := make(chan int, 1)
+ go func(n int) { defer close(ch); ch <- n }(42)
+ return <-ch
+}
+`
+
+// Loading is measured separately: GC analysis and metadata snapshots moved work
+// to this phase. The large case crosses the lazy GC materialization threshold.
+func BenchmarkExecutionDescriptionLoad(b *testing.B) {
+	for _, size := range []struct {
+		name      string
+		additions int
+	}{{"small", 8}, {"large", 1100}} {
+		var source strings.Builder
+		source.WriteString("package main\nimport \"runtime\"\nfunc work(n int) *int { runtime.GC(); p := new(int); *p = n\n")
+		for i := 0; i < size.additions; i++ {
+			fmt.Fprintf(&source, "*p += %d\n", i)
+		}
+		source.WriteString("runtime.GC(); return p }\n")
+		code := source.String()
+		for _, gc := range []bool{false, true} {
+			b.Run(fmt.Sprintf("%s/gc=%t", size.name, gc), func(b *testing.B) {
+				mode := DisableMemo
+				if gc {
+					mode |= ExperimentalSupportGC
+				}
+				b.ReportAllocs()
+				for b.Loop() {
+					interp, err := NewContext(mode).LoadInterp("load_bench.go", code)
+					if err != nil {
+						b.Fatal(err)
+					}
+					interp.UnsafeRelease()
+				}
+			})
+		}
+	}
+}
