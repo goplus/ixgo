@@ -52,7 +52,7 @@ type Command struct {
 // ixgo command
 var Ixgo = &Command{
 	UsageLine: "ixgo",
-	Short:     `ixgo is a SSA interpreter of Go/Go+ source code.`,
+	Short:     `ixgo is a SSA interpreter of Go/XGo source code.`,
 	// Commands initialized in package main
 }
 

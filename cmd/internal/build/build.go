@@ -34,7 +34,7 @@ import (
 // Cmd - ixgo build
 var Cmd = &base.Command{
 	UsageLine: "ixgo build [build flags] [package]",
-	Short:     "compile a Go/Go+ package",
+	Short:     "compile a Go/XGo package",
 }
 
 var (
