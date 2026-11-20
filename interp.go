@@ -199,7 +199,7 @@ type frame struct {
 	stack     []value // result args env datas
 	phiVals   []value // temporary values for parallel phi assignments
 	ipc       int32
-	pred      int32
+	pred      int32 // zero-based predecessor block ID used by Phi
 	deferid   uint64
 	memoState *interpreterMemoState
 }
@@ -483,11 +483,6 @@ func (plan *gcLivenessPlan) regsAt(pc int) []register {
 		for _, reg := range plan.uses[tr.useStart:tr.useEnd] {
 			dead[int(reg)] = false
 		}
-		if !block.isRecover {
-			for _, reg := range plan.recover {
-				dead[int(reg)] = false
-			}
-		}
 	}
 	if !block.isRecover {
 		for _, reg := range plan.recover {
@@ -522,6 +517,7 @@ func (pfn *function) initGCLiveness() {
 		pfn.gcRegs[pc] = pfn.gcRegsAt(pc)
 		pfn.gcReady[pc].Store(true)
 	}
+	pfn.gcPlan = nil
 }
 
 func (pfn *function) gcRegsForPC(pc int) []register {
@@ -547,6 +543,9 @@ func isGCRegisterKind(kind reflect.Kind) bool {
 }
 
 func (pfn *function) gcRegsAt(pc int) []register {
+	if pfn.gcPlan == nil {
+		return pfn.gcRegs[pc]
+	}
 	return pfn.gcPlan.regsAt(pc)
 }
 

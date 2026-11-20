@@ -45,6 +45,9 @@ func loadGCLivenessFunction(b testing.TB, mode Mode) *function {
 
 func TestGCLivenessPrecomputed(t *testing.T) {
 	pfn := loadGCLivenessFunction(t, ExperimentalSupportGC)
+	if pfn.gcPlan != nil {
+		t.Fatal("eagerly materialized function retained GC plan")
+	}
 	if len(pfn.gcRegs) != len(pfn.ssaInstrs) {
 		t.Fatalf("GC points = %d, want %d", len(pfn.gcRegs), len(pfn.ssaInstrs))
 	}
@@ -172,6 +175,7 @@ func Work(n int) int {
 
 func TestGCLivenessPlanPCMapping(t *testing.T) {
 	pfn := loadGCLivenessFunction(t, ExperimentalSupportGC)
+	pfn.gcPlan = pfn.compileGCLiveness()
 	for pc, instr := range pfn.ssaInstrs {
 		point := pfn.gcPlan.points[pc]
 		if point.block < 0 {
@@ -205,10 +209,11 @@ func BenchmarkFrameGC(b *testing.B) {
 			fr.gc()
 		}
 	})
+	plan := pfn.compileGCLiveness()
 	b.Run("plan-materialization", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
-			_ = pfn.gcRegsAt(pc)
+			_ = plan.regsAt(pc)
 		}
 	})
 }
@@ -312,6 +317,7 @@ func phi(first, second *int, choose bool) {
 
 func TestGCLivenessCacheConcurrent(t *testing.T) {
 	pfn := loadGCLivenessFunction(t, ExperimentalSupportGC)
+	pfn.gcPlan = pfn.compileGCLiveness()
 	want := make([][]register, len(pfn.gcRegs))
 	for pc, regs := range pfn.gcRegs {
 		want[pc] = slices.Clone(regs)
@@ -369,7 +375,8 @@ func Work() int { return *work() }
 	}
 	defer interp.UnsafeRelease()
 	pfn := interp.funcs[interp.mainpkg.Func("work")]
-	if pfn.Fn.Recover == nil || len(pfn.gcPlan.recover) == 0 {
+	plan := pfn.compileGCLiveness()
+	if pfn.Fn.Recover == nil || len(plan.recover) == 0 {
 		t.Fatal("missing recover block liveness")
 	}
 	for pc, instr := range pfn.ssaInstrs {
@@ -377,7 +384,7 @@ func Work() int { return *work() }
 		if !ok || !isRuntimeGCFunction(call.Common().StaticCallee()) {
 			continue
 		}
-		for _, reg := range pfn.gcPlan.recover {
+		for _, reg := range plan.recover {
 			if slices.Contains(pfn.gcRegsForPC(pc), reg) {
 				t.Errorf("recover register %d is dead at GC point %d", reg, pc)
 			}
@@ -391,5 +398,16 @@ func Work() int { return *work() }
 		if got != 42 {
 			t.Fatalf("Work() = %v, want 42", got)
 		}
+	}
+}
+
+func TestGCLivenessRecoverRootsAfterDefinitions(t *testing.T) {
+	plan := &gcLivenessPlan{
+		registers: []register{0, 1}, recover: []register{0},
+		points: []gcLivenessPoint{{block: 0, instr: 0}},
+		blocks: []gcLivenessBlock{{transfers: []gcLivenessTransfer{{def: -1}, {def: 0}, {def: 1}}}},
+	}
+	if got := plan.regsAt(0); !slices.Equal(got, []register{1}) {
+		t.Fatalf("dead registers = %v; want [1] with recover root 0 retained", got)
 	}
 }

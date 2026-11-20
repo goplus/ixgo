@@ -60,10 +60,8 @@ func runtimeFuncFileLine(fr *frame, f *runtime.Func, pc uintptr) (file string, l
 	if isInlineFunc(f) && pc >= entry {
 		interp := fr.pfn.Interp
 		if pfn := findFuncByEntry(interp, int(entry)); pfn != nil {
-			var fpos = pfn.metadata.entry
-			if pc == entry {
-				fpos = pfn.metadata.entry
-			} else {
+			fpos := pfn.metadata.entry
+			if pc != entry {
 				// pc-1 : fn.instr.pos
 				fpos = pfn.PositionForPC(int(pc - entry - 1))
 				if !fpos.IsValid() {
