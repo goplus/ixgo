@@ -286,6 +286,7 @@ type gcLivenessPlan struct {
 	registers []register
 	blocks    []gcLivenessBlock
 	points    []gcLivenessPoint
+	uses      []register
 	recover   []register
 	captures  []closureCapture
 	byResult  map[int]int
@@ -298,8 +299,9 @@ type gcLivenessBlock struct {
 }
 
 type gcLivenessTransfer struct {
-	def  register
-	uses []register
+	def      register
+	useStart int
+	useEnd   int
 }
 
 type gcLivenessPoint struct {
@@ -317,18 +319,25 @@ func (pfn *function) compileGCLiveness() *gcLivenessPlan {
 	}
 	slices.Sort(plan.registers)
 	plan.registers = slices.Compact(plan.registers)
-	candidates := make(map[register]bool, len(plan.registers))
-	for _, reg := range plan.registers {
-		candidates[reg] = true
+	liveIn := make(map[*ssa.BasicBlock]map[register]bool)
+	regFor := func(v ssa.Value) register {
+		encoded, ok := pfn.index[v]
+		if !ok {
+			return -1
+		}
+		vk, rk := kind(encoded>>30), reflect.Kind(encoded>>24&0x3f)
+		if vk.isStatic() || !isGCRegisterKind(rk) {
+			return -1
+		}
+		return register(encoded & 0xffffff)
 	}
-	liveIn := make(map[*ssa.BasicBlock]map[ssa.Value]bool)
-	add := func(dst, src map[ssa.Value]bool) {
-		for v := range src {
-			dst[v] = true
+	add := func(dst, src map[register]bool) {
+		for reg := range src {
+			dst[reg] = true
 		}
 	}
-	liveOut := func(b *ssa.BasicBlock) map[ssa.Value]bool {
-		live := make(map[ssa.Value]bool)
+	liveOut := func(b *ssa.BasicBlock) map[register]bool {
+		live := make(map[register]bool)
 		for _, succ := range b.Succs {
 			add(live, liveIn[succ])
 			for i, pred := range succ.Preds {
@@ -340,22 +349,28 @@ func (pfn *function) compileGCLiveness() *gcLivenessPlan {
 					if !ok {
 						break
 					}
-					live[phi.Edges[i]] = true
+					if reg := regFor(phi.Edges[i]); reg >= 0 {
+						live[reg] = true
+					}
 				}
 			}
 		}
 		return live
 	}
 	var ops []*ssa.Value
-	transfer := func(live map[ssa.Value]bool, instr ssa.Instruction) {
+	transfer := func(live map[register]bool, instr ssa.Instruction) {
 		if v, ok := instr.(ssa.Value); ok {
-			delete(live, v)
+			if reg := regFor(v); reg >= 0 {
+				delete(live, reg)
+			}
 		}
 		if _, ok := instr.(*ssa.Phi); !ok {
 			ops = instr.Operands(ops[:0])
 			for _, op := range ops {
 				if *op != nil {
-					live[*op] = true
+					if reg := regFor(*op); reg >= 0 {
+						live[reg] = true
+					}
 				}
 			}
 		}
@@ -365,7 +380,7 @@ func (pfn *function) compileGCLiveness() *gcLivenessPlan {
 		}
 	}
 	for _, b := range pfn.Fn.Blocks {
-		liveIn[b] = make(map[ssa.Value]bool)
+		liveIn[b] = make(map[register]bool)
 	}
 	for changed := true; changed; {
 		changed = false
@@ -375,34 +390,25 @@ func (pfn *function) compileGCLiveness() *gcLivenessPlan {
 			for j := len(b.Instrs) - 1; j >= 0; j-- {
 				transfer(live, b.Instrs[j])
 			}
-			for v := range live {
-				if !liveIn[b][v] {
-					liveIn[b][v] = true
+			for reg := range live {
+				if !liveIn[b][reg] {
+					liveIn[b][reg] = true
 					changed = true
 				}
 			}
 		}
 	}
-	regFor := func(v ssa.Value) register {
-		encoded, ok := pfn.index[v]
-		reg := register(encoded & 0xffffff)
-		if !ok || !candidates[reg] {
-			return -1
-		}
-		return reg
-	}
-	regsFor := func(live map[ssa.Value]bool) []register {
+	regsFor := func(live map[register]bool) []register {
 		var regs []register
-		for v := range live {
-			if reg := regFor(v); reg >= 0 {
-				regs = append(regs, reg)
-			}
+		for reg := range live {
+			regs = append(regs, reg)
 		}
 		slices.Sort(regs)
 		return slices.Compact(regs)
 	}
 	plan.recover = regsFor(liveIn[pfn.Fn.Recover])
-	points := make(map[ssa.Instruction]gcLivenessPoint)
+	plan.blocks = make([]gcLivenessBlock, 0, len(pfn.Fn.Blocks))
+	plan.uses = make([]register, 0, len(pfn.ssaInstrs))
 	for _, b := range pfn.Fn.Blocks {
 		block := gcLivenessBlock{
 			liveOut:   regsFor(liveOut(b)),
@@ -410,27 +416,40 @@ func (pfn *function) compileGCLiveness() *gcLivenessPlan {
 			transfers: make([]gcLivenessTransfer, len(b.Instrs)),
 		}
 		for i, instr := range b.Instrs {
-			tr := gcLivenessTransfer{def: -1}
+			tr := gcLivenessTransfer{def: -1, useStart: len(plan.uses)}
 			if v, ok := instr.(ssa.Value); ok {
 				tr.def = regFor(v)
 			}
 			if _, ok := instr.(*ssa.Phi); !ok {
 				ops = instr.Operands(ops[:0])
 				for _, op := range ops {
-					if reg := regFor(*op); reg >= 0 {
-						tr.uses = append(tr.uses, reg)
+					if *op != nil {
+						if reg := regFor(*op); reg >= 0 {
+							plan.uses = append(plan.uses, reg)
+						}
 					}
 				}
 			}
+			tr.useEnd = len(plan.uses)
 			block.transfers[i] = tr
-			points[instr] = gcLivenessPoint{block: len(plan.blocks), instr: i}
 		}
 		plan.blocks = append(plan.blocks, block)
 	}
+	// Instructions retain block order after elision. Walk each original block
+	// once to map execution PCs without a per-instruction hash table.
+	cursors := make([]int, len(plan.blocks))
 	for pc, instr := range pfn.ssaInstrs {
-		point, ok := points[instr]
-		if !ok {
-			point.block = -1
+		point := gcLivenessPoint{block: -1}
+		if instr != nil && instr.Block() != nil {
+			block := instr.Block()
+			for cursors[block.Index] < len(block.Instrs) {
+				index := cursors[block.Index]
+				cursors[block.Index]++
+				if block.Instrs[index] == instr {
+					point = gcLivenessPoint{block: block.Index, instr: index}
+					break
+				}
+			}
 		}
 		plan.points[pc] = point
 	}
@@ -461,7 +480,7 @@ func (plan *gcLivenessPlan) regsAt(pc int) []register {
 		if tr.def >= 0 {
 			dead[int(tr.def)] = true
 		}
-		for _, reg := range tr.uses {
+		for _, reg := range plan.uses[tr.useStart:tr.useEnd] {
 			dead[int(reg)] = false
 		}
 		if !block.isRecover {

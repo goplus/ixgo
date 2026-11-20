@@ -170,6 +170,19 @@ func Work(n int) int {
 	}
 }
 
+func TestGCLivenessPlanPCMapping(t *testing.T) {
+	pfn := loadGCLivenessFunction(t, ExperimentalSupportGC)
+	for pc, instr := range pfn.ssaInstrs {
+		point := pfn.gcPlan.points[pc]
+		if point.block < 0 {
+			t.Fatalf("missing GC plan point at PC %d", pc)
+		}
+		if got := pfn.Fn.Blocks[point.block].Instrs[point.instr]; got != instr {
+			t.Fatalf("GC plan PC %d maps to %v, want %v", pc, got, instr)
+		}
+	}
+}
+
 func BenchmarkFrameGC(b *testing.B) {
 	pfn := loadGCLivenessFunction(b, ExperimentalSupportGC)
 	pc := 0
