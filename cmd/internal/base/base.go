@@ -14,7 +14,7 @@
  limitations under the License.
 */
 
-// Package base defines shared xtype pieces of the gop command,
+// Package base defines shared xtype pieces of the ixgo command,
 // in particular logging and the Command structure.
 package base
 
@@ -26,25 +26,25 @@ import (
 	"strings"
 )
 
-// A Command is an implementation of a gop command
-// like gop export or gop install.
+// A Command is an implementation of an ixgo command
+// like ixgo run or ixgo export.
 type Command struct {
 	// Run runs the command.
 	// The args are the arguments after the command name.
 	Run func(cmd *Command, args []string)
 
 	// UsageLine is the one-line usage message.
-	// The words between "gop" and the first flag or argument in the line are taken to be the command name.
+	// The words between "ixgo" and the first flag or argument in the line are taken to be the command name.
 	UsageLine string
 
-	// Short is the short description shown in the 'gop help' output.
+	// Short is the short description shown in the 'ixgo help' output.
 	Short string
 
 	// Flag is a set of flags specific to this command.
 	Flag flag.FlagSet
 
 	// Commands lists the available commands and help topics.
-	// The order here is the order in which they are printed by 'gop help'.
+	// The order here is the order in which they are printed by 'ixgo help'.
 	// Note that subcommands are in general best avoided.
 	Commands []*Command
 }

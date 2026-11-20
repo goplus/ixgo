@@ -14,7 +14,7 @@
  limitations under the License.
 */
 
-// Package run implements the “gop run” command.
+// Package run implements the “ixgo run” command.
 package run
 
 import (
