@@ -28,8 +28,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"unsafe"
-
-	"golang.org/x/tools/go/ssa"
 )
 
 func init() {
@@ -300,12 +298,8 @@ var (
 	reFuncName = regexp.MustCompile("\\$(\\d+)")
 )
 
-func fixedFuncName(fn *ssa.Function) (name string, autogen bool) {
-	interfaceThunk := false
-	if sig, ok := fn.Type().(*types.Signature); ok && sig.Params().Len() > 0 {
-		interfaceThunk = types.IsInterface(sig.Params().At(0).Type())
-	}
-	return formatRuntimeFuncName(fn.String(), interfaceThunk)
+func isInterfaceThunk(sig *types.Signature) bool {
+	return sig != nil && sig.Params().Len() > 0 && types.IsInterface(sig.Params().At(0).Type())
 }
 
 func formatRuntimeFuncName(name string, interfaceThunk bool) (string, bool) {

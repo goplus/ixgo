@@ -576,7 +576,7 @@ func (p *function) finishMetadata() {
 	p.metadata.fileSet = fn.Prog.Fset
 	if strings.HasSuffix(p.metadata.name, "$thunk") {
 		sig := fn.Signature
-		p.metadata.interfaceThunk = sig.Params().Len() > 0 && types.IsInterface(sig.Params().At(0).Type())
+		p.metadata.interfaceThunk = isInterfaceThunk(sig)
 	}
 	p.metadata.entry = fn.Prog.Fset.Position(fn.Pos())
 	p.metadata.sourcePositions = make([]token.Pos, len(p.ssaInstrs))

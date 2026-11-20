@@ -1782,7 +1782,7 @@ func outer() int { f := func() int { return 42 }; return f() }
 	}
 	var expected []metadataExpectation
 	for _, p := range interp.funcs {
-		name, autogen := fixedFuncName(p.Fn)
+		name, autogen := formatRuntimeFuncName(p.Fn.String(), isInterfaceThunk(p.Fn.Signature))
 		positions := make([]token.Position, len(p.ssaInstrs))
 		for pc := range positions {
 			positions[pc] = p.Fn.Prog.Fset.Position(p.PosForPC(pc))
