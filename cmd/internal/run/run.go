@@ -14,7 +14,7 @@
  limitations under the License.
 */
 
-// Package run implements the “gop run” command.
+// Package run implements the “ixgo run” command.
 package run
 
 import (
@@ -36,7 +36,7 @@ import (
 // Cmd - ixgo run
 var Cmd = &base.Command{
 	UsageLine: "ixgo run [build flags] [package] [arguments...]",
-	Short:     "run a Go/Go+ package",
+	Short:     "run a Go/XGo package",
 }
 
 var (
