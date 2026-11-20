@@ -4,7 +4,6 @@
 package ixgo
 
 import (
-	"go/token"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -61,17 +60,16 @@ func runtimeFuncFileLine(fr *frame, f *runtime.Func, pc uintptr) (file string, l
 	if isInlineFunc(f) && pc >= entry {
 		interp := fr.pfn.Interp
 		if pfn := findFuncByEntry(interp, int(entry)); pfn != nil {
-			var pos token.Pos
+			var fpos = pfn.metadata.entry
 			if pc == entry {
-				pos = pfn.Fn.Pos()
+				fpos = pfn.metadata.entry
 			} else {
 				// pc-1 : fn.instr.pos
-				pos = pfn.PosForPC(int(pc - entry - 1))
-				if !pos.IsValid() {
+				fpos = pfn.PositionForPC(int(pc - entry - 1))
+				if !fpos.IsValid() {
 					return "?", 0
 				}
 			}
-			fpos := interp.ctx.FileSet.Position(pos)
 			if fpos.Filename == "" {
 				return "??", fpos.Line
 			}

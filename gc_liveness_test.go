@@ -2,10 +2,10 @@ package ixgo
 
 import (
 	"fmt"
-	"maps"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"golang.org/x/tools/go/ssa"
@@ -127,8 +127,8 @@ func Work(n int) int {
 	if len(pfn.ssaInstrs) <= maxEagerGCLivenessPCs {
 		t.Fatalf("instructions = %d, want more than %d", len(pfn.ssaInstrs), maxEagerGCLivenessPCs)
 	}
-	if pfn.gcReady == nil || pfn.gcReady[0].Load() || pfn.gcLiveIn != nil {
-		t.Fatal("large function liveness was eagerly computed")
+	if pfn.gcReady == nil || pfn.gcReady[0].Load() || pfn.gcPlan == nil || pfn.gcRegs[0] != nil {
+		t.Fatal("large function GC registers were eagerly materialized")
 	}
 	var wg sync.WaitGroup
 	for i := 0; i < 16; i++ {
@@ -139,7 +139,7 @@ func Work(n int) int {
 		}()
 	}
 	wg.Wait()
-	if !pfn.gcReady[0].Load() || len(pfn.gcLiveIn) != len(fn.Blocks) {
+	if !pfn.gcReady[0].Load() {
 		t.Fatal("liveness was not cached after first GC")
 	}
 
@@ -192,7 +192,7 @@ func BenchmarkFrameGC(b *testing.B) {
 			fr.gc()
 		}
 	})
-	b.Run("dynamic-analysis", func(b *testing.B) {
+	b.Run("plan-materialization", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
 			_ = pfn.gcRegsAt(pc)
@@ -203,13 +203,13 @@ func BenchmarkFrameGC(b *testing.B) {
 func TestKeepLiveClosureBindingsWorklist(t *testing.T) {
 	// wrap captures inner's MakeClosure result; inner captures f.
 	// Only wrap starts live, so inner must be enqueued when its result is revived.
-	pfn := &function{
+	pfn := &function{functionCompilation: functionCompilation{
 		closureCaptures: []closureCapture{
 			{result: 10, binds: []int{5}},
 			{result: 5, binds: []int{1}},
 		},
 		closureByResult: map[int]int{10: 0, 5: 1},
-	}
+	}}
 	dead := map[int]bool{1: true, 5: true, 10: false}
 	pfn.keepLiveClosureBindings(dead)
 	if dead[5] || dead[1] {
@@ -304,19 +304,22 @@ func TestGCLivenessCacheConcurrent(t *testing.T) {
 		want[pc] = slices.Clone(regs)
 		slices.Sort(want[pc])
 	}
-	// Exercise concurrent first use independently of eager per-PC initialization.
-	pfn.gcLiveOnce = sync.Once{}
-	pfn.gcLiveIn = nil
+	// A runtime GC query must not depend on compiler metadata.
+	pfn.Fn = nil
+	pfn.index = nil
+	pfn.ssaInstrs = nil
 	pfn.closureCaptures = nil
 	pfn.closureByResult = nil
+	pfn.gcRegs = make([][]register, len(want))
+	pfn.gcReady = make([]atomic.Bool, len(want))
 	check := func() {
 		var wg sync.WaitGroup
 		for worker := 0; worker < 16; worker++ {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				for pc := range pfn.ssaInstrs {
-					got := pfn.gcRegsAt(pc)
+				for pc := range want {
+					got := slices.Clone(pfn.gcRegsForPC(pc))
 					slices.Sort(got)
 					if !slices.Equal(got, want[pc]) {
 						t.Errorf("GC point %d: dead registers = %v, want %v", pc, got, want[pc])
@@ -327,20 +330,53 @@ func TestGCLivenessCacheConcurrent(t *testing.T) {
 		wg.Wait()
 	}
 	check()
-	if len(pfn.gcLiveIn) != len(pfn.Fn.Blocks) {
-		t.Fatalf("cached blocks = %d, want %d", len(pfn.gcLiveIn), len(pfn.Fn.Blocks))
-	}
-	pfn.gcLiveOnce.Do(func() {
-		t.Error("block liveness was not initialized through sync.Once")
-	})
-	snapshot := make(map[*ssa.BasicBlock]map[ssa.Value]bool)
-	for block, live := range pfn.gcLiveIn {
-		snapshot[block] = maps.Clone(live)
+	for pc := range want {
+		if !pfn.gcReady[pc].Load() {
+			t.Errorf("GC point %d was not cached", pc)
+		}
 	}
 	check()
-	for block, live := range snapshot {
-		if !maps.Equal(pfn.gcLiveIn[block], live) {
-			t.Errorf("cached live-in set for %s changed during concurrent queries", block)
+}
+
+func TestGCLivenessRecoverNamedResult(t *testing.T) {
+	const source = `package main
+import "runtime"
+func work() (result *int) {
+	defer func() { recover() }()
+	result = new(int)
+	*result = 42
+	runtime.GC()
+	panic("resume in recover block")
+}
+func Work() int { return *work() }
+`
+	interp, err := NewContext(ExperimentalSupportGC).LoadInterp("main.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer interp.UnsafeRelease()
+	pfn := interp.funcs[interp.mainpkg.Func("work")]
+	if pfn.Fn.Recover == nil || len(pfn.gcPlan.recover) == 0 {
+		t.Fatal("missing recover block liveness")
+	}
+	for pc, instr := range pfn.ssaInstrs {
+		call, ok := instr.(*ssa.Call)
+		if !ok || !isRuntimeGCFunction(call.Common().StaticCallee()) {
+			continue
+		}
+		for _, reg := range pfn.gcPlan.recover {
+			if slices.Contains(pfn.gcRegsForPC(pc), reg) {
+				t.Errorf("recover register %d is dead at GC point %d", reg, pc)
+			}
+		}
+	}
+	for range 3 {
+		got, err := interp.RunFunc("Work")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != 42 {
+			t.Fatalf("Work() = %v, want 42", got)
 		}
 	}
 }

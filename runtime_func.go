@@ -64,11 +64,10 @@ func runtimeFuncFileLine(fr *frame, f *runtime.Func, pc uintptr) (file string, l
 		interp := fr.pfn.Interp
 		if pfn := findFuncByEntry(interp, int(entry)); pfn != nil {
 			// pc-1 : fn.instr.pos
-			pos := pfn.PosForPC(int(pc - entry - 1))
-			if !pos.IsValid() {
+			fpos := pfn.PositionForPC(int(pc - entry - 1))
+			if !fpos.IsValid() {
 				return "?", 0
 			}
-			fpos := interp.ctx.FileSet.Position(pos)
 			if fpos.Filename == "" {
 				return "??", fpos.Line
 			}
