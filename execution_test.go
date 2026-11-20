@@ -1666,3 +1666,90 @@ func Check() {}
 		t.Fatalf("checked=%v, final event=%v", checked, latest)
 	}
 }
+
+func TestExecutionDescriptionWithoutCompilation(t *testing.T) {
+	ctx := NewContext(DisableMemo | ExperimentalSupportGC)
+	ctx.SetLeastCallForEnablePool(0)
+	interp, err := ctx.LoadInterp("execution_description.go", `package main
+import "runtime"
+type counter int
+func (c counter) Value() int { return int(c) }
+func method() int { var v interface { Value() int } = counter(42); return v.Value() }
+func async() int {
+ ch := make(chan int, 1)
+ go func(n int) { defer close(ch); ch <- n }(42)
+ return <-ch
+}
+func collect() int { p := new(int); *p = 42; runtime.GC(); return *p }
+func pair(n int) (int, int) { return n, n+1 }
+func sum(n int) int {
+ a, b := 0, 1
+ for i := 0; i < n; i++ { a, b = b, a+b }
+ x, y := pair(a)
+ return x+y
+}
+func recovered() (n int) {
+ defer func() { recover(); n = 42 }()
+ panic("test")
+}
+func captured(n int) int { f := func() int { return n+1 }; return f() }
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer interp.UnsafeRelease()
+	functions := make(map[string]*function)
+	for fn, p := range interp.funcs {
+		functions[fn.Name()] = p
+		p.functionCompilation = functionCompilation{}
+	}
+	for _, tc := range []struct {
+		name string
+		args []value
+		want value
+	}{
+		{"sum", []value{10}, 111},
+		{"recovered", nil, 42},
+		{"captured", []value{41}, 42},
+		{"method", nil, 42},
+		{"async", nil, 42},
+		{"collect", nil, 42},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := functions[tc.name]
+			if p == nil {
+				t.Fatal("missing function")
+			}
+			for i := 0; i < 3; i++ {
+				got := interp.callFunction(&frame{}, p, tc.args, nil)
+				if !reflect.DeepEqual(got, tc.want) {
+					t.Fatalf("got %v, want %v", got, tc.want)
+				}
+			}
+			hasPosition := false
+			for pc := range p.Instrs {
+				pos := p.PositionForPC(pc)
+				hasPosition = hasPosition || pos.IsValid()
+			}
+			if !hasPosition {
+				t.Fatal("missing source metadata")
+			}
+			if got := runtimeFunc(p).Name(); got == "" {
+				t.Fatal("missing runtime function name")
+			}
+			for pc := range p.gcRegs {
+				_ = p.gcRegsForPC(pc)
+			}
+		})
+	}
+}
+
+func TestExecutionDescriptionPositionBounds(t *testing.T) {
+	p := &function{}
+	for _, pc := range []int{-1, 0, 1} {
+		pos := p.PositionForPC(pc)
+		if p.PosForPC(pc).IsValid() || pos.IsValid() {
+			t.Fatalf("unexpected position at %d", pc)
+		}
+	}
+}
