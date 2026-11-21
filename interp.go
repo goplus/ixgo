@@ -195,7 +195,7 @@ type frame struct {
 	callee    *frame
 	_defer    *_defer
 	_panic    *_panic
-	block     int32   // one-based block ID; zero denotes a root frame
+	block     int32   // zero-based block ID; -1 denotes a root frame
 	stack     []value // result args env datas
 	phiVals   []value // temporary values for parallel phi assignments
 	ipc       int32
@@ -640,7 +640,7 @@ func (pfn *function) initClosureCaptures() {
 }
 
 func (fr *frame) valid() bool {
-	return fr != nil && fr.pfn != nil && fr.block != 0
+	return fr != nil && fr.pfn != nil && fr.block >= 0
 }
 
 func (fr *frame) pc() uintptr {

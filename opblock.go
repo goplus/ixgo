@@ -151,7 +151,7 @@ type functionMetadata struct {
 }
 
 func (fr *frame) jump(target int32) {
-	fr.pred, fr.block = fr.block-1, target+1
+	fr.pred, fr.block = fr.block, target
 	fr.ipc = int32(fr.pfn.Blocks[target])
 }
 
@@ -219,7 +219,7 @@ func (p *function) initPool() {
 	p.frameCacheSafe = len(p.clearRanges) == 0 && len(p.localRefs) == 0
 	p.pool = &sync.Pool{}
 	p.pool.New = func() interface{} {
-		fr := &frame{pfn: p, block: 1}
+		fr := &frame{pfn: p, block: 0}
 		fr.stack = append([]value{}, p.stack...)
 		return fr
 	}
@@ -237,14 +237,14 @@ func (p *function) allocFrame(caller *frame) *frame {
 	var fr *frame
 	if atomic.LoadInt32(&p.cached) == 1 {
 		fr = p.pool.Get().(*frame)
-		fr.block = 1
+		fr.block = 0
 		fr.ipc = 0
 		fr.pred = 0
 	} else {
 		if atomic.AddInt32(&p.used, 1) > int32(p.Interp.ctx.callForPool) {
 			atomic.StoreInt32(&p.cached, 1)
 		}
-		fr = &frame{pfn: p, block: 1}
+		fr = &frame{pfn: p, block: 0}
 		fr.stack = append([]value{}, p.stack...)
 	}
 	fr.caller = caller
@@ -286,7 +286,7 @@ func (p *function) allocFrameFromCaller(caller *frame) *frame {
 		reg := caller.pfn.childFrameReg
 		if spare, ok := caller.stack[reg].(*frame); ok && spare.pfn == p {
 			caller.stack[reg] = nil
-			spare.block = 1
+			spare.block = 0
 			spare.ipc, spare.pred = 0, 0
 			spare.caller = caller
 			spare.deferid = caller.deferid
