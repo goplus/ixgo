@@ -264,6 +264,9 @@ func checkRuns(block *ssa.BasicBlock, jumps map[*ssa.BasicBlock]bool, succs map[
 }
 
 func (fr *frame) gc() {
+	if !fr.valid() {
+		return
+	}
 	// Hidden caches are not part of SSA liveness.
 	for _, reg := range fr.pfn.cacheRegs {
 		fr.stack[reg] = nil

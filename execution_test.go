@@ -1831,25 +1831,74 @@ func TestRuntimeFunctionNameFormatting(t *testing.T) {
 	}
 }
 
-func TestRootFrameSentinelWithGCAndGoroutine(t *testing.T) {
-	ctx := NewContext(ExperimentalSupportGC | EnableCachedReg)
-	interp, err := ctx.LoadInterp("root_frame.go", `package main
-import "runtime"
-func worker(done chan int) { runtime.GC(); done <- 42 }
-func main() { done := make(chan int, 1); go worker(done); if got := <-done; got != 42 { panic(got) } }
-`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer interp.UnsafeRelease()
-	if _, err := interp.RunFunc("main"); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestRootFrameConstructor(t *testing.T) {
 	fr := rootFrame()
 	if fr.block != -1 || fr.valid() {
 		t.Fatalf("root frame = block %d, valid %v; want -1, false", fr.block, fr.valid())
+	}
+}
+
+func TestRootFrameCallersAndGC(t *testing.T) {
+	const source = `package main
+
+import "runtime"
+
+var gotNames []string
+
+func work(done chan bool) {
+	pcs := make([]uintptr, 16)
+	n := runtime.Callers(1, pcs)
+	if n == 0 {
+		panic("no callers")
+	}
+	frames := runtime.CallersFrames(pcs[:n])
+	names := make([]string, 0, n)
+	for {
+		f, more := frames.Next()
+		if f.Function != "" {
+			names = append(names, f.Function)
+		}
+		if !more {
+			break
+		}
+	}
+	runtime.GC()
+	gotNames = names
+	done <- true
+}
+func main() { done := make(chan bool, 1); go work(done); <-done }
+`
+	for _, tc := range []struct {
+		name string
+		mode Mode
+	}{
+		{"gc", ExperimentalSupportGC},
+		{"gc_cached_registers", ExperimentalSupportGC | EnableCachedReg},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := NewContext(tc.mode)
+			interp, err := ctx.LoadInterp("root_callers.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer interp.UnsafeRelease()
+			if _, err := interp.RunFunc("main"); err != nil {
+				t.Fatal(err)
+			}
+			addr, ok := interp.GetVarAddr("gotNames")
+			if !ok {
+				t.Fatal("missing gotNames global")
+			}
+			names := *addr.(*[]string)
+			workCount := 0
+			for _, name := range names {
+				if name == "main.work" {
+					workCount++
+				}
+			}
+			if workCount != 1 {
+				t.Fatalf("call stack = %v; want exactly one main.work frame", names)
+			}
+		})
 	}
 }
