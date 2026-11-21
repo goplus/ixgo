@@ -43,13 +43,18 @@ func loadGCLivenessFunction(b testing.TB, mode Mode) *function {
 	return pfn
 }
 
-func TestGCLivenessPrecomputed(t *testing.T) {
+func testGCLivenessModes(t *testing.T, run func(*testing.T, Mode)) {
+	t.Helper()
 	for _, tc := range []struct {
 		name string
 		mode Mode
 	}{{"closure", 0}, {"execution_plan", EnableGCExecutionPlan}} {
-		t.Run(tc.name, func(t *testing.T) { testGCLivenessPrecomputed(t, tc.mode) })
+		t.Run(tc.name, func(t *testing.T) { run(t, tc.mode) })
 	}
+}
+
+func TestGCLivenessPrecomputed(t *testing.T) {
+	testGCLivenessModes(t, testGCLivenessPrecomputed)
 }
 
 func testGCLivenessPrecomputed(t *testing.T, planMode Mode) {
@@ -75,12 +80,7 @@ func testGCLivenessPrecomputed(t *testing.T, planMode Mode) {
 }
 
 func TestGCLivenessDetectsRuntimeGCValue(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		mode Mode
-	}{{"closure", 0}, {"execution_plan", EnableGCExecutionPlan}} {
-		t.Run(tc.name, func(t *testing.T) { testGCLivenessDetectsRuntimeGCValue(t, tc.mode) })
-	}
+	testGCLivenessModes(t, testGCLivenessDetectsRuntimeGCValue)
 }
 
 func testGCLivenessDetectsRuntimeGCValue(t *testing.T, planMode Mode) {
@@ -112,12 +112,7 @@ func work() { collect() }
 }
 
 func TestGCLivenessLargeFunctionIsLazy(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		mode Mode
-	}{{"closure", 0}, {"execution_plan", EnableGCExecutionPlan}} {
-		t.Run(tc.name, func(t *testing.T) { testGCLivenessLargeFunctionIsLazy(t, tc.mode) })
-	}
+	testGCLivenessModes(t, testGCLivenessLargeFunctionIsLazy)
 }
 
 func testGCLivenessLargeFunctionIsLazy(t *testing.T, planMode Mode) {
@@ -294,12 +289,7 @@ func TestInitClosureCapturesNilFn(t *testing.T) {
 }
 
 func TestGCLivenessLoopDefinitionsAndPhiEdges(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		mode Mode
-	}{{"closure", 0}, {"execution_plan", EnableGCExecutionPlan}} {
-		t.Run(tc.name, func(t *testing.T) { testGCLivenessLoopDefinitionsAndPhiEdges(t, tc.mode) })
-	}
+	testGCLivenessModes(t, testGCLivenessLoopDefinitionsAndPhiEdges)
 }
 
 func testGCLivenessLoopDefinitionsAndPhiEdges(t *testing.T, planMode Mode) {
@@ -374,12 +364,7 @@ func phi(first, second *int, choose bool) {
 }
 
 func TestGCLivenessCacheConcurrent(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		mode Mode
-	}{{"closure", 0}, {"execution_plan", EnableGCExecutionPlan}} {
-		t.Run(tc.name, func(t *testing.T) { testGCLivenessCacheConcurrentMode(t, tc.mode) })
-	}
+	testGCLivenessModes(t, testGCLivenessCacheConcurrentMode)
 }
 
 func testGCLivenessCacheConcurrentMode(t *testing.T, mode Mode) {
@@ -394,9 +379,10 @@ func testGCLivenessCacheConcurrentMode(t *testing.T, mode Mode) {
 	}
 	// Execution-plan queries must also work after compiler state is released.
 	if mode != 0 {
-		pfn.Fn = nil
-		pfn.index = nil
-		pfn.ssaInstrs = nil
+		pfn.functionCompilation = functionCompilation{}
+	} else {
+		pfn.gcLiveOnce = sync.Once{}
+		pfn.gcLiveIn = nil
 		pfn.closureCaptures = nil
 		pfn.closureByResult = nil
 	}
@@ -429,12 +415,7 @@ func testGCLivenessCacheConcurrentMode(t *testing.T, mode Mode) {
 }
 
 func TestGCLivenessRecoverNamedResult(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		mode Mode
-	}{{"closure", 0}, {"execution_plan", EnableGCExecutionPlan}} {
-		t.Run(tc.name, func(t *testing.T) { testGCLivenessRecoverNamedResult(t, tc.mode) })
-	}
+	testGCLivenessModes(t, testGCLivenessRecoverNamedResult)
 }
 
 func testGCLivenessRecoverNamedResult(t *testing.T, planMode Mode) {

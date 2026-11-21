@@ -104,14 +104,15 @@ type closure struct {
 }
 
 // function keeps compiler metadata alongside the closure execution backend.
-// Only compilation and compatibility/debug APIs need functionCompilation.
+// Default lazy GC queries and compiler-aware APIs still use functionCompilation.
 type function struct {
 	Interp *Interp
 	functionCompilation
 	functionExecution
 }
 
-// functionExecution describes the closure backend without retaining SSA objects.
+// functionExecution holds the closure backend layout and runtime metadata.
+// Some instruction closures still capture compiler objects.
 // Compilation fills the frame layout and metadata before execution begins.
 type functionExecution struct {
 	Instrs           []func(*frame)
@@ -1651,12 +1652,11 @@ func makeCallMethodInstr(interp *Interp, instr ssa.Value, call *ssa.CallCommon, 
 		}
 
 		var method func(*frame)
-		// find user type method *ssa.Function
+		// Find an interpreted method.
 		if mset, ok := interp.msets[rtype]; ok {
 			if fn, ok := mset[mname]; ok {
-				ifn := fn
 				method = func(fr *frame) {
-					interp.callFunctionByStack(fr, ifn, ir, ia, dests)
+					interp.callFunctionByStack(fr, fn, ir, ia, dests)
 				}
 			} else {
 				ext, found := findUserMethod(rtype, mname)

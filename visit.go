@@ -564,19 +564,13 @@ func namedResultAlloc(fn *ssa.Function, res *types.Var) *ssa.Alloc {
 	return nil
 }
 
-func isRunDefers(instr ssa.Instruction) bool {
-	_, ok := instr.(*ssa.RunDefers)
-	return ok
-}
-
 // finishMetadata snapshots locations after instruction elision and return wrapping.
 func (p *function) finishMetadata() {
 	fn := p.Fn
 	p.metadata.name = fn.String()
 	p.metadata.fileSet = fn.Prog.Fset
 	if strings.HasSuffix(p.metadata.name, "$thunk") {
-		sig := fn.Signature
-		p.metadata.interfaceThunk = isInterfaceThunk(sig)
+		p.metadata.interfaceThunk = isInterfaceThunk(fn.Signature)
 	}
 	p.metadata.entry = fn.Prog.Fset.Position(fn.Pos())
 	p.metadata.sourcePositions = make([]token.Pos, len(p.ssaInstrs))
@@ -586,7 +580,7 @@ func (p *function) finishMetadata() {
 		}
 		pos := instr.Pos()
 		// RunDefers locations conventionally point at the function's closing brace.
-		if isRunDefers(instr) && fn.Syntax() != nil {
+		if _, ok := instr.(*ssa.RunDefers); ok && fn.Syntax() != nil {
 			pos = fn.Syntax().End()
 		}
 		p.metadata.sourcePositions[pc] = pos

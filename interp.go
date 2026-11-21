@@ -404,7 +404,7 @@ func (pfn *function) compileGCLiveness() *gcLivenessPlan {
 			regs = append(regs, reg)
 		}
 		slices.Sort(regs)
-		return slices.Compact(regs)
+		return regs
 	}
 	plan.recover = regsFor(liveIn[pfn.Fn.Recover])
 	plan.blocks = make([]gcLivenessBlock, 0, len(pfn.Fn.Blocks))
@@ -501,7 +501,8 @@ func (plan *gcLivenessPlan) regsAt(pc int) []register {
 
 const maxEagerGCLivenessPCs = 1024
 
-// initGCLiveness preserves lazy SSA analysis for the closure backend.
+// initGCLiveness precomputes small-function cleanup sets and leaves large
+// functions lazy; default queries use SSA analysis on first use.
 // EnableGCExecutionPlan builds an SSA-free plan before execution.
 func (pfn *function) initGCLiveness() {
 	if !pfn.hasGCRegs {

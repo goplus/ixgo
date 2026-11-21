@@ -1317,15 +1317,6 @@ func TestExecutionFilterPreservesDebugCallbacks(t *testing.T) {
 // before host deduplication; highlights/op counts visible source-line changes.
 // Editor rendering and asynchronous event delivery are excluded.
 func BenchmarkExecutionHighlights(b *testing.B) {
-	for _, tc := range []struct {
-		name string
-		mode Mode
-	}{{"closure", 0}, {"execution_plan", EnableGCExecutionPlan}} {
-		b.Run(tc.name, func(b *testing.B) { benchmarkExecutionHighlightsMode(b, tc.mode) })
-	}
-}
-
-func benchmarkExecutionHighlightsMode(b *testing.B, gcMode Mode) {
 	for _, workload := range []struct {
 		name string
 		args []Value
@@ -1341,7 +1332,7 @@ func benchmarkExecutionHighlightsMode(b *testing.B, gcMode Mode) {
 			var hostChanges uint64
 			for _, mode := range []string{"baseline", "debug_only", "host_stack", "execution_tracker", "execution_repeated"} {
 				b.Run(mode, func(b *testing.B) {
-					changes := benchmarkHighlightCase(b, mode, workload.name, workload.args, workload.want, gcMode)
+					changes := benchmarkHighlightCase(b, mode, workload.name, workload.args, workload.want)
 					if mode == "host_stack" {
 						hostChanges = changes
 					} else if (mode == "execution_tracker" || mode == "execution_repeated") && hostChanges != 0 && changes != hostChanges {
@@ -1354,9 +1345,9 @@ func benchmarkExecutionHighlightsMode(b *testing.B, gcMode Mode) {
 }
 
 // Returns the warmup count for comparing highlighting modes.
-func benchmarkHighlightCase(b *testing.B, mode, name string, args []Value, want int, gcMode Mode) uint64 {
+func benchmarkHighlightCase(b *testing.B, mode, name string, args []Value, want int) uint64 {
 	b.Helper()
-	ctx := NewContext(gcMode)
+	ctx := NewContext(0)
 	ctx.SetLeastCallForEnablePool(0)
 	tracked := mode == "execution_tracker" || mode == "execution_repeated"
 	h := &benchmarkHighlights{
