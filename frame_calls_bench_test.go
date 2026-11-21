@@ -10,6 +10,15 @@ import (
 func BenchmarkFrameCalls(b *testing.B) {
 	for _, tc := range []struct {
 		name string
+		mode Mode
+	}{{"closure", 0}, {"execution_plan", EnableGCExecutionPlan}} {
+		b.Run(tc.name, func(b *testing.B) { benchmarkFrameCallsMode(b, tc.mode) })
+	}
+}
+
+func benchmarkFrameCallsMode(b *testing.B, gcMode Mode) {
+	for _, tc := range []struct {
+		name string
 		args []Value
 		want Value
 	}{
@@ -21,7 +30,7 @@ func BenchmarkFrameCalls(b *testing.B) {
 		{"fibish", []Value{20}, Tuple{2584, 8362}},
 	} {
 		b.Run(tc.name, func(b *testing.B) {
-			ctx := NewContext(0)
+			ctx := NewContext(gcMode)
 			ctx.SetLeastCallForEnablePool(0)
 			interp, err := ctx.LoadInterp("frame_bench.go", frameCallsSource)
 			if err != nil {
@@ -81,9 +90,18 @@ func fibish(x int) (int, int) {
 // BenchmarkExecutionDescription covers the call paths changed by execution
 // descriptions. DisableMemo keeps the loop workload on the interpreter backend.
 func BenchmarkExecutionDescription(b *testing.B) {
+	for _, tc := range []struct {
+		name string
+		mode Mode
+	}{{"closure", 0}, {"execution_plan", EnableGCExecutionPlan}} {
+		b.Run(tc.name, func(b *testing.B) { benchmarkExecutionDescriptionMode(b, tc.mode) })
+	}
+}
+
+func benchmarkExecutionDescriptionMode(b *testing.B, gcMode Mode) {
 	for _, name := range []string{"phi", "closure", "interfaceCall", "deferred", "recovered", "goroutine"} {
 		b.Run(name, func(b *testing.B) {
-			ctx := NewContext(DisableMemo)
+			ctx := NewContext(DisableMemo | gcMode)
 			ctx.SetLeastCallForEnablePool(0)
 			interp, err := ctx.LoadInterp("execution_bench.go", executionDescriptionSource)
 			if err != nil {
@@ -130,8 +148,8 @@ func goroutine() int {
 }
 `
 
-// Loading is measured separately: GC analysis and metadata snapshots moved work
-// to this phase. The large case crosses the lazy GC materialization threshold.
+// Loading is measured separately for lazy SSA analysis and load-time GC plans.
+// The large case crosses the lazy GC materialization threshold.
 func BenchmarkExecutionDescriptionLoad(b *testing.B) {
 	for _, size := range []struct {
 		name      string
@@ -145,20 +163,32 @@ func BenchmarkExecutionDescriptionLoad(b *testing.B) {
 		source.WriteString("runtime.GC(); return p }\n")
 		code := source.String()
 		for _, gc := range []bool{false, true} {
-			b.Run(fmt.Sprintf("%s/gc=%t", size.name, gc), func(b *testing.B) {
-				mode := DisableMemo
-				if gc {
-					mode |= ExperimentalSupportGC
+			for _, plan := range []bool{false, true} {
+				if plan && !gc {
+					continue
 				}
-				b.ReportAllocs()
-				for b.Loop() {
-					interp, err := NewContext(mode).LoadInterp("load_bench.go", code)
-					if err != nil {
-						b.Fatal(err)
+				name := fmt.Sprintf("%s/gc=%t", size.name, gc)
+				if plan {
+					name += "/execution_plan"
+				}
+				b.Run(name, func(b *testing.B) {
+					mode := DisableMemo
+					if gc {
+						mode |= ExperimentalSupportGC
 					}
-					interp.UnsafeRelease()
-				}
-			})
+					if plan {
+						mode |= EnableGCExecutionPlan
+					}
+					b.ReportAllocs()
+					for b.Loop() {
+						interp, err := NewContext(mode).LoadInterp("load_bench.go", code)
+						if err != nil {
+							b.Fatal(err)
+						}
+						interp.UnsafeRelease()
+					}
+				})
+			}
 		}
 	}
 }

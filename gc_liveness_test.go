@@ -44,7 +44,16 @@ func loadGCLivenessFunction(b testing.TB, mode Mode) *function {
 }
 
 func TestGCLivenessPrecomputed(t *testing.T) {
-	pfn := loadGCLivenessFunction(t, ExperimentalSupportGC)
+	for _, tc := range []struct {
+		name string
+		mode Mode
+	}{{"closure", 0}, {"execution_plan", EnableGCExecutionPlan}} {
+		t.Run(tc.name, func(t *testing.T) { testGCLivenessPrecomputed(t, tc.mode) })
+	}
+}
+
+func testGCLivenessPrecomputed(t *testing.T, planMode Mode) {
+	pfn := loadGCLivenessFunction(t, ExperimentalSupportGC|planMode)
 	if pfn.gcPlan != nil {
 		t.Fatal("eagerly materialized function retained GC plan")
 	}
@@ -66,6 +75,15 @@ func TestGCLivenessPrecomputed(t *testing.T) {
 }
 
 func TestGCLivenessDetectsRuntimeGCValue(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mode Mode
+	}{{"closure", 0}, {"execution_plan", EnableGCExecutionPlan}} {
+		t.Run(tc.name, func(t *testing.T) { testGCLivenessDetectsRuntimeGCValue(t, tc.mode) })
+	}
+}
+
+func testGCLivenessDetectsRuntimeGCValue(t *testing.T, planMode Mode) {
 	const source = `package main
 
 import "runtime"
@@ -74,7 +92,7 @@ var collect = runtime.GC
 
 func work() { collect() }
 `
-	interp, err := NewContext(ExperimentalSupportGC).LoadInterp("main.go", source)
+	interp, err := NewContext(ExperimentalSupportGC|planMode).LoadInterp("main.go", source)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +101,7 @@ func work() { collect() }
 		t.Fatal("runtime.GC function value was not detected")
 	}
 
-	interp, err = NewContext(ExperimentalSupportGC).LoadInterp("main.go", "package main\nfunc work() {}\n")
+	interp, err = NewContext(ExperimentalSupportGC|planMode).LoadInterp("main.go", "package main\nfunc work() {}\n")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,6 +112,15 @@ func work() { collect() }
 }
 
 func TestGCLivenessLargeFunctionIsLazy(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mode Mode
+	}{{"closure", 0}, {"execution_plan", EnableGCExecutionPlan}} {
+		t.Run(tc.name, func(t *testing.T) { testGCLivenessLargeFunctionIsLazy(t, tc.mode) })
+	}
+}
+
+func testGCLivenessLargeFunctionIsLazy(t *testing.T, planMode Mode) {
 	const additions = maxEagerGCLivenessPCs + 100
 	var source strings.Builder
 	source.WriteString(`package main
@@ -120,7 +147,7 @@ func Work(n int) int {
 	return newWork(captured)(parameter, n)
 }
 `)
-	interp, err := NewContext(ExperimentalSupportGC).LoadInterp("main.go", source.String())
+	interp, err := NewContext(ExperimentalSupportGC|planMode).LoadInterp("main.go", source.String())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,8 +157,12 @@ func Work(n int) int {
 	if len(pfn.ssaInstrs) <= maxEagerGCLivenessPCs {
 		t.Fatalf("instructions = %d, want more than %d", len(pfn.ssaInstrs), maxEagerGCLivenessPCs)
 	}
-	if pfn.gcReady == nil || pfn.gcReady[0].Load() || pfn.gcPlan == nil || pfn.gcRegs[0] != nil {
+	if pfn.gcReady == nil || pfn.gcReady[0].Load() || (pfn.gcPlan != nil) != (planMode != 0) || pfn.gcLiveIn != nil || pfn.gcRegs[0] != nil {
 		t.Fatal("large function GC registers were eagerly materialized")
+	}
+	parameterRegs := []register{pfn.regIndex(fn.Params[0]), pfn.regIndex(fn.FreeVars[0])}
+	if planMode != 0 {
+		pfn.functionCompilation = functionCompilation{}
 	}
 	var wg sync.WaitGroup
 	for i := 0; i < 16; i++ {
@@ -165,8 +196,8 @@ func Work(n int) int {
 	if lastGC == 0 {
 		t.Fatal("large function liveness was not computed during GC")
 	}
-	for _, value := range []ssa.Value{fn.Params[0], fn.FreeVars[0]} {
-		reg := pfn.regIndex(value)
+	for i, value := range []ssa.Value{fn.Params[0], fn.FreeVars[0]} {
+		reg := parameterRegs[i]
 		if !slices.Contains(pfn.gcRegsForPC(lastGC), reg) {
 			t.Errorf("dead %s register was retained after the second GC", value.Name())
 		}
@@ -188,7 +219,16 @@ func TestGCLivenessPlanPCMapping(t *testing.T) {
 }
 
 func BenchmarkFrameGC(b *testing.B) {
-	pfn := loadGCLivenessFunction(b, ExperimentalSupportGC)
+	for _, tc := range []struct {
+		name string
+		mode Mode
+	}{{"closure", 0}, {"execution_plan", EnableGCExecutionPlan}} {
+		b.Run(tc.name, func(b *testing.B) { benchmarkFrameGCMode(b, tc.mode) })
+	}
+}
+
+func benchmarkFrameGCMode(b *testing.B, mode Mode) {
+	pfn := loadGCLivenessFunction(b, ExperimentalSupportGC|mode)
 	pc := 0
 	for i := range pfn.gcRegs {
 		if len(pfn.gcRegs[i]) > len(pfn.gcRegs[pc]) {
@@ -209,13 +249,22 @@ func BenchmarkFrameGC(b *testing.B) {
 			fr.gc()
 		}
 	})
-	plan := pfn.compileGCLiveness()
-	b.Run("plan-materialization", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			_ = plan.regsAt(pc)
-		}
-	})
+	if mode == 0 {
+		b.Run("dynamic-analysis", func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = pfn.gcRegsFromSSA(pc)
+			}
+		})
+	} else {
+		plan := pfn.compileGCLiveness()
+		b.Run("plan-materialization", func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = plan.regsAt(pc)
+			}
+		})
+	}
 }
 
 func TestKeepLiveClosureBindingsWorklist(t *testing.T) {
@@ -245,6 +294,15 @@ func TestInitClosureCapturesNilFn(t *testing.T) {
 }
 
 func TestGCLivenessLoopDefinitionsAndPhiEdges(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mode Mode
+	}{{"closure", 0}, {"execution_plan", EnableGCExecutionPlan}} {
+		t.Run(tc.name, func(t *testing.T) { testGCLivenessLoopDefinitionsAndPhiEdges(t, tc.mode) })
+	}
+}
+
+func testGCLivenessLoopDefinitionsAndPhiEdges(t *testing.T, planMode Mode) {
 	const source = `package main
 import "runtime"
 func consume(p *int) { if *p != 42 { panic("value") } }
@@ -266,7 +324,7 @@ func phi(first, second *int, choose bool) {
 	consume(p)
 }
 `
-	interp, err := NewContext(ExperimentalSupportGC).LoadInterp("main.go", source)
+	interp, err := NewContext(ExperimentalSupportGC|planMode).LoadInterp("main.go", source)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,19 +374,32 @@ func phi(first, second *int, choose bool) {
 }
 
 func TestGCLivenessCacheConcurrent(t *testing.T) {
-	pfn := loadGCLivenessFunction(t, ExperimentalSupportGC)
-	pfn.gcPlan = pfn.compileGCLiveness()
+	for _, tc := range []struct {
+		name string
+		mode Mode
+	}{{"closure", 0}, {"execution_plan", EnableGCExecutionPlan}} {
+		t.Run(tc.name, func(t *testing.T) { testGCLivenessCacheConcurrentMode(t, tc.mode) })
+	}
+}
+
+func testGCLivenessCacheConcurrentMode(t *testing.T, mode Mode) {
+	pfn := loadGCLivenessFunction(t, ExperimentalSupportGC|mode)
+	if mode != 0 {
+		pfn.gcPlan = pfn.compileGCLiveness()
+	}
 	want := make([][]register, len(pfn.gcRegs))
 	for pc, regs := range pfn.gcRegs {
 		want[pc] = slices.Clone(regs)
 		slices.Sort(want[pc])
 	}
-	// A runtime GC query must not depend on compiler metadata.
-	pfn.Fn = nil
-	pfn.index = nil
-	pfn.ssaInstrs = nil
-	pfn.closureCaptures = nil
-	pfn.closureByResult = nil
+	// Execution-plan queries must also work after compiler state is released.
+	if mode != 0 {
+		pfn.Fn = nil
+		pfn.index = nil
+		pfn.ssaInstrs = nil
+		pfn.closureCaptures = nil
+		pfn.closureByResult = nil
+	}
 	pfn.gcRegs = make([][]register, len(want))
 	pfn.gcReady = make([]atomic.Bool, len(want))
 	check := func() {
@@ -358,6 +429,15 @@ func TestGCLivenessCacheConcurrent(t *testing.T) {
 }
 
 func TestGCLivenessRecoverNamedResult(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		mode Mode
+	}{{"closure", 0}, {"execution_plan", EnableGCExecutionPlan}} {
+		t.Run(tc.name, func(t *testing.T) { testGCLivenessRecoverNamedResult(t, tc.mode) })
+	}
+}
+
+func testGCLivenessRecoverNamedResult(t *testing.T, planMode Mode) {
 	const source = `package main
 import "runtime"
 func work() (result *int) {
@@ -369,7 +449,7 @@ func work() (result *int) {
 }
 func Work() int { return *work() }
 `
-	interp, err := NewContext(ExperimentalSupportGC).LoadInterp("main.go", source)
+	interp, err := NewContext(ExperimentalSupportGC|planMode).LoadInterp("main.go", source)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,5 +489,50 @@ func TestGCLivenessRecoverRootsAfterDefinitions(t *testing.T) {
 	}
 	if got := plan.regsAt(0); !slices.Equal(got, []register{1}) {
 		t.Fatalf("dead registers = %v; want [1] with recover root 0 retained", got)
+	}
+}
+
+func TestGCLivenessModesEquivalent(t *testing.T) {
+	ctx := NewContext(ExperimentalSupportGC | EnableGCExecutionPlan)
+	interp, err := ctx.LoadInterp("equivalence.go", `package main
+import "runtime"
+func work(n int) (result *int) {
+ defer func() { recover(); if result != nil { *result += 1 } }()
+ result = new(int)
+ inner := func() int { return *result }
+ outer := func() int { return inner() }
+ for i := 0; i < n; i++ {
+  if i%2 == 0 { *result += outer()+i } else { *result += i }
+  runtime.GC()
+ }
+ if n < 0 { panic("recover") }
+ return result
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer interp.UnsafeRelease()
+	for fn, p := range interp.funcs {
+		if !p.hasGCRegs {
+			continue
+		}
+		plan := p.compileGCLiveness()
+		for pc := range p.ssaInstrs {
+			want := p.gcRegsFromSSA(pc)
+			got := plan.regsAt(pc)
+			slices.Sort(want)
+			slices.Sort(got)
+			if !slices.Equal(got, want) {
+				t.Fatalf("%s PC %d: plan %v, SSA %v", fn, pc, got, want)
+			}
+		}
+	}
+}
+
+func TestGCExecutionPlanModeWithoutGC(t *testing.T) {
+	p := loadGCLivenessFunction(t, EnableGCExecutionPlan)
+	if p.gcRegs != nil || p.gcPlan != nil || p.gcLiveIn != nil {
+		t.Fatal("plan mode enabled GC implicitly")
 	}
 }
