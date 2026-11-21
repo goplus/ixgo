@@ -137,7 +137,7 @@ func installInterpreterMemo(p *function) {
 }
 
 type interpreterAccumulatorKey struct {
-	fn     *ssa.Function
+	fn     *function
 	inputs string
 }
 
@@ -187,7 +187,7 @@ func installInterpreterAccumulator(p *function, output int, state bool) {
 			}
 			// Nil arguments retain the original load and panic order.
 			if valid && !cache.disabled {
-				key := interpreterAccumulatorKey{fn: p.Fn, inputs: string(keys)}
+				key := interpreterAccumulatorKey{fn: p, inputs: string(keys)}
 				if delta, ok := cache.values[key]; ok {
 					if state {
 						memo.SetScalarBits(out.Elem(), delta)
@@ -404,7 +404,7 @@ func installInterpreterReceiver(p *function, plan *MemoReceiverPlan) {
 			keys = binary.LittleEndian.AppendUint64(keys, memo.ValueBits(arg))
 		}
 		if valid {
-			fr.memoState.receiver.key = interpreterAccumulatorKey{fn: p.Fn, inputs: string(keys)}
+			fr.memoState.receiver.key = interpreterAccumulatorKey{fn: p, inputs: string(keys)}
 			if result, ok := cache.values[fr.memoState.receiver.key]; ok {
 				for i, field := range fr.memoState.receiver.fields {
 					if plan.Receiver.Affine[i] {

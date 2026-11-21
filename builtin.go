@@ -32,7 +32,7 @@ import (
 
 // callBuiltin interprets a call to builtin fn with arguments args,
 // returning its result.
-func (inter *Interp) callBuiltin(fr *frame, fn *ssa.Builtin, args []value, ssaArgs []ssa.Value) value {
+func (inter *Interp) callBuiltin(fr *frame, fn builtinFunction, args []value, interfaceArgs []bool) value {
 	switch fnName := fn.Name(); fnName {
 	case "append":
 		if len(args) == 1 {
@@ -70,12 +70,9 @@ func (inter *Interp) callBuiltin(fr *frame, fn *ssa.Builtin, args []value, ssaAr
 			if i > 0 && ln {
 				buf.WriteRune(' ')
 			}
-			if len(ssaArgs) > i {
-				typ := inter.toType(ssaArgs[i].Type())
-				if typ.Kind() == reflect.Interface {
-					writeinterface(&buf, arg)
-					continue
-				}
+			if i < len(interfaceArgs) && interfaceArgs[i] {
+				writeinterface(&buf, arg)
+				continue
 			}
 			writevalue(&buf, arg, inter.ctx.Mode&EnablePrintAny != 0)
 		}
@@ -233,7 +230,7 @@ func (inter *Interp) callBuiltin(fr *frame, fn *ssa.Builtin, args []value, ssaAr
 
 // callBuiltinDiscardsResult interprets a call to builtin fn with arguments args,
 // discards its result.
-func (inter *Interp) callBuiltinDiscardsResult(fr *frame, fn *ssa.Builtin, args []value, ssaArgs []ssa.Value) {
+func (inter *Interp) callBuiltinDiscardsResult(fr *frame, fn builtinFunction, args []value, interfaceArgs []bool) {
 	switch fnName := fn.Name(); fnName {
 	case "append":
 		panic("discards result of " + fnName)
@@ -255,12 +252,9 @@ func (inter *Interp) callBuiltinDiscardsResult(fr *frame, fn *ssa.Builtin, args 
 			if i > 0 && ln {
 				buf.WriteRune(' ')
 			}
-			if len(ssaArgs) > i {
-				typ := inter.toType(ssaArgs[i].Type())
-				if typ.Kind() == reflect.Interface {
-					writeinterface(&buf, arg)
-					continue
-				}
+			if i < len(interfaceArgs) && interfaceArgs[i] {
+				writeinterface(&buf, arg)
+				continue
 			}
 			writevalue(&buf, arg, inter.ctx.Mode&EnablePrintAny != 0)
 		}
@@ -335,7 +329,7 @@ func (inter *Interp) callBuiltinDiscardsResult(fr *frame, fn *ssa.Builtin, args 
 
 // makeBuiltinByStack interprets a call to builtin fn with arguments args,
 // returning its result.
-func (interp *Interp) makeBuiltinByStack(pfn *function, fn *ssa.Builtin, ssaArgs []ssa.Value, ir register, ia []register) func(fr *frame) {
+func (interp *Interp) makeBuiltinByStack(pfn *function, fn *ssa.Builtin, ssaArgs []ssa.Value, ir register, ia []register, pos token.Pos) func(fr *frame) {
 	switch fn.Name() {
 	case "append":
 		if len(ia) == 1 {
@@ -382,6 +376,7 @@ func (interp *Interp) makeBuiltinByStack(pfn *function, fn *ssa.Builtin, ssaArgs
 
 	case "print", "println": // print(any, ...)
 		ln := fn.Name() == "println"
+		interfaceArgs := builtinInterfaceArgs(interp, fn.Name(), ssaArgs)
 		return func(fr *frame) {
 			var buf bytes.Buffer
 			for i := 0; i < len(ia); i++ {
@@ -389,12 +384,9 @@ func (interp *Interp) makeBuiltinByStack(pfn *function, fn *ssa.Builtin, ssaArgs
 				if i > 0 && ln {
 					buf.WriteRune(' ')
 				}
-				if len(ssaArgs) > i {
-					typ := interp.toType(ssaArgs[i].Type())
-					if typ.Kind() == reflect.Interface {
-						writeinterface(&buf, arg)
-						continue
-					}
+				if i < len(interfaceArgs) && interfaceArgs[i] {
+					writeinterface(&buf, arg)
+					continue
 				}
 				writevalue(&buf, arg, interp.ctx.Mode&EnablePrintAny != 0)
 			}
@@ -599,12 +591,16 @@ func (interp *Interp) makeBuiltinByStack(pfn *function, fn *ssa.Builtin, ssaArgs
 			fr.setReg(ir, uintptr(typ.Align()))
 		}
 	case "Offsetof": // instance of generic function
-		return func(fr *frame) {
-			offset, err := builtinOffsetof(fr, fn, int(fr.ipc)-1)
-			if err != nil {
-				panic(err)
+		offset, err := builtinOffsetof(interp.ctx, pos, ssaArgs)
+		if err != nil {
+			msg := err.Error()
+			return func(fr *frame) {
+				panic(fr.plainError(fn, msg))
 			}
-			fr.setReg(ir, uintptr(offset))
+		}
+		result := uintptr(offset)
+		return func(fr *frame) {
+			fr.setReg(ir, result)
 		}
 	case "clear":
 		return func(fr *frame) {
@@ -695,44 +691,47 @@ func mulUintptr(a, b uintptr) (uintptr, bool) {
 	return a * b, overflow
 }
 
-func builtinOffsetof(fr *frame, fn *ssa.Builtin, pc int) (int64, error) {
-	pfn := fr.pfn
-	pos := pfn.ssaInstrs[pc].Pos()
-	paths, info, ok := pathEnclosingInterval(pfn.Interp.ctx, pos)
-	if !ok {
-		return -1, fr.plainError(fn, "unsafe.Offsetof not found code")
+// builtinOffsetof resolves generic field selections while compiler metadata is available.
+func builtinOffsetof(ctx *Context, pos token.Pos, args []ssa.Value) (int64, error) {
+	if len(args) != 1 {
+		return -1, PlainError("unsafe.Offsetof not found call operand")
+	}
+	paths, info, ok := pathEnclosingInterval(ctx, pos)
+	if !ok || len(paths) == 0 {
+		return -1, PlainError("unsafe.Offsetof not found code")
 	}
 	call, ok := paths[0].(*ast.CallExpr)
-	if !ok {
-		return -1, fr.plainError(fn, "unsafe.Offsetof not found call")
+	if !ok || len(call.Args) != 1 {
+		return -1, PlainError("unsafe.Offsetof not found call")
 	}
-	selx, ok := call.Args[0].(*ast.SelectorExpr)
+	selx, ok := ast.Unparen(call.Args[0]).(*ast.SelectorExpr)
 	if !ok {
-		return -1, fr.plainError(fn, "unsafe.Offsetof not found selector expr")
+		return -1, PlainError("unsafe.Offsetof not found selector expr")
 	}
-	sel, _ := info.Selections[selx]
+	sel := info.Selections[selx]
 	if sel == nil {
-		return -1, fr.plainError(fn, "unsafe.Offsetof not found selector type")
+		return -1, PlainError("unsafe.Offsetof not found selector type")
 	}
-	instrs, found := foundFieldAddr(pfn, pc)
-	if !found || len(sel.Index()) > len(instrs) {
-		return -1, fr.plainError(fn, "unsafe.Offsetof not found FieldAddr instr")
-	}
-	instr := instrs[len(sel.Index())-1]
-	return selOffsetof(pfn.Interp.ctx.sizes, instr.X.Type().Underlying().(*types.Pointer).Elem().Underlying().(*types.Struct), sel.Index(), selx.Sel.Name)
-}
-
-func foundFieldAddr(pfn *function, pc int) (instrs []*ssa.FieldAddr, found bool) {
-	for pc > 0 {
-		pc--
-		if fd, ok := pfn.ssaInstrs[pc].(*ssa.FieldAddr); ok {
-			found = true
-			instrs = append(instrs, fd)
-		} else if found {
-			return
+	// Only implicit selections belong to this offset, not explicit x.A.B steps.
+	operand := args[0]
+	for range sel.Index() {
+		if load, ok := operand.(*ssa.UnOp); ok && load.Op == token.MUL {
+			operand = load.X
+		}
+		switch field := operand.(type) {
+		case *ssa.FieldAddr:
+			operand = field.X
+		case *ssa.Field:
+			operand = field.X
+		default:
+			return -1, PlainError("unsafe.Offsetof not found field operand")
 		}
 	}
-	return
+	typ := operand.Type().Underlying()
+	if ptr, ok := typ.(*types.Pointer); ok {
+		typ = ptr.Elem().Underlying()
+	}
+	return selOffsetof(ctx.sizes, typ, sel.Index(), selx.Sel.Name)
 }
 
 func pathEnclosingInterval(ctx *Context, pos token.Pos) (path []ast.Node, info *types.Info, exact bool) {
