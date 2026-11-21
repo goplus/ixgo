@@ -52,6 +52,7 @@ import (
 	"go/token"
 	"go/types"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -82,26 +83,26 @@ func init() {
 type Interp struct {
 	ctx          *Context
 	rctx         *reflectx.Context
-	mainpkg      *ssa.Package                                // the SSA main package
-	record       *TypesRecord                                // lookup type and ToType
-	globals      map[string]value                            // addresses of global variables (immutable)
-	chkinit      map[string]bool                             // init vars
-	preloadTypes map[types.Type]reflect.Type                 // preload types.Type -> reflect.Type
-	funcs        map[*ssa.Function]*function                 // ssa.Function -> *function
-	msets        map[reflect.Type](map[string]*ssa.Function) // user defined type method sets
-	chexit       chan int                                    // call os.Exit code by chan for runtime.Goexit
-	cherror      chan PanicError                             // call by go func error for context
-	deferMap     sync.Map                                    // defer goroutine id -> call frame
-	rfuncMap     sync.Map                                    // reflect.Value(fn).Pointer -> *function
-	typesMutex   sync.RWMutex                                // findType/toType mutex
-	mainid       uint64                                      // main goroutine id
-	exitCode     int                                         // call os.Exit code
-	goroutines   int32                                       // atomically updated
-	deferCount   int32                                       // fast has defer check
-	goexited     int32                                       // is call runtime.Goexit
-	exited       int32                                       // is call os.Exit
-	gcEnabled    bool                                        // program can invoke runtime.GC
-	execution    *ExecutionTracker                           // optional execution tracking session
+	mainpkg      *ssa.Package                            // the SSA main package
+	record       *TypesRecord                            // lookup type and ToType
+	globals      map[string]value                        // addresses of global variables (immutable)
+	chkinit      map[string]bool                         // init vars
+	preloadTypes map[types.Type]reflect.Type             // preload types.Type -> reflect.Type
+	funcs        map[*ssa.Function]*function             // ssa.Function -> *function
+	msets        map[reflect.Type](map[string]*function) // user defined type method sets
+	chexit       chan int                                // call os.Exit code by chan for runtime.Goexit
+	cherror      chan PanicError                         // call by go func error for context
+	deferMap     sync.Map                                // defer goroutine id -> call frame
+	rfuncMap     sync.Map                                // reflect.Value(fn).Pointer -> *function
+	typesMutex   sync.RWMutex                            // findType/toType mutex
+	mainid       uint64                                  // main goroutine id
+	exitCode     int                                     // call os.Exit code
+	goroutines   int32                                   // atomically updated
+	deferCount   int32                                   // fast has defer check
+	goexited     int32                                   // is call runtime.Goexit
+	exited       int32                                   // is call os.Exit
+	gcEnabled    bool                                    // program can invoke runtime.GC
+	execution    *ExecutionTracker                       // optional execution tracking session
 	interpExt
 }
 
@@ -123,14 +124,9 @@ func (i *Interp) loadFunction(fn *ssa.Function) *function {
 		return pfn
 	}
 	pfn := &function{
-		Interp: i,
-		Fn:     fn,
-		index:  make(map[ssa.Value]uint32),
-		narg:   len(fn.Params),
-		nenv:   len(fn.FreeVars),
-	}
-	if len(fn.Blocks) > 0 {
-		pfn.Main = fn.Blocks[0]
+		Interp:              i,
+		functionCompilation: functionCompilation{Fn: fn, index: make(map[ssa.Value]uint32)},
+		functionExecution:   functionExecution{narg: len(fn.Params), nenv: len(fn.FreeVars)},
 	}
 	if res := fn.Signature.Results(); res != nil {
 		pfn.nres = res.Len()
@@ -187,10 +183,10 @@ func (i *Interp) FindMethod(mtyp reflect.Type, fn *types.Func) func([]reflect.Va
 }
 
 type _defer struct {
-	fn      value
-	tail    *_defer
-	args    []value
-	ssaArgs []ssa.Value
+	fn            value
+	tail          *_defer
+	args          []value
+	interfaceArgs []bool
 }
 
 type frame struct {
@@ -199,11 +195,11 @@ type frame struct {
 	callee    *frame
 	_defer    *_defer
 	_panic    *_panic
-	block     *ssa.BasicBlock
+	block     int32   // one-based block ID; zero denotes a root frame
 	stack     []value // result args env datas
 	phiVals   []value // temporary values for parallel phi assignments
 	ipc       int32
-	pred      int32
+	pred      int32 // zero-based predecessor block ID used by Phi
 	deferid   uint64
 	memoState *interpreterMemoState
 }
@@ -284,14 +280,238 @@ func (fr *frame) gc() {
 	}
 }
 
+// gcLivenessPlan contains no SSA objects. Block live-out sets and backwards
+// register transfers defer per-PC dead-set materialization without retaining SSA.
+type gcLivenessPlan struct {
+	registers []register
+	blocks    []gcLivenessBlock
+	points    []gcLivenessPoint
+	uses      []register
+	recover   []register
+	captures  []closureCapture
+	byResult  map[int]int
+}
+
+type gcLivenessBlock struct {
+	liveOut   []register
+	transfers []gcLivenessTransfer
+	isRecover bool
+}
+
+type gcLivenessTransfer struct {
+	def      register
+	useStart int
+	useEnd   int
+}
+
+type gcLivenessPoint struct {
+	block int
+	instr int
+}
+
+func (pfn *function) compileGCLiveness() *gcLivenessPlan {
+	plan := &gcLivenessPlan{points: make([]gcLivenessPoint, len(pfn.ssaInstrs))}
+	for _, encoded := range pfn.index {
+		vk, rk := kind(encoded>>30), reflect.Kind(encoded>>24&0x3f)
+		if !vk.isStatic() && isGCRegisterKind(rk) {
+			plan.registers = append(plan.registers, register(encoded&0xffffff))
+		}
+	}
+	slices.Sort(plan.registers)
+	plan.registers = slices.Compact(plan.registers)
+	liveIn := make(map[*ssa.BasicBlock]map[register]bool)
+	regFor := func(v ssa.Value) register {
+		encoded, ok := pfn.index[v]
+		if !ok {
+			return -1
+		}
+		vk, rk := kind(encoded>>30), reflect.Kind(encoded>>24&0x3f)
+		if vk.isStatic() || !isGCRegisterKind(rk) {
+			return -1
+		}
+		return register(encoded & 0xffffff)
+	}
+	add := func(dst, src map[register]bool) {
+		for reg := range src {
+			dst[reg] = true
+		}
+	}
+	liveOut := func(b *ssa.BasicBlock) map[register]bool {
+		live := make(map[register]bool)
+		for _, succ := range b.Succs {
+			add(live, liveIn[succ])
+			for i, pred := range succ.Preds {
+				if pred != b {
+					continue
+				}
+				for _, instr := range succ.Instrs {
+					phi, ok := instr.(*ssa.Phi)
+					if !ok {
+						break
+					}
+					if reg := regFor(phi.Edges[i]); reg >= 0 {
+						live[reg] = true
+					}
+				}
+			}
+		}
+		return live
+	}
+	var ops []*ssa.Value
+	transfer := func(live map[register]bool, instr ssa.Instruction) {
+		if v, ok := instr.(ssa.Value); ok {
+			if reg := regFor(v); reg >= 0 {
+				delete(live, reg)
+			}
+		}
+		if _, ok := instr.(*ssa.Phi); !ok {
+			ops = instr.Operands(ops[:0])
+			for _, op := range ops {
+				if *op != nil {
+					if reg := regFor(*op); reg >= 0 {
+						live[reg] = true
+					}
+				}
+			}
+		}
+		// A recovered panic resumes in an otherwise disconnected block.
+		if pfn.Fn.Recover != nil && instr.Block() != pfn.Fn.Recover {
+			add(live, liveIn[pfn.Fn.Recover])
+		}
+	}
+	for _, b := range pfn.Fn.Blocks {
+		liveIn[b] = make(map[register]bool)
+	}
+	for changed := true; changed; {
+		changed = false
+		for i := len(pfn.Fn.Blocks) - 1; i >= 0; i-- {
+			b := pfn.Fn.Blocks[i]
+			live := liveOut(b)
+			for j := len(b.Instrs) - 1; j >= 0; j-- {
+				transfer(live, b.Instrs[j])
+			}
+			for reg := range live {
+				if !liveIn[b][reg] {
+					liveIn[b][reg] = true
+					changed = true
+				}
+			}
+		}
+	}
+	regsFor := func(live map[register]bool) []register {
+		var regs []register
+		for reg := range live {
+			regs = append(regs, reg)
+		}
+		slices.Sort(regs)
+		return regs
+	}
+	plan.recover = regsFor(liveIn[pfn.Fn.Recover])
+	plan.blocks = make([]gcLivenessBlock, 0, len(pfn.Fn.Blocks))
+	plan.uses = make([]register, 0, len(pfn.ssaInstrs))
+	for _, b := range pfn.Fn.Blocks {
+		block := gcLivenessBlock{
+			liveOut:   regsFor(liveOut(b)),
+			isRecover: b == pfn.Fn.Recover,
+			transfers: make([]gcLivenessTransfer, len(b.Instrs)),
+		}
+		for i, instr := range b.Instrs {
+			tr := gcLivenessTransfer{def: -1, useStart: len(plan.uses)}
+			if v, ok := instr.(ssa.Value); ok {
+				tr.def = regFor(v)
+			}
+			if _, ok := instr.(*ssa.Phi); !ok {
+				ops = instr.Operands(ops[:0])
+				for _, op := range ops {
+					if *op != nil {
+						if reg := regFor(*op); reg >= 0 {
+							plan.uses = append(plan.uses, reg)
+						}
+					}
+				}
+			}
+			tr.useEnd = len(plan.uses)
+			block.transfers[i] = tr
+		}
+		plan.blocks = append(plan.blocks, block)
+	}
+	// Instructions retain block order after elision. Walk each original block
+	// once to map execution PCs without a per-instruction hash table.
+	cursors := make([]int, len(plan.blocks))
+	for pc, instr := range pfn.ssaInstrs {
+		point := gcLivenessPoint{block: -1}
+		if instr != nil && instr.Block() != nil {
+			block := instr.Block()
+			for cursors[block.Index] < len(block.Instrs) {
+				index := cursors[block.Index]
+				cursors[block.Index]++
+				if block.Instrs[index] == instr {
+					point = gcLivenessPoint{block: block.Index, instr: index}
+					break
+				}
+			}
+		}
+		plan.points[pc] = point
+	}
+	pfn.initClosureCaptures()
+	plan.captures = pfn.closureCaptures
+	plan.byResult = pfn.closureByResult
+	return plan
+}
+
+func (plan *gcLivenessPlan) regsAt(pc int) []register {
+	if plan == nil || pc < 0 || pc >= len(plan.points) {
+		return nil
+	}
+	point := plan.points[pc]
+	if point.block < 0 {
+		return nil
+	}
+	block := &plan.blocks[point.block]
+	dead := make(map[int]bool, len(plan.registers))
+	for _, reg := range plan.registers {
+		dead[int(reg)] = true
+	}
+	for _, reg := range block.liveOut {
+		dead[int(reg)] = false
+	}
+	for i := len(block.transfers) - 1; i > point.instr; i-- {
+		tr := &block.transfers[i]
+		if tr.def >= 0 {
+			dead[int(tr.def)] = true
+		}
+		for _, reg := range plan.uses[tr.useStart:tr.useEnd] {
+			dead[int(reg)] = false
+		}
+	}
+	if !block.isRecover {
+		for _, reg := range plan.recover {
+			dead[int(reg)] = false
+		}
+	}
+	keepLiveClosureBindings(dead, plan.captures, plan.byResult)
+	regs := make([]register, 0, len(plan.registers))
+	for _, reg := range plan.registers {
+		if dead[int(reg)] {
+			regs = append(regs, reg)
+		}
+	}
+	return regs
+}
+
 const maxEagerGCLivenessPCs = 1024
 
-// initGCLiveness precomputes dead registers for small functions at load time.
-// Large functions compute entries lazily per PC; both share one block-liveness
-// fixed point. Entries identify registers releasable after each instruction.
+// initGCLiveness precomputes small-function cleanup sets at load time.
+// In the default mode, large functions build the execution plan lazily on
+// their first GC query. Small functions keep their completed plan so later
+// direct queries remain valid. EnableGCExecutionPlan builds SSA-free plans at
+// load time; large functions still materialize per-PC cleanup sets on first use.
 func (pfn *function) initGCLiveness() {
 	if !pfn.hasGCRegs {
 		return
+	}
+	if pfn.Interp.ctx.Mode&EnableGCExecutionPlan != 0 {
+		pfn.gcPlan = pfn.compileGCLiveness()
 	}
 	pfn.gcRegs = make([][]register, len(pfn.ssaInstrs))
 	pfn.gcReady = make([]atomic.Bool, len(pfn.ssaInstrs))
@@ -301,6 +521,9 @@ func (pfn *function) initGCLiveness() {
 	for pc := range pfn.ssaInstrs {
 		pfn.gcRegs[pc] = pfn.gcRegsAt(pc)
 		pfn.gcReady[pc].Store(true)
+	}
+	if pfn.Interp.ctx.Mode&EnableGCExecutionPlan != 0 {
+		pfn.gcPlan = nil
 	}
 }
 
@@ -327,112 +550,17 @@ func isGCRegisterKind(kind reflect.Kind) bool {
 }
 
 func (pfn *function) gcRegsAt(pc int) []register {
-	cur := pfn.ssaInstrs[pc]
-	block := cur.Block()
-	if block == nil {
-		return nil
+	if pfn.gcPlan == nil {
+		return pfn.gcRegsLazy(pc)
 	}
-	dead := make(map[int]bool)
-	for _, reg := range pfn.index {
-		vk, rk := kind(reg>>30), reflect.Kind(reg>>24&0x3f)
-		if !vk.isStatic() && isGCRegisterKind(rk) {
-			dead[int(reg&0xffffff)] = true
-		}
-	}
-	var liveIn map[*ssa.BasicBlock]map[ssa.Value]bool
-	add := func(dst, src map[ssa.Value]bool) {
-		for v := range src {
-			dst[v] = true
-		}
-	}
-	liveOut := func(b *ssa.BasicBlock) map[ssa.Value]bool {
-		live := make(map[ssa.Value]bool)
-		for _, succ := range b.Succs {
-			add(live, liveIn[succ])
-			for i, pred := range succ.Preds {
-				if pred != b {
-					continue
-				}
-				for _, instr := range succ.Instrs {
-					phi, ok := instr.(*ssa.Phi)
-					if !ok {
-						break
-					}
-					live[phi.Edges[i]] = true
-				}
-			}
-		}
-		return live
-	}
-	var ops []*ssa.Value
-	transfer := func(live map[ssa.Value]bool, instr ssa.Instruction) {
-		if v, ok := instr.(ssa.Value); ok {
-			delete(live, v)
-		}
-		if _, ok := instr.(*ssa.Phi); !ok {
-			ops = instr.Operands(ops[:0])
-			for _, op := range ops {
-				if *op != nil {
-					live[*op] = true
-				}
-			}
-		}
-		// Recovered panics resume in an otherwise disconnected SSA block.
-		// Its implicit named-result loads must survive every possible panic.
-		if pfn.Fn.Recover != nil && instr.Block() != pfn.Fn.Recover {
-			add(live, liveIn[pfn.Fn.Recover])
-		}
-	}
-	pfn.gcLiveOnce.Do(func() {
-		// Phi inputs are uses on predecessor edges, not in the successor block.
-		liveIn = make(map[*ssa.BasicBlock]map[ssa.Value]bool)
-		for _, b := range pfn.Fn.Blocks {
-			liveIn[b] = make(map[ssa.Value]bool)
-		}
-		for changed := true; changed; {
-			changed = false
-			for i := len(pfn.Fn.Blocks) - 1; i >= 0; i-- {
-				b := pfn.Fn.Blocks[i]
-				live := liveOut(b)
-				for j := len(b.Instrs) - 1; j >= 0; j-- {
-					transfer(live, b.Instrs[j])
-				}
-				for v := range live {
-					if !liveIn[b][v] {
-						liveIn[b][v] = true
-						changed = true
-					}
-				}
-			}
-		}
-		pfn.initClosureCaptures()
-		pfn.gcLiveIn = liveIn
-	})
-	// After publication, liveOut and transfer only read liveIn. Each query
-	// owns its mutable live set and operand scratch, allowing concurrent queries.
-	liveIn = pfn.gcLiveIn
-	live := liveOut(block)
-	for j := len(block.Instrs) - 1; j >= 0 && block.Instrs[j] != cur; j-- {
-		transfer(live, block.Instrs[j])
-	}
-	if pfn.Fn.Recover != nil && block != pfn.Fn.Recover {
-		add(live, liveIn[pfn.Fn.Recover])
-	}
-	for v := range live {
-		if reg, ok := pfn.index[v]; ok {
-			dead[int(reg&0xffffff)] = false
-		}
-	}
-	// Captured registers are not operands of later closure calls.
-	pfn.keepLiveClosureBindings(dead)
-	regs := make([]register, 0, len(dead))
-	for i, isDead := range dead {
-		if !isDead {
-			continue
-		}
-		regs = append(regs, register(i))
-	}
-	return regs
+	return pfn.gcPlan.regsAt(pc)
+}
+
+// gcRegsLazy builds the same SSA-free plan used by EnableGCExecutionPlan on
+// the first query. The mode only changes when the plan is constructed.
+func (pfn *function) gcRegsLazy(pc int) []register {
+	pfn.gcLiveOnce.Do(func() { pfn.gcPlan = pfn.compileGCLiveness() })
+	return pfn.gcPlan.regsAt(pc)
 }
 
 // keepLiveClosureBindings keeps registers captured by a still-live MakeClosure.
@@ -446,7 +574,10 @@ func (pfn *function) gcRegsAt(pc int) []register {
 // The MakeClosure list is built once in initClosureCaptures.
 func (pfn *function) keepLiveClosureBindings(dead map[int]bool) {
 	pfn.initClosureCaptures()
-	caps := pfn.closureCaptures
+	keepLiveClosureBindings(dead, pfn.closureCaptures, pfn.closureByResult)
+}
+
+func keepLiveClosureBindings(dead map[int]bool, caps []closureCapture, byResult map[int]int) {
 	if len(caps) == 0 {
 		return
 	}
@@ -466,7 +597,7 @@ func (pfn *function) keepLiveClosureBindings(dead map[int]bool) {
 				continue
 			}
 			dead[idx] = false
-			if j, ok := pfn.closureByResult[idx]; ok && !queued[j] {
+			if j, ok := byResult[idx]; ok && !queued[j] {
 				q = append(q, j)
 				queued[j] = true
 			}
@@ -509,7 +640,7 @@ func (pfn *function) initClosureCaptures() {
 }
 
 func (fr *frame) valid() bool {
-	return fr != nil && fr.pfn != nil && fr.block != nil
+	return fr != nil && fr.pfn != nil && fr.block != 0
 }
 
 func (fr *frame) pc() uintptr {
@@ -705,7 +836,7 @@ func (fr *frame) runDefer(d *_defer) (ok bool) {
 			}
 		}
 	}()
-	fr.pfn.Interp.callDiscardsResult(fr, d.fn, d.args, d.ssaArgs)
+	fr.pfn.Interp.callDiscardsResult(fr, d.fn, d.args, d.interfaceArgs)
 	ok = true
 	return
 }
@@ -837,83 +968,20 @@ func (i *DebugInfo) AsFunc() (*types.Func, bool) {
 	return v, ok
 }
 
-// prepareCall determines the function value and argument values for a
-// function call in a Call, Go or Defer instruction, performing
-// interface method lookup if needed.
-func (i *Interp) prepareCall(fr *frame, call *ssa.CallCommon, iv register, ia []register, ib []register) (fv value, args []value) {
-	if call.Method == nil {
-		switch f := call.Value.(type) {
-		case *ssa.Builtin:
-			fv = f
-		case *ssa.Function:
-			if f.Blocks == nil {
-				ext, ok := findExternFunc(i, f)
-				if !ok {
-					// skip pkg.init
-					if f.Pkg != nil && f.Name() == "init" {
-						fv = func() {}
-					} else {
-						panic(fmt.Errorf("no code for function: %v", f))
-					}
-				} else {
-					fv = ext
-				}
-			} else {
-				fv = f
-			}
-		case *ssa.MakeClosure:
-			var bindings []value
-			for i := range f.Bindings {
-				bindings = append(bindings, fr.reg(ib[i]))
-			}
-			fv = &closure{i.funcs[f.Fn.(*ssa.Function)], bindings}
-		default:
-			fv = fr.reg(iv)
-		}
-	} else {
-		v := fr.reg(iv)
-		rtype := reflect.TypeOf(v)
-		mname := call.Method.Name()
-		if mset, ok := i.msets[rtype]; ok {
-			if f, ok := mset[mname]; ok {
-				fv = f
-			} else {
-				ext, ok := findUserMethod(rtype, mname)
-				if !ok {
-					panic(fmt.Errorf("no code for method: %v.%v", rtype, mname))
-				}
-				fv = ext
-			}
-		} else {
-			ext, ok := findExternMethod(rtype, mname)
-			if !ok {
-				panic(fmt.Errorf("no code for method: %v.%v", rtype, mname))
-			}
-			fv = ext
-		}
-		args = append(args, v)
-	}
-	for i := range call.Args {
-		v := fr.reg(ia[i])
-		args = append(args, v)
-	}
-	return
-}
-
 // prepareGoCall transfers interpreted arguments and closure bindings to the
 // goroutine frame before starting it. Keeping a separate function/argument
 // slice on the host goroutine stack would retain dead bindings while it blocks.
-func (i *Interp) prepareGoCall(root *frame, fn value, args []value, ssaArgs []ssa.Value) func() {
+func (i *Interp) prepareGoCall(root *frame, fn value, args []value, interfaceArgs []bool) func() {
 	var pfn *function
 	var env []value
 	switch f := fn.(type) {
-	case *ssa.Function:
-		pfn = i.funcs[f]
+	case *function:
+		pfn = f
 	case *closure:
 		pfn, env = f.pfn, f.env
 	}
 	if pfn == nil {
-		return func() { i.callDiscardsResult(root, fn, args, ssaArgs) }
+		return func() { i.callDiscardsResult(root, fn, args, interfaceArgs) }
 	}
 	root.pfn = pfn
 	fr := pfn.allocFrame(root)
@@ -928,14 +996,14 @@ func (i *Interp) prepareGoCall(root *frame, fn value, args []value, ssaArgs []ss
 // call interprets a call to a function (function, builtin or closure)
 // fn with arguments args, returning its result.
 // callpos is the position of the callsite.
-func (i *Interp) call(caller *frame, fn value, args []value, ssaArgs []ssa.Value) value {
+func (i *Interp) call(caller *frame, fn value, args []value, interfaceArgs []bool) value {
 	switch fn := fn.(type) {
-	case *ssa.Function:
-		return i.callFunction(caller, i.funcs[fn], args, nil)
+	case *function:
+		return i.callFunction(caller, fn, args, nil)
 	case *closure:
 		return i.callFunction(caller, fn.pfn, args, fn.env)
-	case *ssa.Builtin:
-		return i.callBuiltin(caller, fn, args, ssaArgs)
+	case *builtinDescription:
+		return i.callBuiltin(caller, fn, args, interfaceArgs)
 	case reflect.Value:
 		return i.callExternal(caller, fn, args, nil)
 	default:
@@ -946,14 +1014,14 @@ func (i *Interp) call(caller *frame, fn value, args []value, ssaArgs []ssa.Value
 // call interprets a call to a function (function, builtin or closure)
 // fn with arguments args, returning its result.
 // callpos is the position of the callsite.
-func (i *Interp) callDiscardsResult(caller *frame, fn value, args []value, ssaArgs []ssa.Value) {
+func (i *Interp) callDiscardsResult(caller *frame, fn value, args []value, interfaceArgs []bool) {
 	switch fn := fn.(type) {
-	case *ssa.Function:
-		i.callFunctionDiscardsResult(caller, i.funcs[fn], args, nil)
+	case *function:
+		i.callFunctionDiscardsResult(caller, fn, args, nil)
 	case *closure:
 		i.callFunctionDiscardsResult(caller, fn.pfn, args, fn.env)
-	case *ssa.Builtin:
-		i.callBuiltinDiscardsResult(caller, fn, args, ssaArgs)
+	case *builtinDescription:
+		i.callBuiltinDiscardsResult(caller, fn, args, interfaceArgs)
 	case reflect.Value:
 		i.callExternalDiscardsResult(caller, fn, args, nil)
 	default:
@@ -1288,21 +1356,7 @@ func (i *Interp) callExternalWithFrameByStack(caller *frame, fn reflect.Value, i
 	copyExternalResults(caller, ir, dests, results)
 }
 
-// runFrame executes SSA instructions starting at fr.block and
-// continuing until a return, a panic, or a recovered panic.
-//
-// After a panic, runFrame panics.
-//
-// After a normal return, fr.result contains the result of the call
-// and fr.block is nil.
-//
-// A recovered panic in a function without named return parameters
-// (NRPs) becomes a normal return of the zero value of the function's
-// result type.
-//
-// After a recovered panic in a function with NRPs, fr.result is
-// undefined and fr.block contains the block at which to resume
-// control.
+// run executes closure instructions and handles defers and recovery.
 func (fr *frame) run() {
 	interp := fr.pfn.Interp
 	if tracker := interp.execution; tracker != nil {
@@ -1405,7 +1459,7 @@ func newInterp(ctx *Context, mainpkg *ssa.Package, globals map[string]interface{
 		goroutines:   1,
 		preloadTypes: make(map[types.Type]reflect.Type),
 		funcs:        make(map[*ssa.Function]*function),
-		msets:        make(map[reflect.Type](map[string]*ssa.Function)),
+		msets:        make(map[reflect.Type](map[string]*function)),
 		chexit:       make(chan int),
 		mainid:       GoroutineID(),
 		execution:    ctx.execution,
@@ -1585,7 +1639,7 @@ func (i *Interp) RunFunc(name string, args ...Value) (r Value, err error) {
 		}
 	}()
 	if fn := i.mainpkg.Func(name); fn != nil {
-		r = i.call(fr, fn, args, nil)
+		r = i.call(fr, i.loadFunction(fn), args, nil)
 	} else {
 		err = fmt.Errorf("no function %v", name)
 	}

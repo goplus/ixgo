@@ -1841,7 +1841,7 @@ func receive(ch chan int) int { x, _ := <-ch; return x }
 			pfn.index[recv.X] = uint32(kindGlobal)<<30 | uint32(reflect.Chan)<<24 | uint32(reg)
 			pfn.stack[reg] = ch
 			recv.CommaOk = commaOK
-			fr := &frame{pfn: pfn, block: recv.Block(), ipc: int32(pc + 1), stack: append([]value(nil), pfn.stack...)}
+			fr := &frame{pfn: pfn, block: int32(recv.Block().Index + 1), ipc: int32(pc + 1), stack: append([]value(nil), pfn.stack...)}
 			makeUnOpARROW(pfn, recv)(fr)
 			got := fr.reg(pfn.regIndex(recv))
 			if commaOK {
@@ -1859,13 +1859,13 @@ func receive(ch chan int) int { x, _ := <-ch; return x }
 
 func TestGCFramesSkipsOnlyEmptyRoots(t *testing.T) {
 	cached := new(int)
-	pfn := &function{cacheRegs: []register{0}}
-	fr := &frame{pfn: pfn, block: &ssa.BasicBlock{}, stack: []value{cached}, phiVals: []value{cached}}
+	pfn := &function{functionExecution: functionExecution{cacheRegs: []register{0}}}
+	fr := &frame{pfn: pfn, block: 1, stack: []value{cached}, phiVals: []value{cached}}
 	fr.gcFrames()
 	if fr.stack[0] != nil || fr.phiVals[0] != nil {
 		t.Fatal("frame without SSA roots retained hidden references")
 	}
-	child := &frame{pfn: &function{}, block: &ssa.BasicBlock{}, caller: fr}
+	child := &frame{pfn: &function{}, block: 1, caller: fr}
 	fr.stack[0], fr.phiVals[0] = cached, cached
 	child.gcFrames()
 	if fr.stack[0] != nil || fr.phiVals[0] != nil {
@@ -1902,7 +1902,7 @@ func fib(n int) int { if n < 2 { return n }; return fib(n-1)+fib(n-2) }
 			t.Fatalf("mode %v: %v, %v", mode, got, err)
 		}
 	}
-	if EnableCachedReg != 1<<14 || LastMode != DisableMemo || DisableMemo != EnableCachedReg<<1 {
+	if EnableCachedReg != 1<<14 || LastMode != EnableGCExecutionPlan || EnableGCExecutionPlan != DisableMemo<<1 || DisableMemo != EnableCachedReg<<1 {
 		t.Fatal("unexpected mode bit allocation")
 	}
 }
