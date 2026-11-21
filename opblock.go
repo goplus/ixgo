@@ -160,7 +160,6 @@ type functionCompilation struct {
 	index           map[ssa.Value]uint32
 	ssaInstrs       []ssa.Instruction
 	gcLiveOnce      sync.Once
-	gcLiveIn        map[*ssa.BasicBlock]map[ssa.Value]bool
 	closureCaptures []closureCapture
 	closureByResult map[int]int
 	hasRunDefers    bool
@@ -192,7 +191,6 @@ func (p *function) UnsafeRelease() {
 	p.pool = nil
 	p.index = nil
 	p.cacheRegs = nil
-	p.gcLiveIn = nil
 	p.gcPlan = nil
 	p.gcRegs = nil
 	p.gcReady = nil

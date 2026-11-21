@@ -76,7 +76,7 @@ func fibish(x int) (int, int) {
 }
 `
 
-// Compare identical workloads on main and the refactor with GOMAXPROCS=1,
+// Compare identical workloads with a baseline commit using GOMAXPROCS=1,
 // -benchmem -benchtime=200ms -count=10, then analyze with benchstat.
 // BenchmarkExecutionDescription covers the call paths changed by execution
 // descriptions. DisableMemo keeps the loop workload on the interpreter backend.

@@ -547,119 +547,17 @@ func isGCRegisterKind(kind reflect.Kind) bool {
 }
 
 func (pfn *function) gcRegsAt(pc int) []register {
-	if pfn.gcPlan != nil {
-		return pfn.gcPlan.regsAt(pc)
+	if pfn.gcPlan == nil {
+		return pfn.gcRegsLazy(pc)
 	}
-	return pfn.gcRegsFromSSA(pc)
+	return pfn.gcPlan.regsAt(pc)
 }
 
-func (pfn *function) gcRegsFromSSA(pc int) []register {
-	cur := pfn.ssaInstrs[pc]
-	block := cur.Block()
-	if block == nil {
-		return nil
-	}
-	dead := make(map[int]bool)
-	for _, reg := range pfn.index {
-		vk, rk := kind(reg>>30), reflect.Kind(reg>>24&0x3f)
-		if !vk.isStatic() && isGCRegisterKind(rk) {
-			dead[int(reg&0xffffff)] = true
-		}
-	}
-	var liveIn map[*ssa.BasicBlock]map[ssa.Value]bool
-	add := func(dst, src map[ssa.Value]bool) {
-		for v := range src {
-			dst[v] = true
-		}
-	}
-	liveOut := func(b *ssa.BasicBlock) map[ssa.Value]bool {
-		live := make(map[ssa.Value]bool)
-		for _, succ := range b.Succs {
-			add(live, liveIn[succ])
-			for i, pred := range succ.Preds {
-				if pred != b {
-					continue
-				}
-				for _, instr := range succ.Instrs {
-					phi, ok := instr.(*ssa.Phi)
-					if !ok {
-						break
-					}
-					live[phi.Edges[i]] = true
-				}
-			}
-		}
-		return live
-	}
-	var ops []*ssa.Value
-	transfer := func(live map[ssa.Value]bool, instr ssa.Instruction) {
-		if v, ok := instr.(ssa.Value); ok {
-			delete(live, v)
-		}
-		if _, ok := instr.(*ssa.Phi); !ok {
-			ops = instr.Operands(ops[:0])
-			for _, op := range ops {
-				if *op != nil {
-					live[*op] = true
-				}
-			}
-		}
-		// Recovered panics resume in an otherwise disconnected SSA block.
-		// Its implicit named-result loads must survive every possible panic.
-		if pfn.Fn.Recover != nil && instr.Block() != pfn.Fn.Recover {
-			add(live, liveIn[pfn.Fn.Recover])
-		}
-	}
-	pfn.gcLiveOnce.Do(func() {
-		// Phi inputs are uses on predecessor edges, not in the successor block.
-		liveIn = make(map[*ssa.BasicBlock]map[ssa.Value]bool)
-		for _, b := range pfn.Fn.Blocks {
-			liveIn[b] = make(map[ssa.Value]bool)
-		}
-		for changed := true; changed; {
-			changed = false
-			for i := len(pfn.Fn.Blocks) - 1; i >= 0; i-- {
-				b := pfn.Fn.Blocks[i]
-				live := liveOut(b)
-				for j := len(b.Instrs) - 1; j >= 0; j-- {
-					transfer(live, b.Instrs[j])
-				}
-				for v := range live {
-					if !liveIn[b][v] {
-						liveIn[b][v] = true
-						changed = true
-					}
-				}
-			}
-		}
-		pfn.initClosureCaptures()
-		pfn.gcLiveIn = liveIn
-	})
-	// After publication, liveOut and transfer only read liveIn. Each query
-	// owns its mutable live set and operand scratch, allowing concurrent queries.
-	liveIn = pfn.gcLiveIn
-	live := liveOut(block)
-	for j := len(block.Instrs) - 1; j >= 0 && block.Instrs[j] != cur; j-- {
-		transfer(live, block.Instrs[j])
-	}
-	if pfn.Fn.Recover != nil && block != pfn.Fn.Recover {
-		add(live, liveIn[pfn.Fn.Recover])
-	}
-	for v := range live {
-		if reg, ok := pfn.index[v]; ok {
-			dead[int(reg&0xffffff)] = false
-		}
-	}
-	// Captured registers are not operands of later closure calls.
-	pfn.keepLiveClosureBindings(dead)
-	regs := make([]register, 0, len(dead))
-	for i, isDead := range dead {
-		if !isDead {
-			continue
-		}
-		regs = append(regs, register(i))
-	}
-	return regs
+// gcRegsLazy builds the same SSA-free plan used by EnableGCExecutionPlan on
+// the first query. The mode only changes when the plan is constructed.
+func (pfn *function) gcRegsLazy(pc int) []register {
+	pfn.gcLiveOnce.Do(func() { pfn.gcPlan = pfn.compileGCLiveness() })
+	return pfn.gcPlan.regsAt(pc)
 }
 
 // keepLiveClosureBindings keeps registers captured by a still-live MakeClosure.

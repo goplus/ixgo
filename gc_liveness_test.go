@@ -152,7 +152,7 @@ func Work(n int) int {
 	if len(pfn.ssaInstrs) <= maxEagerGCLivenessPCs {
 		t.Fatalf("instructions = %d, want more than %d", len(pfn.ssaInstrs), maxEagerGCLivenessPCs)
 	}
-	if pfn.gcReady == nil || pfn.gcReady[0].Load() || (pfn.gcPlan != nil) != (planMode != 0) || pfn.gcLiveIn != nil || pfn.gcRegs[0] != nil {
+	if pfn.gcReady == nil || pfn.gcReady[0].Load() || (pfn.gcPlan != nil) != (planMode != 0) || pfn.gcRegs[0] != nil {
 		t.Fatal("large function GC registers were eagerly materialized")
 	}
 	parameterRegs := []register{pfn.regIndex(fn.Params[0]), pfn.regIndex(fn.FreeVars[0])}
@@ -245,10 +245,10 @@ func benchmarkFrameGCMode(b *testing.B, mode Mode) {
 		}
 	})
 	if mode == 0 {
-		b.Run("dynamic-analysis", func(b *testing.B) {
+		b.Run("lazy-plan-query", func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				_ = pfn.gcRegsFromSSA(pc)
+				_ = pfn.gcRegsLazy(pc)
 			}
 		})
 	} else {
@@ -382,7 +382,6 @@ func testGCLivenessCacheConcurrentMode(t *testing.T, mode Mode) {
 		pfn.functionCompilation = functionCompilation{}
 	} else {
 		pfn.gcLiveOnce = sync.Once{}
-		pfn.gcLiveIn = nil
 		pfn.closureCaptures = nil
 		pfn.closureByResult = nil
 	}
@@ -500,7 +499,7 @@ func work(n int) (result *int) {
 		}
 		plan := p.compileGCLiveness()
 		for pc := range p.ssaInstrs {
-			want := p.gcRegsFromSSA(pc)
+			want := p.gcRegsLazy(pc)
 			got := plan.regsAt(pc)
 			slices.Sort(want)
 			slices.Sort(got)
@@ -513,7 +512,7 @@ func work(n int) (result *int) {
 
 func TestGCExecutionPlanModeWithoutGC(t *testing.T) {
 	p := loadGCLivenessFunction(t, EnableGCExecutionPlan)
-	if p.gcRegs != nil || p.gcPlan != nil || p.gcLiveIn != nil {
+	if p.gcRegs != nil || p.gcPlan != nil {
 		t.Fatal("plan mode enabled GC implicitly")
 	}
 }
