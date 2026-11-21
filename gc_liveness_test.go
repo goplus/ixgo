@@ -174,15 +174,23 @@ func Work(n int) int {
 	parameterRegs := []register{pfn.regIndex(fn.Params[0]), pfn.regIndex(fn.FreeVars[0])}
 	if planMode != 0 {
 		pfn.functionCompilation = functionCompilation{}
+	} else {
+		// The reference comparisons above intentionally built the lazy plan.
+		// Reset only the test state so this block exercises concurrent first use.
+		pfn.gcLiveOnce = sync.Once{}
+		pfn.gcPlan = nil
 	}
+	start := make(chan struct{})
 	var wg sync.WaitGroup
 	for i := 0; i < 16; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			<-start
 			_ = pfn.gcRegsForPC(0)
 		}()
 	}
+	close(start)
 	wg.Wait()
 	if !pfn.gcReady[0].Load() {
 		t.Fatal("liveness was not cached after first GC")
