@@ -303,9 +303,13 @@ func asUint64(x value) uint64 {
 	panic(RuntimeError("negative shift amount"))
 }
 
+// sliceOperands records optional bounds without retaining the SSA slice node.
+type sliceOperands struct {
+	low, high, max bool
+}
+
 // slice returns x[lo:hi:max].  Any of lo, hi and max may be nil.
-func slice(fr *frame, instr *ssa.Slice, makesliceCheck bool, ix, ih, il, im register) reflect.Value {
-	// x := fr.get(instr.X)
+func slice(fr *frame, instr funcInstr, bounds sliceOperands, makesliceCheck bool, ix, ih, il, im register) reflect.Value {
 	x := fr.reg(ix)
 	var Len, Cap int
 	v := reflect.ValueOf(x)
@@ -327,13 +331,13 @@ func slice(fr *frame, instr *ssa.Slice, makesliceCheck bool, ix, ih, il, im regi
 	hi := boundIndex{n: Len, ok: true}
 	max := boundIndex{n: Cap, ok: true}
 	var slice3 bool
-	if instr.Low != nil {
+	if bounds.low {
 		lo = asBound(fr.reg(il))
 	}
-	if instr.High != nil {
+	if bounds.high {
 		hi = asBound(fr.reg(ih))
 	}
-	if instr.Max != nil {
+	if bounds.max {
 		max = asBound(fr.reg(im))
 		slice3 = true
 	}
@@ -1406,10 +1410,19 @@ failed:
 	panic(fmt.Sprintf("invalid unary op %s %T", instr.Op, x))
 }
 
-// typeAssert checks whether dynamic type of itf is instr.AssertedType.
+// assertedType is retained for go/types-based failure diagnostics only.
+// The execution flags and reflect types are resolved during compilation.
+type typeAssertOperands struct {
+	typ, sourceType reflect.Type
+	assertedType    types.Type
+	commaOk         bool
+}
+
+// typeAssert checks the dynamic type using precomputed assertion operands.
 // It returns the extracted value on success, and panics on failure,
-// unless instr.CommaOk, in which case it always returns a "value,ok" tuple.
-func typeAssert(fr *frame, instr *ssa.TypeAssert, typ reflect.Type, xtyp reflect.Type, iv interface{}) value {
+// unless operands.commaOk, in which case it always returns a "value,ok" tuple.
+func typeAssert(fr *frame, instr funcInstr, operands typeAssertOperands, iv interface{}) value {
+	typ, xtyp := operands.typ, operands.sourceType
 	var v value
 	var err error
 	if iv == nil {
@@ -1420,7 +1433,6 @@ func typeAssert(fr *frame, instr *ssa.TypeAssert, typ reflect.Type, xtyp reflect
 		} else {
 			err = fr.plainError(instr, fmt.Sprintf("interface conversion: %v is nil, not %v", xtyp, typ))
 		}
-		// }
 	} else {
 		rv := reflect.ValueOf(iv)
 		rt := rv.Type()
@@ -1429,11 +1441,11 @@ func typeAssert(fr *frame, instr *ssa.TypeAssert, typ reflect.Type, xtyp reflect
 		} else {
 			if !rt.AssignableTo(typ) {
 				err = fr.runtimeError(instr, fmt.Sprintf("interface conversion: %v is %v, not %v", xtyp, rt, typ))
-				if itype, ok := instr.AssertedType.Underlying().(*types.Interface); ok {
+				if itype, ok := operands.assertedType.Underlying().(*types.Interface); ok {
 					if it, ok := fr.pfn.Interp.findType(rt, false); ok {
 						if meth, _ := types.MissingMethod(it, itype, true); meth != nil {
 							err = fr.runtimeError(instr, fmt.Sprintf("interface conversion: %v is not %v: missing method %s",
-								rt, instr.AssertedType, meth.Name()))
+								rt, operands.assertedType, meth.Name()))
 						}
 					}
 				} else if typ.PkgPath() == rt.PkgPath() && typ.Name() == rt.Name() {
@@ -1453,40 +1465,15 @@ func typeAssert(fr *frame, instr *ssa.TypeAssert, typ reflect.Type, xtyp reflect
 		}
 	}
 	if err != nil {
-		if !instr.CommaOk {
+		if !operands.commaOk {
 			panic(err)
 		}
 		return tuple{reflect.New(typ).Elem().Interface(), false}
 	}
-	if instr.CommaOk {
+	if operands.commaOk {
 		return tuple{v, true}
 	}
 	return v
-	// err := ""
-	// if itf.t == nil {
-	// 	err = fmt.Sprintf("interface conversion: interface is nil, not %s", instr.AssertedType)
-
-	// } else if idst, ok := instr.AssertedType.Underlying().(*types.Interface); ok {
-	// 	v = itf
-	// 	err = checkInterface(i, idst, itf)
-
-	// } else if types.Identical(itf.t, instr.AssertedType) {
-	// 	v = itf.v // extract value
-
-	// } else {
-	// 	err = fmt.Sprintf("interface conversion: interface is %s, not %s", itf.t, instr.AssertedType)
-	// }
-
-	// if err != "" {
-	// 	if !instr.CommaOk {
-	// 		panic(err)
-	// 	}
-	// 	return tuple{zero(instr.AssertedType), false}
-	// }
-	// if instr.CommaOk {
-	// 	return tuple{v, true}
-	// }
-	// return v
 }
 
 // widen widens a xtype typed value x to the widest type of its
