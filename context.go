@@ -65,7 +65,7 @@ const (
 	OptionLoadAllImethod                                               // Option load all imethod.
 	EnableCachedReg                                                    // Enable per-frame cache registers.
 	DisableMemo                                                        // Disable the optional memo optimizer.
-	EnableGCExecutionPlan                                              // Precompute SSA-free GC metadata; preserves GC enablement.
+	EnableGCExecutionPlan                                              // Precompute SSA-free GC liveness plans at load time; requires ExperimentalSupportGC.
 	OptionLoadDefaultImethod       = 0                                 // Option load default imethod.
 	LastMode                       = EnableGCExecutionPlan             // Last Mode
 )
