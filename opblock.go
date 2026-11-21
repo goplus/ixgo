@@ -660,6 +660,14 @@ func makeCachedFieldAddrInstr(pfn *function, instr *ssa.FieldAddr) func(fr *fram
 	}
 }
 
+// selectOperands contains everything needed to build a runtime select case.
+type selectOperands struct {
+	channel, send register
+	dir           reflect.SelectDir
+	hasSend       bool
+	elem          reflect.Type
+}
+
 func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *frame) {
 	switch instr := instr.(type) {
 	case *ssa.Alloc:
@@ -904,6 +912,7 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 			fr.setReg(ir, reflect.MakeSlice(typ, Len, Cap).Interface())
 		}
 	case *ssa.Slice:
+		bounds := sliceOperands{low: instr.Low != nil, high: instr.High != nil, max: instr.Max != nil}
 		typ := interp.preToType(instr.Type())
 		isNamed := typ.Kind() == reflect.Slice && typ != reflect.SliceOf(typ.Elem())
 		_, makesliceCheck := instr.X.(*ssa.Alloc)
@@ -914,11 +923,11 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 		im := pfn.regIndex(instr.Max)
 		if isNamed {
 			return func(fr *frame) {
-				fr.setReg(ir, slice(fr, instr, makesliceCheck, ix, ih, il, im).Convert(typ).Interface())
+				fr.setReg(ir, slice(fr, instr, bounds, makesliceCheck, ix, ih, il, im).Convert(typ).Interface())
 			}
 		}
 		return func(fr *frame) {
-			fr.setReg(ir, slice(fr, instr, makesliceCheck, ix, ih, il, im).Interface())
+			fr.setReg(ir, slice(fr, instr, bounds, makesliceCheck, ix, ih, il, im).Interface())
 		}
 	case *ssa.FieldAddr:
 		if interp.ctx.Mode&EnableCachedReg != 0 {
@@ -1012,61 +1021,53 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 		}
 	case *ssa.Select:
 		ir := pfn.regIndex(instr)
-		ic := make([]register, len(instr.States))
-		is := make([]register, len(instr.States))
+		blocking := instr.Blocking
+		states := make([]selectOperands, len(instr.States))
 		for i, state := range instr.States {
-			ic[i] = pfn.regIndex(state.Chan)
-			if state.Send != nil {
-				is[i] = pfn.regIndex(state.Send)
+			desc := selectOperands{channel: pfn.regIndex(state.Chan), dir: reflect.SelectRecv}
+			if state.Dir == types.SendOnly {
+				desc.dir = reflect.SelectSend
 			}
+			desc.hasSend = state.Send != nil
+			if desc.hasSend {
+				desc.send = pfn.regIndex(state.Send)
+			}
+			desc.elem = interp.preToType(state.Chan.Type()).Elem()
+			states[i] = desc
 		}
 		return func(fr *frame) {
-			var cases []reflect.SelectCase
-			if !instr.Blocking {
-				cases = append(cases, reflect.SelectCase{
-					Dir: reflect.SelectDefault,
-				})
+			cases := make([]reflect.SelectCase, 0, len(states)+1)
+			if !blocking {
+				cases = append(cases, reflect.SelectCase{Dir: reflect.SelectDefault})
 			}
-			for i, state := range instr.States {
-				var dir reflect.SelectDir
-				if state.Dir == types.RecvOnly {
-					dir = reflect.SelectRecv
-				} else {
-					dir = reflect.SelectSend
-				}
-				ch := reflect.ValueOf(fr.reg(ic[i]))
+			for _, state := range states {
+				ch := reflect.ValueOf(fr.reg(state.channel))
 				var send reflect.Value
-				if state.Send != nil {
-					v := fr.reg(is[i])
+				if state.hasSend {
+					v := fr.reg(state.send)
 					if v == nil {
-						send = reflect.New(ch.Type().Elem()).Elem()
+						send = reflect.New(state.elem).Elem()
 					} else {
 						send = reflect.ValueOf(v)
 					}
 				}
-				cases = append(cases, reflect.SelectCase{
-					Dir:  dir,
-					Chan: ch,
-					Send: send,
-				})
+				cases = append(cases, reflect.SelectCase{Dir: state.dir, Chan: ch, Send: send})
 			}
 			if interp.gcEnabled {
 				fr.gcFrames()
 			}
 			chosen, recv, recvOk := reflect.Select(cases)
-			if !instr.Blocking {
-				chosen-- // default case should have index -1.
+			if !blocking {
+				chosen--
 			}
 			r := tuple{chosen, recvOk}
-			for n, st := range instr.States {
-				if st.Dir == types.RecvOnly {
+			for n, state := range states {
+				if state.dir == reflect.SelectRecv {
 					var v value
 					if n == chosen && recvOk {
-						// No need to copy since send makes an unaliased copy.
 						v = recv.Interface()
 					} else {
-						typ := interp.toType(st.Chan.Type())
-						v = reflect.New(typ.Elem()).Elem().Interface()
+						v = reflect.New(state.elem).Elem().Interface()
 					}
 					r = append(r, v)
 				}
@@ -1119,16 +1120,17 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 	case *ssa.TypeAssert:
 		typ := interp.preToType(instr.AssertedType)
 		xtyp := interp.preToType(instr.X.Type())
+		operands := typeAssertOperands{typ: typ, sourceType: xtyp, assertedType: instr.AssertedType, commaOk: instr.CommaOk}
 		ir := pfn.regIndex(instr)
 		ix, kx, vx := pfn.regIndex3(instr.X)
 		if kx.isStatic() {
 			return func(fr *frame) {
-				fr.setReg(ir, typeAssert(fr, instr, typ, xtyp, vx))
+				fr.setReg(ir, typeAssert(fr, instr, operands, vx))
 			}
 		}
 		return func(fr *frame) {
 			v := fr.reg(ix)
-			fr.setReg(ir, typeAssert(fr, instr, typ, xtyp, v))
+			fr.setReg(ir, typeAssert(fr, instr, operands, v))
 		}
 	case *ssa.Extract:
 		if pfn.elidedExtract != nil {
@@ -1481,7 +1483,7 @@ func makeCallInstr(pfn *function, interp *Interp, instr ssa.Value, call *ssa.Cal
 	nres := callResultCount(call)
 	switch fn := call.Value.(type) {
 	case *ssa.Builtin:
-		return interp.makeBuiltinByStack(pfn, fn, call.Args, ir, ia)
+		return interp.makeBuiltinByStack(pfn, fn, call.Args, ir, ia, instr.Pos())
 	case *ssa.MakeClosure:
 		ifn := interp.loadFunction(fn.Fn.(*ssa.Function))
 		ia = append(ia, ib...)

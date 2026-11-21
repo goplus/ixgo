@@ -29,6 +29,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"golang.org/x/tools/go/ssa"
 )
 
 func newExecutionRecorder(t *testing.T) *executionRecorder {
@@ -1828,5 +1830,120 @@ func TestRuntimeFunctionNameFormatting(t *testing.T) {
 		if name != tc.want || autogen != tc.autogen {
 			t.Errorf("%q: got %q/%t, want %q/%t", tc.name, name, autogen, tc.want, tc.autogen)
 		}
+	}
+}
+
+// Mutating the original SSA operands after compilation detects accidental
+// runtime reads that clearing functionCompilation alone would leave reachable.
+func TestRuntimeInstructionOperands(t *testing.T) {
+	const source = `package main
+ type numbers []int
+ type counter int
+ func (c counter) Value() int { return int(c) }
+ func selects() int {
+  a, b := make(chan int, 1), make(chan int)
+  a <- 42
+  select { case v := <-a: return v; case <-b: return 0 }
+ }
+ func defaultSelect() int { var c chan int; select { case <-c: return 0; default: return 42 } }
+ func closedSelect() int { c := make(chan *int); close(c); select { case v, ok := <-c: if v == nil && !ok { return 42 }; return 0 } }
+ func sendNilSelect() int {
+  c := make(chan *int, 1)
+  select { case c <- nil: default: return 0 }
+  if <-c == nil { return 42 }; return 0
+ }
+ func sendClosedSelect() int { c := make(chan int); close(c); select { case c <- 1: return 0; default: return 42 } }
+ func nilInterfaceSelect() int {
+  c := make(chan interface{}, 1)
+  select { case c <- nil: default: return 0 }
+  if <-c == nil { return 42 }; return 0
+ }
+ func slices() int { a := numbers{10, 20, 30, 40}; b := a[1:3:4]; return b[0]+len(b)+cap(b)+17 }
+ func omittedBounds() int { a := [3]int{40, 1, 1}; b := a[:]; return b[0]+len(b[1:]) }
+ func stringSlice() int { s := "abc"; if s[1:] == "bc" && s[:2] == "ab" && s[3:] == "" { return 42 }; return 0 }
+ func slicePanic() int { a := []int{1}; n := 2; return len(a[:n]) }
+ func slice3Panic() int { a := []int{1}; n := 2; return len(a[:1:n]) }
+ func negativeSlice() int { a := []int{1}; n := -1; return len(a[n:]) }
+ func makeSlicePanic() int { n := -1; return len(make([]int,n)) }
+ func assertValue() int { var x interface{} = 42; return x.(int) }
+ func assertCommaOK() int { var x interface{} = "wrong"; v, ok := x.(int); if !ok && v == 0 { return 42 }; return 0 }
+ func assertNil() int { var x interface{}; _, ok := x.(int); if !ok { return 42 }; return 0 }
+ func assertTypedNil() int { var x interface{} = (*int)(nil); p, ok := x.(*int); if ok && p == nil { return 42 }; return 0 }
+ func assertInterface() int { var x interface{} = counter(42); return x.(interface{ Value() int }).Value() }
+ func assertPanic() int { var x interface{} = "wrong"; return x.(int) }
+ func assertNilPanic() int { var x interface{}; return x.(int) }
+ func assertMethodPanic() int { var x interface{} = 42; return x.(interface{ Value() int }).Value() }
+ `
+	testGCLivenessModes(t, func(t *testing.T, mode Mode) {
+		ctx := NewContext(DisableMemo | ExperimentalSupportGC | mode)
+		interp, err := ctx.LoadInterp("runtime_operands.go", source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer interp.UnsafeRelease()
+		for _, p := range interp.funcs {
+			for _, instr := range p.ssaInstrs {
+				switch v := instr.(type) {
+				case *ssa.Select:
+					v.Blocking = !v.Blocking
+					v.States = nil
+				case *ssa.Slice:
+					v.Low, v.High, v.Max = nil, nil, nil
+				case *ssa.TypeAssert:
+					v.CommaOk = !v.CommaOk
+					v.AssertedType = nil
+				}
+			}
+			if mode != 0 {
+				p.functionCompilation = functionCompilation{}
+			}
+		}
+		for _, name := range []string{"selects", "defaultSelect", "closedSelect", "sendNilSelect", "nilInterfaceSelect", "slices", "omittedBounds", "stringSlice", "assertValue", "assertCommaOK", "assertNil", "assertTypedNil", "assertInterface"} {
+			t.Run(name, func(t *testing.T) {
+				got, err := interp.RunFunc(name)
+				if err != nil || got != 42 {
+					t.Fatalf("got %v, %v; want 42", got, err)
+				}
+			})
+		}
+		for _, tc := range []struct{ name, message string }{
+			{"sendClosedSelect", "send on closed channel"}, {"slicePanic", "slice bounds out of range"}, {"slice3Panic", "slice bounds out of range"}, {"negativeSlice", "slice bounds out of range"}, {"makeSlicePanic", "makeslice: len out of range"},
+			{"assertPanic", "interface conversion"}, {"assertNilPanic", "interface conversion"}, {"assertMethodPanic", "missing method Value"},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				_, err := interp.RunFunc(tc.name)
+				if err == nil || !strings.Contains(err.Error(), tc.message) {
+					t.Fatalf("got %v; want %q", err, tc.message)
+				}
+			})
+		}
+	})
+}
+
+func BenchmarkRuntimeInstructionOperands(b *testing.B) {
+	const source = `package main
+func slices() int { a := []int{10,20,30,40}; n:=0; for i:=0;i<100;i++ { n+=len(a[1:3:4]) }; return n }
+func assertions() int { var x interface{} = 2; n:=0; for i:=0;i<100;i++ { v,ok:=x.(int);if ok { n+=v } };return n }
+func selects() int { a:=make(chan int,1);n:=0;for i:=0;i<100;i++ { a<-2;select {case v:=<-a:n+=v;default:} };return n }
+`
+	for _, name := range []string{"slices", "assertions", "selects"} {
+		b.Run(name, func(b *testing.B) {
+			interp, err := NewContext(DisableMemo).LoadInterp("operand_bench.go", source)
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.Cleanup(interp.UnsafeRelease)
+			got, err := interp.RunFunc(name)
+			if err != nil || got != 200 {
+				b.Fatalf("got %v, %v; want 200", got, err)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				if _, err := interp.RunFunc(name); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
