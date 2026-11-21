@@ -502,9 +502,10 @@ func (plan *gcLivenessPlan) regsAt(pc int) []register {
 const maxEagerGCLivenessPCs = 1024
 
 // initGCLiveness precomputes small-function cleanup sets at load time.
-// In the default mode, large functions analyze SSA on their first GC query.
-// EnableGCExecutionPlan builds SSA-free plans at load time; large functions
-// still materialize per-PC cleanup sets on first use.
+// In the default mode, large functions build the execution plan lazily on
+// their first GC query. Small functions keep their completed plan so later
+// direct queries remain valid. EnableGCExecutionPlan builds SSA-free plans at
+// load time; large functions still materialize per-PC cleanup sets on first use.
 func (pfn *function) initGCLiveness() {
 	if !pfn.hasGCRegs {
 		return
@@ -521,7 +522,9 @@ func (pfn *function) initGCLiveness() {
 		pfn.gcRegs[pc] = pfn.gcRegsAt(pc)
 		pfn.gcReady[pc].Store(true)
 	}
-	pfn.gcPlan = nil
+	if pfn.Interp.ctx.Mode&EnableGCExecutionPlan != 0 {
+		pfn.gcPlan = nil
+	}
 }
 
 func (pfn *function) gcRegsForPC(pc int) []register {

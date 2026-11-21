@@ -2,6 +2,7 @@ package ixgo
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -59,7 +60,7 @@ func TestGCLivenessPrecomputed(t *testing.T) {
 
 func testGCLivenessPrecomputed(t *testing.T, planMode Mode) {
 	pfn := loadGCLivenessFunction(t, ExperimentalSupportGC|planMode)
-	if pfn.gcPlan != nil {
+	if planMode != 0 && pfn.gcPlan != nil {
 		t.Fatal("eagerly materialized function retained GC plan")
 	}
 	if len(pfn.gcRegs) != len(pfn.ssaInstrs) {
@@ -154,6 +155,21 @@ func Work(n int) int {
 	}
 	if pfn.gcReady == nil || pfn.gcReady[0].Load() || (pfn.gcPlan != nil) != (planMode != 0) || pfn.gcRegs[0] != nil {
 		t.Fatal("large function GC registers were eagerly materialized")
+	}
+	for _, pc := range []int{0, len(pfn.ssaInstrs) / 2, len(pfn.ssaInstrs) - 1} {
+		want := referenceGCRegsAt(pfn, pc)
+		var got []register
+		if planMode != 0 {
+			got = slices.Clone(pfn.gcPlan.regsAt(pc))
+		} else {
+			pfn.gcRegsLazy(pc)
+			got = slices.Clone(pfn.gcPlan.regsAt(pc))
+		}
+		slices.Sort(want)
+		slices.Sort(got)
+		if !slices.Equal(got, want) {
+			t.Fatalf("large function PC %d: reference %v, execution plan %v", pc, want, got)
+		}
 	}
 	parameterRegs := []register{pfn.regIndex(fn.Params[0]), pfn.regIndex(fn.FreeVars[0])}
 	if planMode != 0 {
@@ -380,10 +396,6 @@ func testGCLivenessCacheConcurrentMode(t *testing.T, mode Mode) {
 	// Execution-plan queries must also work after compiler state is released.
 	if mode != 0 {
 		pfn.functionCompilation = functionCompilation{}
-	} else {
-		pfn.gcLiveOnce = sync.Once{}
-		pfn.closureCaptures = nil
-		pfn.closureByResult = nil
 	}
 	pfn.gcRegs = make([][]register, len(want))
 	pfn.gcReady = make([]atomic.Bool, len(want))
@@ -472,9 +484,108 @@ func TestGCLivenessRecoverRootsAfterDefinitions(t *testing.T) {
 	}
 }
 
-func TestGCLivenessModesEquivalent(t *testing.T) {
-	ctx := NewContext(ExperimentalSupportGC | EnableGCExecutionPlan)
-	interp, err := ctx.LoadInterp("equivalence.go", `package main
+// referenceGCRegsAt is the pre-plan SSA liveness algorithm from main. Keep
+// this independent from compileGCLiveness so the plan implementation has a
+// real semantic oracle in tests.
+func referenceGCRegsAt(pfn *function, pc int) []register {
+	cur := pfn.ssaInstrs[pc]
+	block := cur.Block()
+	if block == nil {
+		return nil
+	}
+	dead := make(map[int]bool)
+	for _, encoded := range pfn.index {
+		vk, rk := kind(encoded>>30), reflect.Kind(encoded>>24&0x3f)
+		if !vk.isStatic() && isGCRegisterKind(rk) {
+			dead[int(encoded&0xffffff)] = true
+		}
+	}
+	var liveIn map[*ssa.BasicBlock]map[ssa.Value]bool
+	add := func(dst, src map[ssa.Value]bool) {
+		for v := range src {
+			dst[v] = true
+		}
+	}
+	liveOut := func(b *ssa.BasicBlock) map[ssa.Value]bool {
+		live := make(map[ssa.Value]bool)
+		for _, succ := range b.Succs {
+			add(live, liveIn[succ])
+			for i, pred := range succ.Preds {
+				if pred != b {
+					continue
+				}
+				for _, instr := range succ.Instrs {
+					phi, ok := instr.(*ssa.Phi)
+					if !ok {
+						break
+					}
+					live[phi.Edges[i]] = true
+				}
+			}
+		}
+		return live
+	}
+	var ops []*ssa.Value
+	transfer := func(live map[ssa.Value]bool, instr ssa.Instruction) {
+		if v, ok := instr.(ssa.Value); ok {
+			delete(live, v)
+		}
+		if _, ok := instr.(*ssa.Phi); !ok {
+			ops = instr.Operands(ops[:0])
+			for _, op := range ops {
+				if *op != nil {
+					live[*op] = true
+				}
+			}
+		}
+		if pfn.Fn.Recover != nil && instr.Block() != pfn.Fn.Recover {
+			add(live, liveIn[pfn.Fn.Recover])
+		}
+	}
+	liveIn = make(map[*ssa.BasicBlock]map[ssa.Value]bool)
+	for _, b := range pfn.Fn.Blocks {
+		liveIn[b] = make(map[ssa.Value]bool)
+	}
+	for changed := true; changed; {
+		changed = false
+		for i := len(pfn.Fn.Blocks) - 1; i >= 0; i-- {
+			b := pfn.Fn.Blocks[i]
+			live := liveOut(b)
+			for j := len(b.Instrs) - 1; j >= 0; j-- {
+				transfer(live, b.Instrs[j])
+			}
+			for v := range live {
+				if !liveIn[b][v] {
+					liveIn[b][v] = true
+					changed = true
+				}
+			}
+		}
+	}
+	live := liveOut(block)
+	for j := len(block.Instrs) - 1; j >= 0 && block.Instrs[j] != cur; j-- {
+		transfer(live, block.Instrs[j])
+	}
+	if pfn.Fn.Recover != nil && block != pfn.Fn.Recover {
+		add(live, liveIn[pfn.Fn.Recover])
+	}
+	for v := range live {
+		if encoded, ok := pfn.index[v]; ok {
+			dead[int(encoded&0xffffff)] = false
+		}
+	}
+	pfn.keepLiveClosureBindings(dead)
+	regs := make([]register, 0, len(dead))
+	for i, isDead := range dead {
+		if isDead {
+			regs = append(regs, register(i))
+		}
+	}
+	return regs
+}
+
+func TestGCLivenessModesProduceSameCleanupSets(t *testing.T) {
+	const source = `package main
 import "runtime"
 func work(n int) (result *int) {
  defer func() { recover(); if result != nil { *result += 1 } }()
@@ -488,23 +599,36 @@ func work(n int) (result *int) {
  if n < 0 { panic("recover") }
  return result
 }
-`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer interp.UnsafeRelease()
-	for fn, p := range interp.funcs {
-		if !p.hasGCRegs {
-			continue
+`
+	load := func(mode Mode) map[string]*function {
+		ctx := NewContext(ExperimentalSupportGC | mode)
+		interp, err := ctx.LoadInterp("equivalence.go", source)
+		if err != nil {
+			t.Fatal(err)
 		}
-		plan := p.compileGCLiveness()
-		for pc := range p.ssaInstrs {
-			want := p.gcRegsLazy(pc)
-			got := plan.regsAt(pc)
-			slices.Sort(want)
-			slices.Sort(got)
-			if !slices.Equal(got, want) {
-				t.Fatalf("%s PC %d: plan %v, SSA %v", fn, pc, got, want)
+		t.Cleanup(interp.UnsafeRelease)
+		result := make(map[string]*function)
+		for fn, p := range interp.funcs {
+			result[fn.Name()] = p
+		}
+		return result
+	}
+	for _, tc := range []struct {
+		name string
+		mode Mode
+	}{{"closure", 0}, {"execution_plan", EnableGCExecutionPlan}} {
+		for name, p := range load(tc.mode) {
+			if !p.hasGCRegs {
+				continue
+			}
+			for pc := range p.ssaInstrs {
+				want := referenceGCRegsAt(p, pc)
+				got := slices.Clone(p.gcRegsForPC(pc))
+				slices.Sort(want)
+				slices.Sort(got)
+				if !slices.Equal(got, want) {
+					t.Fatalf("%s/%s PC %d: reference %v, execution plan %v", tc.name, name, pc, want, got)
+				}
 			}
 		}
 	}
