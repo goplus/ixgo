@@ -152,7 +152,7 @@ func (i *Interp) tryDeferFrame() *frame {
 			return f.(*frame)
 		}
 	}
-	return &frame{}
+	return rootFrame()
 }
 
 func (pfn *function) callFunctionByReflect(mtyp reflect.Type, args []reflect.Value, env []interface{}) []reflect.Value {
@@ -638,6 +638,9 @@ func (pfn *function) initClosureCaptures() {
 	pfn.closureCaptures = caps
 	pfn.closureByResult = byResult
 }
+
+// rootFrame creates a caller/root frame that must not be treated as an executable block.
+func rootFrame() *frame { return &frame{block: -1} }
 
 func (fr *frame) valid() bool {
 	return fr != nil && fr.pfn != nil && fr.block >= 0
@@ -1605,7 +1608,7 @@ func (i *Interp) toType(typ types.Type) reflect.Type {
 }
 
 func (i *Interp) RunFunc(name string, args ...Value) (r Value, err error) {
-	fr := &frame{}
+	fr := rootFrame()
 	defer func() {
 		if i.ctx.Mode&DisableRecover != 0 {
 			return

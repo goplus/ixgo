@@ -1253,7 +1253,7 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 		interfaceArgs := builtinInterfaceArgs(interp, desc.builtinName(), instr.Call.Args)
 		return func(fr *frame) {
 			fn, args := desc.prepare(interp, fr)
-			root := &frame{}
+			root := rootFrame()
 			run := interp.prepareGoCall(root, fn, args, interfaceArgs)
 			atomic.AddInt32(&interp.goroutines, 1)
 			go func() {

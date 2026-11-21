@@ -1830,3 +1830,26 @@ func TestRuntimeFunctionNameFormatting(t *testing.T) {
 		}
 	}
 }
+
+func TestRootFrameSentinelWithGCAndGoroutine(t *testing.T) {
+	ctx := NewContext(ExperimentalSupportGC | EnableCachedReg)
+	interp, err := ctx.LoadInterp("root_frame.go", `package main
+import "runtime"
+func worker(done chan int) { runtime.GC(); done <- 42 }
+func main() { done := make(chan int, 1); go worker(done); if got := <-done; got != 42 { panic(got) } }
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer interp.UnsafeRelease()
+	if _, err := interp.RunFunc("main"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRootFrameConstructor(t *testing.T) {
+	fr := rootFrame()
+	if fr.block != -1 || fr.valid() {
+		t.Fatalf("root frame = block %d, valid %v; want -1, false", fr.block, fr.valid())
+	}
+}
