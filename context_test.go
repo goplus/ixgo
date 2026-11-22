@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"unsafe"
 
@@ -777,6 +778,34 @@ func main() {
 	}
 	if _, err := interp.RunMain(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestGenericUnsafeOffsetofRuntimeError(t *testing.T) {
+	const src = `package main
+import "unsafe"
+func offset[T any](x struct { Value T }) uintptr { return unsafe.Offsetof(x.Value) }
+var got uintptr
+func main() { got = offset(struct { Value int }{}) }
+`
+	ctx := NewContext(0)
+	pkg, err := ctx.LoadFile("main.go", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sp := range ctx.pkgs {
+		sp.Files = nil
+	}
+	interp, err := NewInterp(ctx, pkg)
+	if err != nil {
+		t.Fatalf("load after clearing source files: %v", err)
+	}
+	defer interp.UnsafeRelease()
+	if err := interp.RunInit(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = interp.RunFunc("main"); err == nil || !strings.Contains(err.Error(), "unsafe.Offsetof not found code") {
+		t.Fatalf("RunFunc error = %v; want deferred Offsetof error", err)
 	}
 }
 

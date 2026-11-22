@@ -1058,6 +1058,7 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 			}
 			chosen, recv, recvOk := reflect.Select(cases)
 			if !blocking {
+				// default case should have index -1.
 				chosen--
 			}
 			r := tuple{chosen, recvOk}
@@ -1065,6 +1066,7 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 				if state.dir == reflect.SelectRecv {
 					var v value
 					if n == chosen && recvOk {
+						// No need to copy since send makes an unaliased copy.
 						v = recv.Interface()
 					} else {
 						v = reflect.New(state.elem).Elem().Interface()
