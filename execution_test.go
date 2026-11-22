@@ -19,6 +19,7 @@ package ixgo
 import (
 	"fmt"
 	"go/token"
+	"go/types"
 	"maps"
 	"path/filepath"
 	"reflect"
@@ -29,6 +30,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"golang.org/x/tools/go/ssa"
 )
 
 func newExecutionRecorder(t *testing.T) *executionRecorder {
@@ -1900,5 +1903,94 @@ func main() { done := make(chan bool, 1); go work(done); <-done }
 				t.Fatalf("call stack = %v; want exactly one main.work frame", names)
 			}
 		})
+	}
+}
+
+func TestExecutionDescriptionFallbacks(t *testing.T) {
+	interp := loadExecution(t, NewContext(0), "package main\nfunc Root() {}\n")
+	for _, tc := range []struct {
+		name      string
+		wantPanic bool
+	}{
+		{"init", false},
+		{"missing", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fn := interp.mainpkg.Prog.NewFunction(tc.name, types.NewSignatureType(nil, nil, nil, nil, nil, false), "test")
+			fn.Pkg = interp.mainpkg
+			call := &ssa.CallCommon{Value: fn}
+			if tc.wantPanic {
+				defer func() {
+					if got := recover(); got == nil || !strings.Contains(fmt.Sprint(got), "no code for function") {
+						t.Fatalf("panic = %v", got)
+					}
+				}()
+			}
+			desc := interp.describeCall(call, 0, nil, nil)
+			fnValue, args := desc.prepare(interp, &frame{})
+			if got := interp.call(rootFrame(), fnValue, args, nil); got != nil {
+				t.Fatalf("init result = %v", got)
+			}
+		})
+	}
+
+	for _, withMethods := range []bool{false, true} {
+		t.Run(fmt.Sprintf("methods=%t", withMethods), func(t *testing.T) {
+			v := time.Second
+			typ := reflect.TypeOf(v)
+			if withMethods {
+				interp.msets[typ] = map[string]*function{}
+			} else {
+				delete(interp.msets, typ)
+			}
+			fr := &frame{stack: []value{v}}
+			desc := callDescription{receiver: 0, method: "String"}
+			fn, args := desc.prepare(interp, fr)
+			if got := interp.call(rootFrame(), fn, args, nil); got != "1s" {
+				t.Fatalf("String() = %v", got)
+			}
+			desc.method = "Missing"
+			defer func() {
+				if got := recover(); got == nil || !strings.Contains(fmt.Sprint(got), "no code for method") {
+					t.Fatalf("panic = %v", got)
+				}
+			}()
+			desc.prepare(interp, fr)
+		})
+	}
+}
+
+func TestExecutionBuiltinDescription(t *testing.T) {
+	b := &builtinDescription{name: "println"}
+	if b.Name() != "println" || b.String() != "println" || b.Pos() != token.NoPos || b.Parent() != nil {
+		t.Fatalf("unexpected builtin description: %v", b)
+	}
+	interp := loadExecution(t, NewContext(0), "package main\nfunc Root() {}\n")
+	if got := interp.call(rootFrame(), b, []value{42}, []bool{true}); got != nil {
+		t.Fatalf("println result = %v", got)
+	}
+}
+
+func TestExecutionMetadataNilInstruction(t *testing.T) {
+	interp := loadExecution(t, NewContext(0), "package main\nfunc Root() {}\n")
+	p := interp.funcs[interp.mainpkg.Func("Root")]
+	p.ssaInstrs = append(p.ssaInstrs, nil)
+	p.finishMetadata()
+	if got := p.PosForPC(len(p.ssaInstrs) - 1); got != token.NoPos {
+		t.Fatalf("nil instruction position = %v", got)
+	}
+}
+
+func TestGCLivenessInvalidQueries(t *testing.T) {
+	rootFrame().gc()
+	var plan *gcLivenessPlan
+	if got := plan.regsAt(0); got != nil {
+		t.Fatalf("nil plan registers = %v", got)
+	}
+	plan = &gcLivenessPlan{points: []gcLivenessPoint{{block: -1}}}
+	for _, pc := range []int{-1, 0, 1} {
+		if got := plan.regsAt(pc); got != nil {
+			t.Fatalf("registers at %d = %v", pc, got)
+		}
 	}
 }
