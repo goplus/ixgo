@@ -32,7 +32,7 @@ import (
 
 // callBuiltin interprets a call to builtin fn with arguments args,
 // returning its result.
-func (inter *Interp) callBuiltin(fr *frame, fn *ssa.Builtin, args []value, ssaArgs []ssa.Value) value {
+func (inter *Interp) callBuiltin(fr *frame, fn builtinFunction, args []value, interfaceArgs []bool) value {
 	switch fnName := fn.Name(); fnName {
 	case "append":
 		if len(args) == 1 {
@@ -70,12 +70,9 @@ func (inter *Interp) callBuiltin(fr *frame, fn *ssa.Builtin, args []value, ssaAr
 			if i > 0 && ln {
 				buf.WriteRune(' ')
 			}
-			if len(ssaArgs) > i {
-				typ := inter.toType(ssaArgs[i].Type())
-				if typ.Kind() == reflect.Interface {
-					writeinterface(&buf, arg)
-					continue
-				}
+			if i < len(interfaceArgs) && interfaceArgs[i] {
+				writeinterface(&buf, arg)
+				continue
 			}
 			writevalue(&buf, arg, inter.ctx.Mode&EnablePrintAny != 0)
 		}
@@ -233,7 +230,7 @@ func (inter *Interp) callBuiltin(fr *frame, fn *ssa.Builtin, args []value, ssaAr
 
 // callBuiltinDiscardsResult interprets a call to builtin fn with arguments args,
 // discards its result.
-func (inter *Interp) callBuiltinDiscardsResult(fr *frame, fn *ssa.Builtin, args []value, ssaArgs []ssa.Value) {
+func (inter *Interp) callBuiltinDiscardsResult(fr *frame, fn builtinFunction, args []value, interfaceArgs []bool) {
 	switch fnName := fn.Name(); fnName {
 	case "append":
 		panic("discards result of " + fnName)
@@ -255,12 +252,9 @@ func (inter *Interp) callBuiltinDiscardsResult(fr *frame, fn *ssa.Builtin, args 
 			if i > 0 && ln {
 				buf.WriteRune(' ')
 			}
-			if len(ssaArgs) > i {
-				typ := inter.toType(ssaArgs[i].Type())
-				if typ.Kind() == reflect.Interface {
-					writeinterface(&buf, arg)
-					continue
-				}
+			if i < len(interfaceArgs) && interfaceArgs[i] {
+				writeinterface(&buf, arg)
+				continue
 			}
 			writevalue(&buf, arg, inter.ctx.Mode&EnablePrintAny != 0)
 		}
@@ -382,6 +376,7 @@ func (interp *Interp) makeBuiltinByStack(pfn *function, fn *ssa.Builtin, ssaArgs
 
 	case "print", "println": // print(any, ...)
 		ln := fn.Name() == "println"
+		interfaceArgs := builtinInterfaceArgs(interp, fn.Name(), ssaArgs)
 		return func(fr *frame) {
 			var buf bytes.Buffer
 			for i := 0; i < len(ia); i++ {
@@ -389,12 +384,9 @@ func (interp *Interp) makeBuiltinByStack(pfn *function, fn *ssa.Builtin, ssaArgs
 				if i > 0 && ln {
 					buf.WriteRune(' ')
 				}
-				if len(ssaArgs) > i {
-					typ := interp.toType(ssaArgs[i].Type())
-					if typ.Kind() == reflect.Interface {
-						writeinterface(&buf, arg)
-						continue
-					}
+				if i < len(interfaceArgs) && interfaceArgs[i] {
+					writeinterface(&buf, arg)
+					continue
 				}
 				writevalue(&buf, arg, interp.ctx.Mode&EnablePrintAny != 0)
 			}

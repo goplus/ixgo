@@ -441,7 +441,7 @@ func (r *Repl) runFuncEx(i *Interp, pkg *ssa.Package, fnname string, fs *fnState
 		return nil, fmt.Errorf("no function %v", fnname)
 	}
 	pfn := i.funcs[fn]
-	fr := pfn.allocFrame(&frame{})
+	fr := pfn.allocFrame(rootFrame())
 	if fs != nil {
 		// init/main have no call slots; skip their leading tracking state.
 		dst, src := fr.stack, fs.fr.stack

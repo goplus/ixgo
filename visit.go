@@ -91,7 +91,7 @@ func (visit *visitor) program() {
 		if isExtern(typ) {
 			return
 		}
-		mmap := make(map[string]*ssa.Function)
+		mmap := make(map[string]*function)
 		mset := visit.prog.MethodSets.MethodSet(T)
 		checkXGo := visit.intp.ctx.Mode&CheckGopOverloadFunc != 0
 		for i, n := 0, mset.Len(); i < n; i++ {
@@ -110,7 +110,7 @@ func (visit *visitor) program() {
 				}
 			}
 			fn := visit.prog.MethodValue(sel)
-			mmap[obj.Name()] = fn
+			mmap[obj.Name()] = visit.intp.loadFunction(fn)
 			visit.function(fn)
 		}
 		visit.intp.msets[typ] = mmap
@@ -471,6 +471,7 @@ func (visit *visitor) function(fn *ssa.Function) {
 	pfn.base = visit.base
 	visit.base += len(pfn.ssaInstrs) + 2
 	pfn.initPool()
+	pfn.finishMetadata()
 }
 
 func loc(fset *token.FileSet, pos token.Pos) string {
@@ -561,4 +562,27 @@ func namedResultAlloc(fn *ssa.Function, res *types.Var) *ssa.Alloc {
 		}
 	}
 	return nil
+}
+
+// finishMetadata snapshots locations after instruction elision and return wrapping.
+func (p *function) finishMetadata() {
+	fn := p.Fn
+	p.metadata.name = fn.String()
+	p.metadata.fileSet = fn.Prog.Fset
+	if strings.HasSuffix(p.metadata.name, "$thunk") {
+		p.metadata.interfaceThunk = isInterfaceThunk(fn.Signature)
+	}
+	p.metadata.entry = fn.Prog.Fset.Position(fn.Pos())
+	p.metadata.sourcePositions = make([]token.Pos, len(p.ssaInstrs))
+	for pc, instr := range p.ssaInstrs {
+		if instr == nil {
+			continue
+		}
+		pos := instr.Pos()
+		// RunDefers locations conventionally point at the function's closing brace.
+		if _, ok := instr.(*ssa.RunDefers); ok && fn.Syntax() != nil {
+			pos = fn.Syntax().End()
+		}
+		p.metadata.sourcePositions[pc] = pos
+	}
 }
