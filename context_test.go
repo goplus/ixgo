@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"unsafe"
 
@@ -712,6 +713,99 @@ func main() {
 	ctx := NewContext(EnablePrintAny)
 	if _, err := ctx.RunFile("main.go", src, nil); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestGenericUnsafeOffsetof(t *testing.T) {
+	src := `package main
+import "unsafe"
+type Inner[T any] struct { Pad byte; Value T; Tail byte }
+type Middle[T any] struct { Pad byte; Inner[T] }
+type Outer[T any] struct { Pad byte; Middle[T] }
+type Pointer[T any] struct { Pad byte; *Inner[T] }
+func makeOuter[T any]() Outer[T] { return Outer[T]{} }
+func check[T any]() {
+	var x Outer[T]
+	inner := unsafe.Offsetof(x.Middle.Inner)
+	value := unsafe.Offsetof(x.Middle.Inner.Value)
+	want := unsafe.Offsetof(x.Middle) + inner + value
+	if got := unsafe.Offsetof(x.Value); got != want { panic("promoted value") }
+	if got := unsafe.Offsetof((x.Value)); got != want { panic("parenthesized value") }
+	if got := unsafe.Offsetof(x.Middle.Value); got != inner + value { panic("explicit prefix") }
+	if got := unsafe.Offsetof(makeOuter[T]().Value); got != want { panic("field value") }
+	if got := unsafe.Offsetof(makeOuter[T]().Middle.Inner.Value); got != value { panic("nested field value") }
+	if got := unsafe.Offsetof((&x).Value); got != want { panic("pointer receiver") }
+	tail := unsafe.Offsetof(x.Middle.Inner.Tail)
+	if got := unsafe.Offsetof(x.Tail); got != unsafe.Offsetof(x.Middle) + inner + tail { panic("tail") }
+	p := Pointer[T]{Inner: new(Inner[T])}
+	if got := unsafe.Offsetof(p.Inner.Value); got != value { panic("explicit embedded pointer") }
+	if got := unsafe.Offsetof(p.Inner); got != unsafe.Sizeof(uintptr(0)) { panic("embedded pointer field") }
+	for i := 0; i < 3; i++ {
+		if got := unsafe.Offsetof(x.Value); got != want { panic("repeated offset") }
+	}
+}
+func offset[T any](x struct { Pad byte; Value T }) uintptr {
+	return unsafe.Offsetof(x.Value)
+}
+func main() {
+	check[byte]()
+	check[int64]()
+	check[string]()
+	check[[3]uint16]()
+	if offset(struct { Pad byte; Value byte }{}) != 1 { panic("byte offset") }
+	if offset(struct { Pad byte; Value int64 }{}) != unsafe.Alignof(int64(0)) { panic("int64 offset") }
+}
+`
+	ctx := NewContext(0)
+	pkg, err := ctx.LoadFile("main.go", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	interp, err := NewInterp(ctx, pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer interp.UnsafeRelease()
+	// Offsetof execution must not consult source or function compiler metadata.
+	for _, p := range interp.funcs {
+		p.functionCompilation = functionCompilation{}
+	}
+	for _, sp := range ctx.pkgs {
+		sp.Files = nil
+	}
+	if err := interp.RunInit(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := interp.RunMain(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGenericUnsafeOffsetofRuntimeError(t *testing.T) {
+	const src = `package main
+import "unsafe"
+func offset[T any](x struct { Value T }) uintptr { return unsafe.Offsetof(x.Value) }
+var got uintptr
+func main() { got = offset(struct { Value int }{}) }
+`
+	ctx := NewContext(0)
+	pkg, err := ctx.LoadFile("main.go", src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, sp := range ctx.pkgs {
+		sp.Files = nil
+	}
+	interp, err := NewInterp(ctx, pkg)
+	if err != nil {
+		t.Fatalf("load after clearing source files: %v", err)
+	}
+	defer interp.UnsafeRelease()
+	if err := interp.RunInit(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = interp.RunFunc("main"); err == nil || !strings.Contains(err.Error(), "unsafe.Offsetof not found code") {
+		t.Fatalf("RunFunc error = %v; want deferred Offsetof error", err)
 	}
 }
 
