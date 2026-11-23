@@ -1076,6 +1076,10 @@ func (b *SSABuilder) BuildPackages(pkgs []*types.Package) {
 	}
 }
 
+// BuildMain builds SSA for sp and its imports. It rewrites sp.Files and sp.Info
+// in place for generic unsafe layout operations. Callers supplying a SourcePackage
+// must give the builder exclusive ownership of its syntax and type information;
+// generic instances may continue to use them after this method returns.
 func (b *SSABuilder) BuildMain(sp *SourcePackage) (pkg *ssa.Package, err error) {
 	b.BuildImports(sp.Package, true)
 	ctx := b.ctx

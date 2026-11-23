@@ -584,7 +584,7 @@ func (interp *Interp) makeBuiltinByStack(pfn *function, fn *ssa.Builtin, ssaArgs
 	case "Sizeof", "Alignof": // instances of generic functions
 		typ := ssaArgs[0].Type()
 		if len(ssaArgs) == 2 {
-			// The frontend carries the original operand type in a typed pointer.
+			// unsaferewrite.Rewrite carries the operand type in a typed pointer.
 			typ = typ.Underlying().(*types.Pointer).Elem()
 		}
 		var result uintptr

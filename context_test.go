@@ -1488,3 +1488,67 @@ func BenchmarkExternalLayoutPaths(b *testing.B) {
 		})
 	}
 }
+
+func TestGenericUnsafeImportedSource(t *testing.T) {
+	const library = `package layout
+
+import "unsafe"
+
+type Inner[T any] struct{ Value T }
+type Box[T any] struct {
+	Pad byte
+	*Inner[T]
+	Tail T
+}
+
+func operand[T any]() *Box[T] { panic("imported operand evaluated") }
+func Offset[T any]() uintptr  { return unsafe.Offsetof(operand[T]().Tail) }
+func (Box[T]) Layout() (uintptr, uintptr, uintptr) {
+	return unsafe.Sizeof(*operand[T]()), unsafe.Alignof(*operand[T]()), unsafe.Offsetof(operand[T]().Inner)
+}
+`
+	const source = `package main
+
+import (
+	"layout"
+	"unsafe"
+)
+
+func check[T any]() {
+	var p *layout.Box[T]
+	if layout.Offset[T]() != unsafe.Offsetof(p.Tail) {
+		panic("imported offset")
+	}
+	size, align, offset := (layout.Box[T]{}).Layout()
+	if size != unsafe.Sizeof(*p) {
+		panic("imported size")
+	}
+	if align != unsafe.Alignof(*p) {
+		panic("imported alignment")
+	}
+	if offset != unsafe.Offsetof(p.Inner) {
+		panic("embedded pointer offset")
+	}
+}
+func main() { check[byte](); check[int64](); check[any](); check[func()]() }
+`
+	for _, mode := range []Mode{0, EnableCachedReg, ExperimentalSupportGC | EnableCachedReg} {
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
+			ctx := NewContext(mode)
+			if err := ctx.AddImportFile("layout", "layout.go", library); err != nil {
+				t.Fatal(err)
+			}
+			interp, err := ctx.LoadInterp("main.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer interp.UnsafeRelease()
+			if err := interp.RunInit(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := interp.RunFunc("main"); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
