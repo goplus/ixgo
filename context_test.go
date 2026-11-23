@@ -7,11 +7,13 @@ import (
 	"go/build"
 	"go/constant"
 	"go/parser"
+	"go/printer"
 	"go/token"
 	"go/types"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"unsafe"
 
@@ -1341,5 +1343,188 @@ func BenchmarkGenericUnsafeLayoutLoad(b *testing.B) {
 				interp.UnsafeRelease()
 			}
 		})
+	}
+}
+
+func TestExternalLayoutAST(t *testing.T) {
+	const source = `package main
+
+import u "unsafe"
+
+type Box[T any] struct {
+	A byte
+	B T
+}
+
+func bad[T any]() T { panic("evaluated") }
+func (Box[T]) Layout() uintptr {
+	return u.Sizeof(bad[T]()) + u.Alignof(bad[T]()) + u.Offsetof((*Box[T])(nil).B)
+}
+func Answer() bool { return Box[int64]{}.Layout() == u.Sizeof(int64(0))+2*u.Alignof(int64(0)) }
+`
+	for _, pkgMode := range []bool{false, true} {
+		t.Run(fmt.Sprintf("package=%t", pkgMode), func(t *testing.T) {
+			fs := token.NewFileSet()
+			src := source
+			if pkgMode {
+				src = strings.ReplaceAll(strings.Replace(source, "import u ", "import . ", 1), "u.", "")
+			}
+			file, err := parser.ParseFile(fs, "layout.go", src, parser.ParseComments)
+			if err != nil {
+				t.Fatal(err)
+			}
+			other, err := parser.ParseFile(fs, "other.go", "package main", 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if isolateUnsafeAST(other) != other {
+				t.Fatal("ordinary file was copied")
+			}
+			printFile := func() string {
+				var buf bytes.Buffer
+				if err := printer.Fprint(&buf, fs, file); err != nil {
+					t.Fatal(err)
+				}
+				return buf.String()
+			}
+			before := printFile()
+			// Two independent contexts load the same parser AST concurrently.
+			load := func() (*ssa.Package, *Context, error) {
+				ctx := NewContext(DisableCustomBuiltin)
+				ctx.FileSet = fs
+				var pkg *ssa.Package
+				var err error
+				if pkgMode {
+					pkg, err = ctx.LoadAstPackage("main", &ast.Package{Name: "main", Files: map[string]*ast.File{"layout.go": file, "other.go": other}})
+				} else {
+					pkg, err = ctx.LoadAstFile("main", file)
+				}
+				return pkg, ctx, err
+			}
+			done := make(chan error, 1)
+			go func() { _, _, err := load(); done <- err }()
+			pkg, ctx, err := load()
+			otherErr := <-done
+			if err != nil || otherErr != nil {
+				t.Fatalf("loads: %v, %v", err, otherErr)
+			}
+			typ, err := types.Instantiate(nil, pkg.Pkg.Scope().Lookup("Box").Type(), []types.Type{types.Typ[types.Uint16]}, true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fn := pkg.Prog.LookupMethod(typ, pkg.Pkg, "Layout")
+			if fn == nil || len(fn.Blocks) == 0 {
+				t.Fatal("missing late method instance")
+			}
+			for _, block := range fn.Blocks {
+				for _, ins := range block.Instrs {
+					if c, ok := ins.(*ssa.Call); ok {
+						if _, ok := c.Call.Value.(*ssa.Builtin); !ok {
+							t.Fatalf("late instance evaluates operand: %v", c)
+						}
+					}
+				}
+			}
+			interp, err := NewInterp(ctx, pkg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer interp.UnsafeRelease()
+			got, err := interp.RunFunc("Answer")
+			if err != nil || got != true {
+				t.Fatalf("Answer: %v, %v", got, err)
+			}
+			if printFile() != before {
+				t.Fatal("external AST changed")
+			}
+		})
+	}
+}
+
+func TestExternalLayoutASTDiagnostic(t *testing.T) {
+	const source = `package main
+
+import "unsafe"
+
+func size[T any]() uintptr { return unsafe.Sizeof(missing) }
+`
+	ctx := NewContext(0)
+	file, err := ctx.ParseFile("invalid.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = ctx.LoadAstFile("main", file)
+	if err == nil || !strings.Contains(err.Error(), "invalid.go:5:51: undefined: missing") {
+		t.Fatalf("unexpected diagnostic: %v", err)
+	}
+}
+
+func BenchmarkExternalLayoutPaths(b *testing.B) {
+	for _, count := range []int{0, 1, 100} {
+		var src strings.Builder
+		src.WriteString("package main\nimport \"unsafe\"\nvar _ unsafe.Pointer\n")
+		for i := 0; i < 100; i++ {
+			if i < count {
+				fmt.Fprintf(&src, "func f%d[T any](x T) uintptr {return unsafe.Sizeof(x)}\n", i)
+			} else {
+				fmt.Fprintf(&src, "func f%d[T any](x T) uintptr {return 0}\n", i)
+			}
+		}
+		fs := token.NewFileSet()
+		file, err := parser.ParseFile(fs, "paths.go", src.String(), 0)
+		if err != nil {
+			b.Fatal(err)
+		}
+		b.Run(fmt.Sprintf("calls=%d/isolate", count), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				isolateUnsafeAST(file)
+			}
+		})
+		b.Run(fmt.Sprintf("calls=%d/load", count), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				ctx := NewContext(DisableCustomBuiltin)
+				ctx.FileSet = fs
+				if _, err := ctx.LoadAstFile("main", file); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func TestExternalLayoutPaths(t *testing.T) {
+	const src = `package main
+
+import "unsafe"
+
+func ordinary() {}
+func layout[T any](x T) (uintptr, uintptr) {
+	ordinary()
+	return unsafe.Sizeof(x), unsafe.Alignof(x)
+}
+`
+	f, err := parser.ParseFile(token.NewFileSet(), "paths.go", src, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := isolateUnsafeAST(f)
+	if c == f || c.Decls[1] != f.Decls[1] || c.Imports[0] != f.Imports[0] {
+		t.Fatal("expected a private root with shared ordinary declaration and import")
+	}
+	old := f.Decls[2].(*ast.FuncDecl)
+	newFn := c.Decls[2].(*ast.FuncDecl)
+	if old == newFn || old.Body == newFn.Body || old.Body.List[0] != newFn.Body.List[0] {
+		t.Fatal("unexpected function path sharing")
+	}
+	before := old.Body.List[1].(*ast.ReturnStmt)
+	after := newFn.Body.List[1].(*ast.ReturnStmt)
+	for i, expr := range before.Results {
+		a := expr.(*ast.CallExpr)
+		b := after.Results[i].(*ast.CallExpr)
+		if a == b || a.Args[0] != b.Args[0] {
+			t.Fatalf("result %d: expected private call with shared operand", i)
+		}
 	}
 }

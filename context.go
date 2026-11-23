@@ -689,7 +689,7 @@ func (ctx *Context) LoadFile(filename string, src interface{}) (*ssa.Package, er
 	}
 	root, _ := filepath.Split(filename)
 	ctx.setRoot(root)
-	return ctx.LoadAstFile(file.Name.Name, file)
+	return ctx.loadAstFile(file.Name.Name, file)
 }
 
 func (ctx *Context) ParseFile(filename string, src interface{}) (*ast.File, error) {
@@ -706,6 +706,10 @@ func (ctx *Context) ParseFile(filename string, src interface{}) (*ast.File, erro
 }
 
 func (ctx *Context) LoadAstFile(path string, file *ast.File) (*ssa.Package, error) {
+	return ctx.loadAstFile(path, isolateUnsafeAST(file))
+}
+
+func (ctx *Context) loadAstFile(path string, file *ast.File) (*ssa.Package, error) {
 	files := []*ast.File{file}
 	if ctx.Mode&DisableCustomBuiltin == 0 {
 		if f, err := ParseBuiltin(ctx.FileSet, file.Name.Name); err == nil {
@@ -742,7 +746,7 @@ func (ctx *Context) LoadAstFile(path string, file *ast.File) (*ssa.Package, erro
 func (ctx *Context) LoadAstPackage(path string, apkg *ast.Package) (*ssa.Package, error) {
 	var files []*ast.File
 	for _, f := range apkg.Files {
-		files = append(files, f)
+		files = append(files, isolateUnsafeAST(f))
 	}
 	if ctx.Mode&DisableCustomBuiltin == 0 {
 		if f, err := ParseBuiltin(ctx.FileSet, apkg.Name); err == nil {
@@ -1324,6 +1328,111 @@ func runtimeChecker(ctx *Context, prog *ssa.Program) func(typ reflect.Type, meth
 	}
 }
 
+func importsUnsafe(file *ast.File) bool {
+	for _, spec := range file.Imports {
+		if path, _ := strconv.Unquote(spec.Path.Value); path == "unsafe" && (spec.Name == nil || spec.Name.Name != "_") {
+			return true
+		}
+	}
+	return false
+}
+
+// isolateUnsafeAST gives the SSA builder its own syntax when it may rewrite a
+// caller-owned file. Later generic instances still use this syntax after load.
+func isolateUnsafeAST(file *ast.File) *ast.File {
+	if !importsUnsafe(file) {
+		return file
+	}
+	// Only candidate files need
+	// traversal stacks and a replacement table.
+	for n := range ast.Preorder(file) {
+		if !unsafeLayoutCall(n) {
+			continue
+		}
+		paths := make(map[ast.Node]ast.Node)
+		ast.PreorderStack(file, nil, func(n ast.Node, stack []ast.Node) bool {
+			if unsafeLayoutCall(n) {
+				paths[n] = nil
+				for i := len(stack) - 1; i >= 0; i-- {
+					if _, marked := paths[stack[i]]; marked {
+						break
+					}
+					paths[stack[i]] = nil
+				}
+			}
+			return true
+		})
+		return copyLayoutPath(file, paths).(*ast.File)
+	}
+	return file
+}
+
+func unsafeLayoutCall(n ast.Node) bool {
+	call, ok := n.(*ast.CallExpr)
+	if !ok || len(call.Args) != 1 {
+		return false
+	}
+	switch fun := ast.Unparen(call.Fun).(type) {
+	case *ast.SelectorExpr:
+		return isUnsafeLayoutName(fun.Sel.Name)
+	case *ast.Ident:
+		return isUnsafeLayoutName(fun.Name)
+	}
+	return false
+}
+
+func isUnsafeLayoutName(name string) bool {
+	return name == "Sizeof" || name == "Alignof" || name == "Offsetof"
+}
+
+// Shallow-copy marked nodes and detach a child slice on its first replacement.
+// The rewrite replaces CallExpr.Fun and Args wholesale, so the original
+// operands, like other unmodified subtrees, can remain shared.
+func copyLayoutPath(n ast.Node, paths map[ast.Node]ast.Node) ast.Node {
+	if c := paths[n]; c != nil {
+		return c
+	}
+	orig := reflect.ValueOf(n).Elem()
+	ptr := reflect.New(orig.Type())
+	dst := ptr.Elem()
+	dst.Set(orig)
+	c := ptr.Interface().(ast.Node)
+	paths[n] = c
+	child := func(v reflect.Value) ast.Node {
+		node, ok := v.Interface().(ast.Node)
+		if !ok {
+			return nil
+		}
+		if _, marked := paths[node]; marked {
+			return copyLayoutPath(node, paths)
+		}
+		return nil
+	}
+	for i := 0; i < dst.NumField(); i++ {
+		f := dst.Field(i)
+		switch f.Kind() {
+		case reflect.Interface, reflect.Pointer:
+			if repl := child(f); repl != nil {
+				f.Set(reflect.ValueOf(repl))
+			}
+		case reflect.Slice:
+			detached := false
+			for j := 0; j < f.Len(); j++ {
+				if repl := child(f.Index(j)); repl != nil {
+					if !detached {
+						dup := reflect.MakeSlice(f.Type(), f.Len(), f.Len())
+						reflect.Copy(dup, f)
+						f.Set(dup)
+						detached = true
+					}
+					f.Index(j).Set(reflect.ValueOf(repl))
+				}
+			}
+		}
+	}
+	return c
+}
+
 // rewriteUnsafeOperands replaces nonconstant Sizeof, Alignof, and Offsetof
 // operands after type checking and before SSA construction. Internal calls carry
 // a typed nil pointer and constant metadata instead of the unevaluated expression.
@@ -1332,15 +1441,7 @@ func rewriteUnsafeOperands(files []*ast.File, info *types.Info) {
 		return
 	}
 	for _, file := range files {
-		usesUnsafe := false
-		for _, spec := range file.Imports {
-			path, err := strconv.Unquote(spec.Path.Value)
-			if err == nil && path == "unsafe" {
-				usesUnsafe = true
-				break
-			}
-		}
-		if !usesUnsafe {
+		if !importsUnsafe(file) {
 			continue
 		}
 		ast.Inspect(file, func(node ast.Node) bool {
@@ -1360,7 +1461,7 @@ func rewriteUnsafeOperands(files []*ast.File, info *types.Info) {
 				return true
 			}
 			name := builtin.Name()
-			if name != "Offsetof" && name != "Sizeof" && name != "Alignof" {
+			if !isUnsafeLayoutName(name) {
 				return true
 			}
 			operand := call.Args[0]
