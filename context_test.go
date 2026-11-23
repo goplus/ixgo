@@ -18,6 +18,7 @@ import (
 	"unsafe"
 
 	"github.com/goplus/ixgo/alias"
+	"github.com/goplus/ixgo/internal/unsaferewrite"
 	"golang.org/x/tools/go/ssa"
 )
 
@@ -1377,7 +1378,7 @@ func Answer() bool { return Box[int64]{}.Layout() == u.Sizeof(int64(0))+2*u.Alig
 			if err != nil {
 				t.Fatal(err)
 			}
-			if isolateUnsafeAST(other) != other {
+			if unsaferewrite.Isolate(other) != other {
 				t.Fatal("ordinary file was copied")
 			}
 			printFile := func() string {
@@ -1475,12 +1476,6 @@ func BenchmarkExternalLayoutPaths(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		b.Run(fmt.Sprintf("calls=%d/isolate", count), func(b *testing.B) {
-			b.ReportAllocs()
-			for b.Loop() {
-				isolateUnsafeAST(file)
-			}
-		})
 		b.Run(fmt.Sprintf("calls=%d/load", count), func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
@@ -1491,40 +1486,5 @@ func BenchmarkExternalLayoutPaths(b *testing.B) {
 				}
 			}
 		})
-	}
-}
-
-func TestExternalLayoutPaths(t *testing.T) {
-	const src = `package main
-
-import "unsafe"
-
-func ordinary() {}
-func layout[T any](x T) (uintptr, uintptr) {
-	ordinary()
-	return unsafe.Sizeof(x), unsafe.Alignof(x)
-}
-`
-	f, err := parser.ParseFile(token.NewFileSet(), "paths.go", src, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	c := isolateUnsafeAST(f)
-	if c == f || c.Decls[1] != f.Decls[1] || c.Imports[0] != f.Imports[0] {
-		t.Fatal("expected a private root with shared ordinary declaration and import")
-	}
-	old := f.Decls[2].(*ast.FuncDecl)
-	newFn := c.Decls[2].(*ast.FuncDecl)
-	if old == newFn || old.Body == newFn.Body || old.Body.List[0] != newFn.Body.List[0] {
-		t.Fatal("unexpected function path sharing")
-	}
-	before := old.Body.List[1].(*ast.ReturnStmt)
-	after := newFn.Body.List[1].(*ast.ReturnStmt)
-	for i, expr := range before.Results {
-		a := expr.(*ast.CallExpr)
-		b := after.Results[i].(*ast.CallExpr)
-		if a == b || a.Args[0] != b.Args[0] {
-			t.Fatalf("result %d: expected private call with shared operand", i)
-		}
 	}
 }
