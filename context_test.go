@@ -811,6 +811,61 @@ func main() { got = offset(struct { Value int }{}) }
 	}
 }
 
+func TestBuiltinOffsetofFallbackError(t *testing.T) {
+	const source = `package main
+import "unsafe"
+type S[T any] struct { Value T }
+func f[T any](p *S[T]) uintptr { return unsafe.Offsetof(p.Value) }
+func main() {}
+`
+	ctx := NewContext(0)
+	pkg, err := ctx.LoadFile("fallback.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	interp, err := NewInterp(ctx, pkg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer interp.UnsafeRelease()
+	var builtin *ssa.Builtin
+	var call *ssa.Call
+	var fn *ssa.Function
+	var walk func(*ssa.Function)
+	walk = func(candidate *ssa.Function) {
+		if candidate == nil || builtin != nil {
+			return
+		}
+		for _, block := range candidate.Blocks {
+			for _, instr := range block.Instrs {
+				if c, ok := instr.(*ssa.Call); ok && c.Common().Value != nil {
+					if b, ok := c.Common().Value.(*ssa.Builtin); ok && b.Name() == "Offsetof" {
+						builtin, call, fn = b, c, candidate
+						return
+					}
+				}
+			}
+		}
+		for _, anon := range candidate.AnonFuncs {
+			walk(anon)
+		}
+	}
+	for _, member := range pkg.Members {
+		if candidate, ok := member.(*ssa.Function); ok {
+			walk(candidate)
+		}
+	}
+	if builtin == nil {
+		t.Fatal("missing Offsetof builtin")
+	}
+	// Force the legacy one-argument decoder; frontend-rewritten calls use the
+	// multi-argument protocol in ordinary execution.
+	if got := interp.makeBuiltinByStack(&function{Interp: interp}, builtin, call.Common().Args[:1], 0, nil, call.Pos()); got == nil {
+		t.Fatal("missing fallback instruction")
+	}
+	_ = fn
+}
+
 func TestCallBuiltinLegacy(t *testing.T) {
 	src := `package main
 import "unsafe"
