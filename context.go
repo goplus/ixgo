@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/build"
+	"go/constant"
 	"go/parser"
 	"go/token"
 	"go/types"
@@ -1049,6 +1050,7 @@ func (b *SSABuilder) BuildPackages(pkgs []*types.Package) {
 						fmt.Println("# source", p.Path(), "<memory>")
 					}
 				}
+				rewriteUnsafeOperands(pkg.Files, pkg.Info)
 				b.prog.CreatePackage(pkg.Package, pkg.Files, pkg.Info, true).Build()
 			} else {
 				b.BuildImports(p, false)
@@ -1081,6 +1083,7 @@ func (b *SSABuilder) BuildMain(sp *SourcePackage) (pkg *ssa.Package, err error) 
 		}
 	}
 	// Create and build the primary package.
+	rewriteUnsafeOperands(sp.Files, sp.Info)
 	pkg = b.prog.CreatePackage(sp.Package, sp.Files, sp.Info, false)
 	pkg.Build()
 	return
@@ -1318,5 +1321,89 @@ func runtimeChecker(ctx *Context, prog *ssa.Program) func(typ reflect.Type, meth
 			}
 		}
 		return false
+	}
+}
+
+// rewriteUnsafeOperands replaces nonconstant Sizeof, Alignof, and Offsetof
+// operands after type checking and before SSA construction. Internal calls carry
+// a typed nil pointer and constant metadata instead of the unevaluated expression.
+func rewriteUnsafeOperands(files []*ast.File, info *types.Info) {
+	if info == nil {
+		return
+	}
+	for _, file := range files {
+		usesUnsafe := false
+		for _, spec := range file.Imports {
+			path, err := strconv.Unquote(spec.Path.Value)
+			if err == nil && path == "unsafe" {
+				usesUnsafe = true
+				break
+			}
+		}
+		if !usesUnsafe {
+			continue
+		}
+		ast.Inspect(file, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok || len(call.Args) != 1 || info.Types[call].Value != nil {
+				return true
+			}
+			var id *ast.Ident
+			switch fun := ast.Unparen(call.Fun).(type) {
+			case *ast.SelectorExpr:
+				id = fun.Sel
+			case *ast.Ident:
+				id = fun
+			}
+			builtin, ok := info.Uses[id].(*types.Builtin)
+			if !ok || builtin.Pkg() != types.Unsafe {
+				return true
+			}
+			name := builtin.Name()
+			if name != "Offsetof" && name != "Sizeof" && name != "Alignof" {
+				return true
+			}
+			operand := call.Args[0]
+			receiver := info.TypeOf(operand)
+			// Sizeof/Alignof use a zero marker to distinguish this internal
+			// type-only representation from ordinary one-argument SSA.
+			indices := []int{0}
+			if name == "Offsetof" {
+				selector, ok := ast.Unparen(operand).(*ast.SelectorExpr)
+				if !ok {
+					return true
+				}
+				selection := info.Selections[selector]
+				if selection == nil || selection.Kind() != types.FieldVal {
+					return true
+				}
+				receiver = selection.Recv()
+				if ptr, ok := receiver.Underlying().(*types.Pointer); ok {
+					receiver = ptr.Elem()
+				}
+				indices = selection.Index()
+			}
+			ptr := types.NewPointer(receiver)
+			placeholder := &ast.Ident{NamePos: operand.Pos(), Name: "nil"}
+			info.Uses[placeholder] = types.Universe.Lookup("nil")
+			info.Types[placeholder] = types.TypeAndValue{Type: ptr}
+			args := make([]ast.Expr, 1, 1+len(indices))
+			args[0] = placeholder
+			params := make([]*types.Var, 1, 1+len(indices))
+			params[0] = types.NewParam(token.NoPos, nil, "", ptr)
+			for _, index := range indices {
+				arg := &ast.BasicLit{ValuePos: operand.Pos(), Kind: token.INT, Value: strconv.Itoa(index)}
+				info.Types[arg] = types.TypeAndValue{Type: types.Typ[types.Uintptr], Value: constant.MakeInt64(int64(index))}
+				args = append(args, arg)
+				params = append(params, types.NewParam(token.NoPos, nil, "", types.Typ[types.Uintptr]))
+			}
+			fun := &ast.Ident{NamePos: call.Fun.Pos(), Name: name}
+			info.Uses[fun] = builtin
+			info.Types[fun] = types.TypeAndValue{Type: types.NewSignatureType(nil, nil, nil,
+				types.NewTuple(params...), types.NewTuple(types.NewParam(token.NoPos, nil, "", types.Typ[types.Uintptr])), false)}
+			call.Fun = fun
+			call.Args = args
+			return false
+		})
 	}
 }

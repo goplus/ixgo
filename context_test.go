@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 	"unsafe"
 
@@ -781,7 +780,7 @@ func main() {
 	}
 }
 
-func TestGenericUnsafeOffsetofRuntimeError(t *testing.T) {
+func TestGenericUnsafeOffsetofWithoutSource(t *testing.T) {
 	const src = `package main
 import "unsafe"
 func offset[T any](x struct { Value T }) uintptr { return unsafe.Offsetof(x.Value) }
@@ -804,8 +803,8 @@ func main() { got = offset(struct { Value int }{}) }
 	if err := interp.RunInit(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = interp.RunFunc("main"); err == nil || !strings.Contains(err.Error(), "unsafe.Offsetof not found code") {
-		t.Fatalf("RunFunc error = %v; want deferred Offsetof error", err)
+	if _, err = interp.RunFunc("main"); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -1092,5 +1091,255 @@ func main() {
 		_ = pfn.PosForPC(0)
 		_ = pfn.PositionForPC(0)
 		pfn.UnsafeRelease()
+	}
+}
+
+func TestGenericUnsafeOffsetofUnevaluated(t *testing.T) {
+	const source = `package main
+
+import "unsafe"
+
+type Inner[T any] struct {
+	Pad byte
+	B   T
+}
+type Outer[T any] struct {
+	Pad byte
+	Inner[T]
+}
+
+type FunctionBox[T any] struct {
+	Pad      byte
+	Function T
+	Tail     byte
+}
+
+func afterFunction[T any]() uintptr {
+	var p *FunctionBox[T]
+	return unsafe.Offsetof(p.Tail)
+}
+
+var calls int
+
+func pointer[T any]() *Outer[T] { calls++; panic("evaluated operand") }
+func check[T any]() {
+	var p *Outer[T]
+	want := unsafe.Offsetof(Outer[T]{}.Inner) + unsafe.Offsetof(Inner[T]{}.B)
+	if unsafe.Offsetof(p.B) != want {
+		panic("promoted offset")
+	}
+	if unsafe.Offsetof(p.Inner.B) != unsafe.Offsetof(Inner[T]{}.B) {
+		panic("nested offset")
+	}
+	if unsafe.Offsetof(pointer[T]().B) != want {
+		panic("call offset")
+	}
+	if calls != 0 {
+		panic("operand called")
+	}
+}
+func ordinary[T any](p *Outer[T]) (panicked bool) {
+	defer func() { panicked = recover() != nil }()
+	_ = p.B
+	return false
+}
+func makePointer[T any]() *Outer[T] { calls++; return nil }
+func unevaluatedControl[T any]() uintptr {
+	return unsafe.Offsetof(struct {
+		Pad   byte
+		Value T
+		Flag  bool
+	}{Flag: pointer[T]() == nil && pointer[T]() == nil}.Value)
+}
+func preceding[T any]() {
+	x := makePointer[T]()
+	_ = unsafe.Offsetof(x.B)
+	ch := make(chan *Outer[T], 1)
+	ch <- nil
+	y := <-ch
+	_ = unsafe.Offsetof(y.B)
+	if len(ch) != 0 {
+		panic("receive skipped")
+	}
+}
+func pair[T any]() (*Outer[T], int) { calls++; return nil, 0 }
+func precedingPair[T any]() {
+	x, _ := pair[T]()
+	_ = unsafe.Offsetof(x.B)
+	var value any = 1
+	y := value.(*Outer[T])
+	_ = unsafe.Offsetof(y.B)
+}
+func assertionPanics[T any]() (panicked bool) {
+	defer func() { panicked = recover() != nil }()
+	precedingPair[T]()
+	return
+}
+func precedingLoad[T any]() {
+	var p *Outer[T]
+	v := *p
+	_ = unsafe.Offsetof(v.B)
+}
+func loadPanics[T any]() (panicked bool) {
+	defer func() { panicked = recover() != nil }()
+	precedingLoad[T]()
+	return
+}
+func shared[T any](p *Outer[T]) T {
+	_ = unsafe.Offsetof(p.B)
+	return p.B
+}
+func main() {
+	if got, want := afterFunction[func()](), unsafe.Offsetof(FunctionBox[func()]{}.Tail); got != want {
+		panic("offset after function field")
+	}
+	check[byte]()
+	check[int64]()
+	check[string]()
+	if unevaluatedControl[int64]() != unsafe.Offsetof(Inner[int64]{}.B) {
+		panic("control flow operand")
+	}
+	preceding[int64]()
+	if calls != 1 {
+		panic("earlier call skipped")
+	}
+	if !assertionPanics[int64]() || calls != 2 {
+		panic("earlier pair or assertion skipped")
+	}
+	if !loadPanics[int64]() {
+		panic("earlier dereference skipped")
+	}
+	if !ordinary[int64](nil) {
+		panic("ordinary field access did not panic")
+	}
+	p := &Outer[int64]{Inner: Inner[int64]{B: 42}}
+	if shared(p) != 42 {
+		panic("shared operand")
+	}
+}
+`
+	for _, mode := range []Mode{0, EnableCachedReg, ExperimentalSupportGC | EnableCachedReg} {
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
+			ctx := NewContext(mode)
+			if _, err := ctx.RunFile("offsetof.go", source, nil); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestGenericUnsafeLayoutUnevaluated(t *testing.T) {
+	const source = `package main
+
+import "unsafe"
+
+func value[T any]() T    { panic("value evaluated") }
+func slice[T any]() []T  { panic("slice evaluated") }
+func index() int         { panic("index evaluated") }
+func pointer[T any]() *T { panic("pointer evaluated") }
+func condition() bool    { panic("condition evaluated") }
+
+var calls int
+
+func check[T any](wantSize, wantAlign uintptr) {
+	var p *T
+	sizes := []uintptr{
+		unsafe.Sizeof(value[T]()),
+		unsafe.Sizeof(slice[T]()[index()]),
+		unsafe.Sizeof(*pointer[T]()),
+		unsafe.Sizeof(*p),
+		unsafe.Sizeof(struct{ Value T }{value[T]()}),
+	}
+	aligns := []uintptr{
+		unsafe.Alignof(value[T]()),
+		unsafe.Alignof(slice[T]()[index()]),
+		unsafe.Alignof(*pointer[T]()),
+		unsafe.Alignof(*p),
+		unsafe.Alignof(struct{ Value T }{value[T]()}),
+	}
+	for _, got := range sizes {
+		if got != wantSize {
+			panic("size")
+		}
+	}
+	for _, got := range aligns {
+		if got != wantAlign {
+			panic("align")
+		}
+	}
+	x := func() T { calls++; var zero T; return zero }()
+	if unsafe.Sizeof(x) != wantSize || unsafe.Alignof(x) != wantAlign {
+		panic("local layout")
+	}
+}
+func control[T any]() {
+	type S struct {
+		Value T
+		Flag  bool
+	}
+	if unsafe.Sizeof(S{Flag: condition() && condition()}) != unsafe.Sizeof(S{}) {
+		panic("short circuit size")
+	}
+	if unsafe.Alignof(S{Flag: condition() || condition()}) != unsafe.Alignof(S{}) {
+		panic("short circuit align")
+	}
+}
+func main() {
+	check[byte](unsafe.Sizeof(byte(0)), unsafe.Alignof(byte(0)))
+	check[int64](unsafe.Sizeof(int64(0)), unsafe.Alignof(int64(0)))
+	check[[3]int64](unsafe.Sizeof([3]int64{}), unsafe.Alignof([3]int64{}))
+	check[[]int64](unsafe.Sizeof([]int64(nil)), unsafe.Alignof([]int64(nil)))
+	check[*int64](unsafe.Sizeof((*int64)(nil)), unsafe.Alignof((*int64)(nil)))
+	check[any](unsafe.Sizeof(*new(any)), unsafe.Alignof(*new(any)))
+	check[func()](unsafe.Sizeof((func())(nil)), unsafe.Alignof((func())(nil)))
+	check[string](unsafe.Sizeof(""), unsafe.Alignof(""))
+	check[map[string]int](unsafe.Sizeof(map[string]int(nil)), unsafe.Alignof(map[string]int(nil)))
+	check[chan int](unsafe.Sizeof((chan int)(nil)), unsafe.Alignof((chan int)(nil)))
+	if calls != 10 {
+		panic("earlier call skipped")
+	}
+	control[int64]()
+}
+`
+	for _, mode := range []Mode{0, EnableCachedReg, ExperimentalSupportGC | EnableCachedReg} {
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
+			ctx := NewContext(mode)
+			interp, err := ctx.LoadInterp("layout.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer interp.UnsafeRelease()
+			for _, sp := range ctx.pkgs {
+				sp.Files = nil
+				sp.Info = nil
+			}
+			if _, err := interp.RunFunc("main"); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func BenchmarkGenericUnsafeLayoutLoad(b *testing.B) {
+	for _, count := range []int{1, 100} {
+		source := "package main\nimport \"unsafe\"\ntype S[T any] struct { A byte; B T }\n"
+		for i := 0; i < count; i++ {
+			source += fmt.Sprintf("func f%d[T any](p *S[T]) uintptr { return unsafe.Offsetof(p.B) + unsafe.Sizeof(*p) + unsafe.Alignof(*p) }\n", i)
+		}
+		source += "func main() {"
+		for i := 0; i < count; i++ {
+			source += fmt.Sprintf("_ = f%d[int64](nil);", i)
+		}
+		source += "}"
+		b.Run(fmt.Sprint(count), func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				interp, err := NewContext(DisableMemo).LoadInterp("layout_bench.go", source)
+				if err != nil {
+					b.Fatal(err)
+				}
+				interp.UnsafeRelease()
+			}
+		})
 	}
 }
