@@ -1530,7 +1530,28 @@ func check[T any]() {
 		panic("embedded pointer offset")
 	}
 }
-func main() { check[byte](); check[int64](); check[any](); check[func()]() }
+func main() {
+	check[byte]()
+	check[int64]()
+	check[any]()
+	check[func()]()
+	const size16 = unsafe.Sizeof(layout.Box[int16]{})
+	const align16 = unsafe.Alignof(layout.Box[int16]{})
+	const inner16 = unsafe.Offsetof(layout.Box[int16]{}.Inner)
+	const tail16 = unsafe.Offsetof(layout.Box[int16]{}.Tail)
+	size, align, offset := (layout.Box[int16]{}).Layout()
+	if size != size16 || align != align16 || offset != inner16 || layout.Offset[int16]() != tail16 {
+		panic("int16 constant layout mismatch")
+	}
+	const sizeAny = unsafe.Sizeof(layout.Box[any]{})
+	const alignAny = unsafe.Alignof(layout.Box[any]{})
+	const innerAny = unsafe.Offsetof(layout.Box[any]{}.Inner)
+	const tailAny = unsafe.Offsetof(layout.Box[any]{}.Tail)
+	size, align, offset = (layout.Box[any]{}).Layout()
+	if size != sizeAny || align != alignAny || offset != innerAny || layout.Offset[any]() != tailAny {
+		panic("interface constant layout mismatch")
+	}
+}
 `
 	for _, mode := range []Mode{0, EnableCachedReg, ExperimentalSupportGC | EnableCachedReg} {
 		t.Run(fmt.Sprint(mode), func(t *testing.T) {

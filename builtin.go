@@ -598,6 +598,7 @@ func (interp *Interp) makeBuiltinByStack(pfn *function, fn *ssa.Builtin, ssaArgs
 		var offset int64
 		var err error
 		if len(ssaArgs) > 1 {
+			// unsaferewrite.Rewrite carries the struct type and field-index path.
 			typ := ssaArgs[0].Type().Underlying().(*types.Pointer).Elem()
 			for _, arg := range ssaArgs[1:] {
 				index, _ := constant.Int64Val(arg.(*ssa.Const).Value)
