@@ -1670,6 +1670,59 @@ func Check() {}
 	}
 }
 
+func TestTypedInstructionDescription(t *testing.T) {
+	ctx := NewContext(DisableMemo | EnableInstructionDescriptions)
+	interp, err := ctx.LoadInterp("typed_instruction.go", `package main
+func branch(n int) int {
+	if n > 0 { return n + 1 }
+	return n - 1
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer interp.UnsafeRelease()
+	p := interp.funcs[interp.mainpkg.Func("branch")]
+	if p == nil {
+		t.Fatal("missing branch function")
+	}
+	if len(p.Code) != len(p.Instrs) || len(p.Code) != len(p.ssaInstrs) {
+		t.Fatalf("typed code lengths = %d/%d/%d", len(p.Code), len(p.Instrs), len(p.ssaInstrs))
+	}
+	if len(p.Code) == 0 {
+		t.Fatal("empty typed code")
+	}
+	var sawBranch bool
+	for pc, desc := range p.Code {
+		if desc.Op == opIf || desc.Op == opJump {
+			sawBranch = true
+			aux, ok := desc.Aux.(branchAux)
+			if !ok || len(aux.Targets) == 0 {
+				t.Fatalf("missing branch targets at pc %d", pc)
+			}
+		}
+		if desc.Op == opBinOp {
+			aux, ok := desc.Aux.(binaryOpAux)
+			if !ok || aux.Op == token.ILLEGAL {
+				t.Fatalf("missing binary operator at pc %d", pc)
+			}
+		}
+		if desc.Op == opInvalid {
+			t.Fatalf("invalid opcode at pc %d", pc)
+		}
+		_ = p.PosForPC(pc) // Some synthetic instructions have no source position.
+	}
+	if !sawBranch {
+		t.Fatal("missing branch instruction")
+	}
+	if len(p.Blocks) == 0 || p.Blocks[0] != 0 {
+		t.Fatalf("block entries = %v", p.Blocks)
+	}
+	if got := interp.callFunction(&frame{}, p, []value{2}, nil); got != 3 {
+		t.Fatalf("branch result = %v, want 3", got)
+	}
+}
+
 func TestExecutionDescriptionWithoutCompilation(t *testing.T) {
 	ctx := NewContext(DisableMemo | ExperimentalSupportGC | EnableGCExecutionPlan)
 	ctx.SetLeastCallForEnablePool(0)

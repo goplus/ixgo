@@ -135,6 +135,10 @@ type functionExecution struct {
 	childFrameReg    register
 	memoFlags        uint8
 	metadata         functionMetadata
+
+	// Keep optional descriptions after the closure backend fields so enabling
+	// instruction metadata does not shift the hot execution layout.
+	Code []typedInstruction
 }
 
 type functionMetadata struct {
@@ -198,6 +202,7 @@ func (p *function) UnsafeRelease() {
 	p.closureByResult = nil
 	p.elidedExtract = nil
 	p.elidedTuples = nil
+	p.Code = nil
 	p.Instrs = nil
 	p.Recover = nil
 	p.Blocks = nil
