@@ -2,6 +2,7 @@ package ixgo
 
 import (
 	"go/token"
+	"go/types"
 	"reflect"
 
 	"golang.org/x/tools/go/ssa"
@@ -95,17 +96,58 @@ type nextAux struct{ IsString bool }
 
 func (nextAux) instructionAux() { return }
 
-// fieldAux records the field index; receiver type, field type and offset are
-// still supplied by closure lowering rather than this partial description.
-type fieldAux struct{ Index int }
+// fieldAux.Source is the operand type, a pointer for FieldAddr. Field and
+// Offset describe the field within the struct, after dereferencing Source;
+// Offset is relative to the start of that struct.
+type fieldAux struct {
+	Index  int
+	Source reflect.Type
+	Field  reflect.Type
+	Offset uintptr
+}
 
 func (fieldAux) instructionAux() { return }
 
-// lookupAux records result shape; source and key/value types remain in closure
-// lowering until type metadata is added for independent execution.
-type lookupAux struct{ CommaOk bool }
+// lookupAux records map key/element types. For a string Source, Key is the
+// index operand type and Element is byte.
+type lookupAux struct {
+	Source  reflect.Type
+	Key     reflect.Type
+	Element reflect.Type
+	CommaOk bool
+}
 
 func (lookupAux) instructionAux() { return }
+
+// indexAux.Source retains fixed array lengths; slice/string lengths and index
+// bounds are checked against the runtime value. Target is the produced type.
+type indexAux struct {
+	Source reflect.Type
+	Target reflect.Type
+}
+
+func (indexAux) instructionAux() { return }
+
+// Slice Args are source, low, high, max, including -1 for omitted bounds.
+// MakeSliceCheck preserves the checks used when slicing an allocation.
+type sliceAux struct {
+	Source         reflect.Type
+	Target         reflect.Type
+	Low, High, Max bool
+	MakeSliceCheck bool
+}
+
+func (sliceAux) instructionAux() { return }
+
+// rangeAux records map iterator types. For a string Source, Key and Element
+// are int and rune, respectively.
+type rangeAux struct {
+	Source  reflect.Type
+	Key     reflect.Type
+	Element reflect.Type
+}
+
+func (rangeAux) instructionAux() { return }
 
 // Reflect types are the in-memory runtime representation. A portable type table
 // remains future work; these descriptions retain no SSA instruction or value.
@@ -116,6 +158,24 @@ type typeAssertAux struct {
 }
 
 func (typeAssertAux) instructionAux() { return }
+
+// conversionAux records in-memory types, independently of the SSA values.
+// Conversion behavior is selected by the instruction opcode and these types.
+type conversionAux struct {
+	Source reflect.Type
+	Target reflect.Type
+}
+
+func (conversionAux) instructionAux() { return }
+
+// creationAux.Target is the produced type (a pointer for Alloc). Heap is only
+// meaningful for Alloc; sizes and capacities retain their SSA order in Args.
+type creationAux struct {
+	Target reflect.Type
+	Heap   bool
+}
+
+func (creationAux) instructionAux() { return }
 
 // operandKind classifies the source of an input independently from its register.
 // operandFunction and operandBuiltin may still have a valid Args register; only
@@ -222,12 +282,53 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 			d.Result = -1
 		}
 		d.Aux = callAux{ExtractResults: elidedResults}
+	case *ssa.ChangeType:
+		d.Aux = describeConversion(pfn, v.X, v.Type())
+	case *ssa.Convert:
+		d.Aux = describeConversion(pfn, v.X, v.Type())
+	case *ssa.ChangeInterface:
+		d.Aux = describeConversion(pfn, v.X, v.Type())
+	case *ssa.MakeInterface:
+		d.Aux = describeConversion(pfn, v.X, v.Type())
+	case *ssa.SliceToArrayPointer:
+		d.Aux = describeConversion(pfn, v.X, v.Type())
+	case *ssa.Alloc:
+		d.Aux = creationAux{Target: pfn.Interp.preToType(v.Type()), Heap: v.Heap}
+	case *ssa.MakeSlice:
+		d.Aux = creationAux{Target: pfn.Interp.preToType(v.Type())}
+	case *ssa.MakeMap:
+		d.Aux = creationAux{Target: pfn.Interp.preToType(v.Type())}
+	case *ssa.MakeChan:
+		d.Aux = creationAux{Target: pfn.Interp.preToType(v.Type())}
 	case *ssa.Field:
-		d.Aux = fieldAux{Index: v.Field}
+		d.Aux = describeField(pfn, v.X, v.Field)
 	case *ssa.FieldAddr:
-		d.Aux = fieldAux{Index: v.Field}
+		d.Aux = describeField(pfn, v.X, v.Field)
 	case *ssa.Lookup:
-		d.Aux = lookupAux{CommaOk: v.CommaOk}
+		source := pfn.Interp.preToType(v.X.Type())
+		aux := lookupAux{Source: source, CommaOk: v.CommaOk}
+		if source.Kind() == reflect.Map {
+			aux.Key, aux.Element = source.Key(), source.Elem()
+		} else {
+			aux.Key, aux.Element = pfn.Interp.preToType(v.Index.Type()), reflect.TypeOf(byte(0))
+		}
+		d.Aux = aux
+	case *ssa.Index:
+		d.Aux = indexAux{Source: pfn.Interp.preToType(v.X.Type()), Target: pfn.Interp.preToType(v.Type())}
+	case *ssa.IndexAddr:
+		d.Aux = indexAux{Source: pfn.Interp.preToType(v.X.Type()), Target: pfn.Interp.preToType(v.Type())}
+	case *ssa.Slice:
+		_, allocation := v.X.(*ssa.Alloc)
+		d.Aux = sliceAux{Source: pfn.Interp.preToType(v.X.Type()), Target: pfn.Interp.preToType(v.Type()), Low: v.Low != nil, High: v.High != nil, Max: v.Max != nil, MakeSliceCheck: allocation}
+	case *ssa.Range:
+		source := pfn.Interp.preToType(v.X.Type())
+		aux := rangeAux{Source: source}
+		if source.Kind() == reflect.Map {
+			aux.Key, aux.Element = source.Key(), source.Elem()
+		} else {
+			aux.Key, aux.Element = reflect.TypeOf(int(0)), reflect.TypeOf(rune(0))
+		}
+		d.Aux = aux
 	case *ssa.TypeAssert:
 		d.Aux = typeAssertAux{
 			Source:  pfn.Interp.preToType(v.X.Type()),
@@ -253,6 +354,23 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 		}
 	}
 	return d
+}
+
+func describeField(pfn *function, source ssa.Value, index int) fieldAux {
+	typ := pfn.Interp.preToType(source.Type())
+	record := typ
+	if record.Kind() == reflect.Pointer {
+		record = record.Elem()
+	}
+	field := record.Field(index)
+	return fieldAux{Index: index, Source: typ, Field: field.Type, Offset: field.Offset}
+}
+
+func describeConversion(pfn *function, source ssa.Value, target types.Type) conversionAux {
+	return conversionAux{
+		Source: pfn.Interp.preToType(source.Type()),
+		Target: pfn.Interp.preToType(target),
+	}
 }
 
 func producesRegister(instr ssa.Instruction) bool {
