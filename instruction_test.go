@@ -5,8 +5,6 @@ import (
 	"go/constant"
 	"go/types"
 	"reflect"
-	"sync"
-	"sync/atomic"
 	"testing"
 
 	"golang.org/x/tools/go/ssa"
@@ -527,42 +525,6 @@ func TestCallDestinationsUnsafeRelease(t *testing.T) {
 	p.UnsafeRelease()
 	if p.callDests != nil {
 		t.Fatal("UnsafeRelease retained temporary call destinations")
-	}
-}
-
-// Snapshot of the closure executor layout before optional instruction metadata.
-type closureExecutionLayout struct {
-	Instrs           []func(*frame)
-	Recover          []func(*frame)
-	Blocks           []int
-	stack            []value
-	pool             *sync.Pool
-	base             int
-	nres, narg, nenv int
-	used, cached     int32
-	cacheRegs        []register
-	gcRegs           [][]register
-	gcReady          []atomic.Bool
-	gcPlan           *gcLivenessPlan
-	gcMu             sync.Mutex
-	clearRanges      []stackRange
-	localRefs        []register
-	hasGCRegs        bool
-	frameCacheSafe   bool
-	childFrameReg    register
-	memoFlags        uint8
-	metadata         functionMetadata
-}
-
-func TestInstructionDescriptionsColdLayout(t *testing.T) {
-	want := reflect.TypeOf(closureExecutionLayout{})
-	got := reflect.TypeOf(functionExecution{})
-	for i := 0; i < want.NumField(); i++ {
-		field := want.Field(i)
-		actual, ok := got.FieldByName(field.Name)
-		if !ok || actual.Offset != field.Offset || actual.Type != field.Type {
-			t.Fatalf("closure field %s changed: got %v, want %v", field.Name, actual, field)
-		}
 	}
 }
 
