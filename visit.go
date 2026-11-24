@@ -345,7 +345,7 @@ func (visit *visitor) function(fn *ssa.Function) {
 			if ifn == nil {
 				continue
 			}
-			if descriptions != nil {
+			if visit.intp.ctx.Mode&EnableInstructionDescriptions != 0 {
 				var dests []register
 				if call, ok := instr.(ssa.Value); ok {
 					dests = pfn.callDests[call]
@@ -446,7 +446,7 @@ func (visit *visitor) function(fn *ssa.Function) {
 		pfn.Blocks = append(pfn.Blocks, offset)
 		pfn.Instrs = append(pfn.Instrs, Instrs[:index]...)
 		pfn.ssaInstrs = append(pfn.ssaInstrs, ssaInstrs[:index]...)
-		if descriptions != nil {
+		if visit.intp.ctx.Mode&EnableInstructionDescriptions != 0 {
 			pfn.Code = append(pfn.Code, descriptions[:index]...)
 		}
 		if b == fn.Recover && visit.intp.ctx.Mode&DisableRecover == 0 {
@@ -486,8 +486,10 @@ func (visit *visitor) function(fn *ssa.Function) {
 	visit.base += len(pfn.ssaInstrs) + 2
 	pfn.initPool()
 	pfn.finishMetadata()
-	// Code now owns destination slices; release temporary SSA-keyed lookup data.
-	pfn.callDests = nil
+	if visit.intp.ctx.Mode&EnableInstructionDescriptions != 0 {
+		// Code now owns destination slices; release temporary SSA-keyed lookup data.
+		pfn.callDests = nil
+	}
 }
 
 func loc(fset *token.FileSet, pos token.Pos) string {

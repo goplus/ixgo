@@ -5,6 +5,7 @@ import (
 	"go/constant"
 	"go/types"
 	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -177,6 +178,11 @@ func TestInstructionAuxVariants(t *testing.T) {
 		typeAssertAux{},
 		conversionAux{},
 		creationAux{},
+		selectAux{},
+		sendAux{},
+		storeAux{},
+		mapUpdateAux{},
+		panicAux{},
 		indexAux{},
 		sliceAux{},
 		rangeAux{},
@@ -576,6 +582,9 @@ func TestClosureBackendInstructionDescriptions(t *testing.T) {
 			for _, p := range interp.funcs {
 				if !enabled && p.Code != nil {
 					t.Fatal("default closure backend retained typed descriptions")
+				}
+				if !enabled && p.callDests != nil {
+					t.Fatal("default closure backend retained temporary call destinations")
 				}
 			}
 			for _, name := range []string{"phi", "closure", "interfaceCall", "deferred", "recovered", "goroutine"} {
@@ -1058,5 +1067,142 @@ func TestDescriptionStringLookup(t *testing.T) {
 	aux := d.Aux.(lookupAux)
 	if aux.Source != reflect.TypeOf("") || aux.Key != reflect.TypeOf(0) || aux.Element != reflect.TypeOf(byte(0)) || aux.CommaOk {
 		t.Fatalf("string lookup = %#v", aux)
+	}
+}
+
+func TestDescriptionSideEffectMetadata(t *testing.T) {
+	const source = `package main
+func selectRecv(c chan int) int { select { case v := <-c: return v; default: return 0 } }
+func selectSend(c chan int, v int) { select { case c <- v: default: } }
+func send(c chan int, v int) { c <- v }
+func store(p *int, v int) { *p = v }
+func update(m map[string]int, v int) { m["x"] = v }
+func panicf(x any) { panic(x) }
+`
+	for _, mode := range []Mode{0, EnableCachedReg, ExperimentalSupportGC, ExperimentalSupportGC | EnableGCExecutionPlan} {
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
+			i, err := NewContext(DisableMemo|EnableInstructionDescriptions|mode).LoadInterp("side_effect_metadata.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			counts := map[instructionOpcode]int{}
+			var sendStates, recvStates int
+			for _, p := range i.funcs {
+				for pc, d := range p.Code {
+					switch v := p.ssaInstrs[pc].(type) {
+					case *ssa.Select:
+						aux, ok := d.Aux.(selectAux)
+						if !ok || len(aux.States) != len(v.States) || aux.Blocking != v.Blocking {
+							t.Fatalf("select = %#v", d)
+						}
+						for j, state := range v.States {
+							wantDir := reflect.SelectRecv
+							if state.Dir == types.SendOnly {
+								wantDir = reflect.SelectSend
+							}
+							if aux.States[j].Chan != i.preToType(state.Chan.Type()) || aux.States[j].Dir != wantDir {
+								t.Fatalf("select state = %#v", aux.States[j])
+							}
+							if state.Send == nil && aux.States[j].Send != nil {
+								t.Fatal("receive has send type")
+							}
+							if state.Send != nil && aux.States[j].Send != i.preToType(state.Send.Type()) {
+								t.Fatal("send type mismatch")
+							}
+							if wantDir == reflect.SelectSend {
+								if aux.States[j].Send == nil {
+									t.Fatal("missing select send value type")
+								}
+								sendStates++
+							} else {
+								recvStates++
+							}
+						}
+					case *ssa.Send:
+						aux, ok := d.Aux.(sendAux)
+						if !ok || aux.Chan != i.preToType(v.Chan.Type()) || aux.Value != i.preToType(v.X.Type()) {
+							t.Fatalf("send = %#v", d)
+						}
+					case *ssa.Store:
+						aux, ok := d.Aux.(storeAux)
+						if !ok || aux.Address != i.preToType(v.Addr.Type()) || aux.Value != i.preToType(v.Val.Type()) {
+							t.Fatalf("store = %#v", d)
+						}
+					case *ssa.MapUpdate:
+						aux, ok := d.Aux.(mapUpdateAux)
+						if !ok || aux.Map != i.preToType(v.Map.Type()) || aux.Key != i.preToType(v.Key.Type()) || aux.Value != i.preToType(v.Value.Type()) {
+							t.Fatalf("map update = %#v", d)
+						}
+					case *ssa.Panic:
+						aux, ok := d.Aux.(panicAux)
+						if !ok || aux.Value != i.preToType(v.X.Type()) {
+							t.Fatalf("panic = %#v", d)
+						}
+					default:
+						continue
+					}
+					counts[d.Op]++
+				}
+			}
+			for _, op := range []instructionOpcode{opSelect, opSend, opStore, opMapUpdate, opPanic} {
+				if counts[op] == 0 {
+					t.Fatalf("missing metadata opcode %d", op)
+				}
+			}
+			if sendStates == 0 || recvStates == 0 {
+				t.Fatalf("select directions not covered: send=%d receive=%d", sendStates, recvStates)
+			}
+			c := make(chan int, 1)
+			if _, err := i.RunFunc("send", c, 7); err != nil {
+				t.Fatal(err)
+			}
+			if got := <-c; got != 7 {
+				t.Fatalf("sent %d", got)
+			}
+			m := map[string]int{}
+			if _, err := i.RunFunc("update", m, 9); err != nil {
+				t.Fatal(err)
+			}
+			if m["x"] != 9 {
+				t.Fatalf("map update = %v", m)
+			}
+			v := 0
+			if _, err := i.RunFunc("store", &v, 5); err != nil {
+				t.Fatal(err)
+			}
+			if v != 5 {
+				t.Fatalf("store = %d", v)
+			}
+			if got, err := i.RunFunc("selectRecv", make(chan int)); err != nil || got != 0 {
+				t.Fatalf("select recv = %v, %v", got, err)
+			}
+			if _, err := i.RunFunc("selectSend", c, 11); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case got := <-c:
+				if got != 11 {
+					t.Fatalf("select sent %d, want 11", got)
+				}
+			default:
+				t.Fatal("select send did not enqueue value")
+			}
+			// A full buffer must take the default arm without replacing its value.
+			c <- 12
+			if _, err := i.RunFunc("selectSend", c, 13); err != nil {
+				t.Fatal(err)
+			}
+			if got := <-c; got != 12 {
+				t.Fatalf("default select replaced buffered value with %d", got)
+			}
+			c <- 14
+			if got, err := i.RunFunc("selectRecv", c); err != nil || got != 14 {
+				t.Fatalf("ready select receive = %v, %v", got, err)
+			}
+			if _, err := i.RunFunc("panicf", "side-effect panic"); err == nil || !strings.Contains(err.Error(), "side-effect panic") {
+				t.Fatalf("panic result = %v", err)
+			}
+		})
 	}
 }
