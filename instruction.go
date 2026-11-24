@@ -2,6 +2,7 @@ package ixgo
 
 import (
 	"go/token"
+	"reflect"
 
 	"golang.org/x/tools/go/ssa"
 )
@@ -93,6 +94,28 @@ func (extractAux) instructionAux() { return }
 type nextAux struct{ IsString bool }
 
 func (nextAux) instructionAux() { return }
+
+// fieldAux records the field index; receiver type, field type and offset are
+// still supplied by closure lowering rather than this partial description.
+type fieldAux struct{ Index int }
+
+func (fieldAux) instructionAux() { return }
+
+// lookupAux records result shape; source and key/value types remain in closure
+// lowering until type metadata is added for independent execution.
+type lookupAux struct{ CommaOk bool }
+
+func (lookupAux) instructionAux() { return }
+
+// Reflect types are the in-memory runtime representation. A portable type table
+// remains future work; these descriptions retain no SSA instruction or value.
+type typeAssertAux struct {
+	Source  reflect.Type
+	Target  reflect.Type
+	CommaOk bool
+}
+
+func (typeAssertAux) instructionAux() { return }
 
 // operandKind classifies the source of an input independently from its register.
 // operandFunction and operandBuiltin may still have a valid Args register; only
@@ -199,6 +222,18 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 			d.Result = -1
 		}
 		d.Aux = callAux{ExtractResults: elidedResults}
+	case *ssa.Field:
+		d.Aux = fieldAux{Index: v.Field}
+	case *ssa.FieldAddr:
+		d.Aux = fieldAux{Index: v.Field}
+	case *ssa.Lookup:
+		d.Aux = lookupAux{CommaOk: v.CommaOk}
+	case *ssa.TypeAssert:
+		d.Aux = typeAssertAux{
+			Source:  pfn.Interp.preToType(v.X.Type()),
+			Target:  pfn.Interp.preToType(v.AssertedType),
+			CommaOk: v.CommaOk,
+		}
 	case *ssa.Extract:
 		d.Aux = extractAux{Index: v.Index}
 	case *ssa.Next:
