@@ -96,6 +96,9 @@ type nextAux struct{ IsString bool }
 
 func (nextAux) instructionAux() { return }
 
+// fieldAux.Source is the operand type, a pointer for FieldAddr. Field and
+// Offset describe the field within the struct, after dereferencing Source;
+// Offset is relative to the start of that struct.
 type fieldAux struct {
 	Index  int
 	Source reflect.Type
@@ -105,6 +108,8 @@ type fieldAux struct {
 
 func (fieldAux) instructionAux() { return }
 
+// lookupAux records map key/element types. For a string Source, Key is the
+// index operand type and Element is byte.
 type lookupAux struct {
 	Source  reflect.Type
 	Key     reflect.Type
@@ -134,6 +139,8 @@ type sliceAux struct {
 
 func (sliceAux) instructionAux() { return }
 
+// rangeAux records map iterator types. For a string Source, Key and Element
+// are int and rune, respectively.
 type rangeAux struct {
 	Source  reflect.Type
 	Key     reflect.Type
