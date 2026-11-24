@@ -68,7 +68,13 @@ type unaryOpAux struct {
 
 func (unaryOpAux) instructionAux() { return }
 
-type phiAux struct{ Preds []int32 }
+// phiAux describes the parallel assignment performed by one grouped closure.
+// Edges[i][j] supplies Results[i] when control arrives from Preds[j].
+type phiAux struct {
+	Preds   []int32
+	Results []register
+	Edges   [][]register
+}
 
 func (phiAux) instructionAux() { return }
 
@@ -88,16 +94,37 @@ type nextAux struct{ IsString bool }
 
 func (nextAux) instructionAux() { return }
 
+// operandKind distinguishes non-register inputs without retaining SSA values.
+type operandKind uint8
+
+const (
+	operandAbsent operandKind = iota
+	operandRegister
+	operandFunction
+	operandBuiltin
+	operandUnallocated
+)
+
+// callAux describes result placement after tuple extraction elision. A nil
+// ExtractResults means the call still uses its ordinary result register. A -1
+// entry denotes an unused result. Static target resolution remains incremental.
+type callAux struct {
+	ExtractResults []register
+}
+
+func (callAux) instructionAux() { return }
+
 // typedInstruction records partial execution metadata alongside the closure
-// backend. Each entry corresponds to one generated closure, so merged Phi groups
-// and result destinations of elided Extracts are not yet fully represented.
-// Args preserve SSA operand order; -1 denotes an absent or unallocated operand,
-// including static call targets. Opcode-specific lowering is incremental.
+// backend. Each entry corresponds to one generated closure; Phi auxiliary data
+// covers the entire group. Args preserve SSA operand order and use -1 for inputs
+// without a register; ArgKinds distinguishes absent, static and unallocated
+// inputs. Opcode-specific lowering and static target resolution are incremental.
 type typedInstruction struct {
-	Op     instructionOpcode
-	Result register
-	Args   []register
-	Aux    instructionAux
+	Op       instructionOpcode
+	Result   register
+	Args     []register
+	ArgKinds []operandKind
+	Aux      instructionAux
 }
 
 func descriptionRegister(pfn *function, v ssa.Value) register {
@@ -113,7 +140,22 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 	d := typedInstruction{Op: opcodeOf(instr), Result: -1}
 	for _, operand := range operands {
 		if operand != nil {
-			d.Args = append(d.Args, descriptionRegister(pfn, *operand))
+			r := descriptionRegister(pfn, *operand)
+			kind := operandRegister
+			switch (*operand).(type) {
+			case nil:
+				kind = operandAbsent
+			case *ssa.Function:
+				kind = operandFunction
+			case *ssa.Builtin:
+				kind = operandBuiltin
+			default:
+				if r < 0 {
+					kind = operandUnallocated
+				}
+			}
+			d.Args = append(d.Args, r)
+			d.ArgKinds = append(d.ArgKinds, kind)
 		}
 	}
 	if producesRegister(instr) {
@@ -127,11 +169,46 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 	case *ssa.UnOp:
 		d.Aux = unaryOpAux{Op: v.Op, CommaOk: v.CommaOk}
 	case *ssa.Phi:
-		aux := phiAux{Preds: make([]int32, 0)}
+		aux := phiAux{}
 		if block := v.Block(); block != nil {
 			aux.Preds = make([]int32, len(block.Preds))
 			for i, pred := range block.Preds {
 				aux.Preds[i] = int32(pred.Index)
+			}
+			for _, instr := range block.Instrs {
+				phi, ok := instr.(*ssa.Phi)
+				if !ok {
+					break
+				}
+				aux.Results = append(aux.Results, descriptionRegister(pfn, phi))
+				edges := make([]register, len(phi.Edges))
+				for i, edge := range phi.Edges {
+					edges[i] = descriptionRegister(pfn, edge)
+				}
+				aux.Edges = append(aux.Edges, edges)
+			}
+		}
+		d.Aux = aux
+	case *ssa.Call:
+		aux := callAux{}
+		if refs := v.Referrers(); refs != nil {
+			for _, ref := range *refs {
+				ex, ok := ref.(*ssa.Extract)
+				if !ok {
+					continue
+				}
+				if _, elided := pfn.elidedExtract[ex]; !elided {
+					continue
+				}
+				if aux.ExtractResults == nil {
+					aux.ExtractResults = make([]register, callResultCount(&v.Call))
+					for j := range aux.ExtractResults {
+						aux.ExtractResults[j] = -1
+					}
+				}
+				if uses := ex.Referrers(); uses != nil && len(*uses) > 0 {
+					aux.ExtractResults[ex.Index] = descriptionRegister(pfn, ex)
+				}
 			}
 		}
 		d.Aux = aux
