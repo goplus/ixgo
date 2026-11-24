@@ -5,6 +5,7 @@ import (
 	"go/constant"
 	"go/types"
 	"reflect"
+	"strings"
 	"testing"
 
 	"golang.org/x/tools/go/ssa"
@@ -176,7 +177,6 @@ func TestInstructionAuxVariants(t *testing.T) {
 		conversionAux{},
 		creationAux{},
 		selectAux{},
-		selectStateAux{},
 		sendAux{},
 		storeAux{},
 		mapUpdateAux{},
@@ -1044,6 +1044,7 @@ func panicf(x any) { panic(x) }
 	}
 	defer i.UnsafeRelease()
 	counts := map[instructionOpcode]int{}
+	var sendStates, recvStates int
 	for _, p := range i.funcs {
 		for pc, d := range p.Code {
 			switch v := p.ssaInstrs[pc].(type) {
@@ -1053,7 +1054,11 @@ func panicf(x any) { panic(x) }
 					t.Fatalf("select = %#v", d)
 				}
 				for j, state := range v.States {
-					if aux.States[j].Chan != i.preToType(state.Chan.Type()) || aux.States[j].Dir == reflect.SelectDefault {
+					wantDir := reflect.SelectRecv
+					if state.Dir == types.SendOnly {
+						wantDir = reflect.SelectSend
+					}
+					if aux.States[j].Chan != i.preToType(state.Chan.Type()) || aux.States[j].Dir != wantDir {
 						t.Fatalf("select state = %#v", aux.States[j])
 					}
 					if state.Send == nil && aux.States[j].Send != nil {
@@ -1061,6 +1066,14 @@ func panicf(x any) { panic(x) }
 					}
 					if state.Send != nil && aux.States[j].Send != i.preToType(state.Send.Type()) {
 						t.Fatal("send type mismatch")
+					}
+					if wantDir == reflect.SelectSend {
+						if aux.States[j].Send == nil {
+							t.Fatal("missing select send value type")
+						}
+						sendStates++
+					} else {
+						recvStates++
 					}
 				}
 			case *ssa.Send:
@@ -1094,6 +1107,9 @@ func panicf(x any) { panic(x) }
 			t.Fatalf("missing metadata opcode %d", op)
 		}
 	}
+	if sendStates == 0 || recvStates == 0 {
+		t.Fatalf("select directions not covered: send=%d receive=%d", sendStates, recvStates)
+	}
 	c := make(chan int, 1)
 	if _, err := i.RunFunc("send", c, 7); err != nil {
 		t.Fatal(err)
@@ -1118,4 +1134,31 @@ func panicf(x any) { panic(x) }
 	if got, err := i.RunFunc("selectRecv", make(chan int)); err != nil || got != 0 {
 		t.Fatalf("select recv = %v, %v", got, err)
 	}
+	if _, err := i.RunFunc("selectSend", c, 11); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case got := <-c:
+		if got != 11 {
+			t.Fatalf("select sent %d, want 11", got)
+		}
+	default:
+		t.Fatal("select send did not enqueue value")
+	}
+	// A full buffer must take the default arm without replacing its value.
+	c <- 12
+	if _, err := i.RunFunc("selectSend", c, 13); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-c; got != 12 {
+		t.Fatalf("default select replaced buffered value with %d", got)
+	}
+	c <- 14
+	if got, err := i.RunFunc("selectRecv", c); err != nil || got != 14 {
+		t.Fatalf("ready select receive = %v, %v", got, err)
+	}
+	if _, err := i.RunFunc("panicf", "side-effect panic"); err == nil || !strings.Contains(err.Error(), "side-effect panic") {
+		t.Fatalf("panic result = %v", err)
+	}
+
 }

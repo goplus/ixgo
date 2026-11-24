@@ -184,8 +184,6 @@ type selectStateAux struct {
 	Dir  reflect.SelectDir
 }
 
-func (selectStateAux) instructionAux() { return }
-
 type selectAux struct {
 	States   []selectStateAux
 	Blocking bool
