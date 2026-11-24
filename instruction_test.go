@@ -709,6 +709,23 @@ func TestDescriptionValueMetadata(t *testing.T) {
 						if !ok || aux.CommaOk != v.CommaOk || aux.Source != i.preToType(v.X.Type()) || aux.Target != i.preToType(v.AssertedType) {
 							t.Fatalf("assertion = %#v", d)
 						}
+						if aux.Source.Kind() != reflect.Interface {
+							t.Fatalf("assertion source = %v, want interface", aux.Source)
+						}
+						switch p.Fn.Name() {
+						case "assert":
+							if aux.Target != reflect.TypeOf(int(0)) || aux.CommaOk {
+								t.Fatalf("int assertion = %#v", aux)
+							}
+						case "assertInterface":
+							if aux.Target.Kind() != reflect.Interface || aux.Target.NumMethod() != 1 || !aux.CommaOk {
+								t.Fatalf("interface assertion = %#v", aux)
+							}
+							method := aux.Target.Method(0)
+							if method.Name != "String" || method.Type.NumIn() != 0 || method.Type.NumOut() != 1 || method.Type.Out(0) != reflect.TypeOf("") {
+								t.Fatalf("interface method = %v, want String() string", method)
+							}
+						}
 						counts[d.Op]++
 					default:
 						continue

@@ -95,10 +95,14 @@ type nextAux struct{ IsString bool }
 
 func (nextAux) instructionAux() { return }
 
+// fieldAux records the field index; receiver type, field type and offset are
+// still supplied by closure lowering rather than this partial description.
 type fieldAux struct{ Index int }
 
 func (fieldAux) instructionAux() { return }
 
+// lookupAux records result shape; source and key/value types remain in closure
+// lowering until type metadata is added for independent execution.
 type lookupAux struct{ CommaOk bool }
 
 func (lookupAux) instructionAux() { return }
