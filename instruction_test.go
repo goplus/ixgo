@@ -3,6 +3,8 @@ package ixgo
 import (
 	"fmt"
 	"reflect"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"golang.org/x/tools/go/ssa"
@@ -168,6 +170,9 @@ func TestInstructionAuxVariants(t *testing.T) {
 		extractAux{},
 		nextAux{},
 		callAux{},
+		fieldAux{},
+		lookupAux{},
+		typeAssertAux{},
 	}
 	for _, aux := range variants {
 		t.Run(reflect.TypeOf(aux).Name(), func(t *testing.T) {
@@ -509,5 +514,238 @@ func TestCallDestinationsUnsafeRelease(t *testing.T) {
 	p.UnsafeRelease()
 	if p.callDests != nil {
 		t.Fatal("UnsafeRelease retained temporary call destinations")
+	}
+}
+
+// Snapshot of the closure executor layout before optional instruction metadata.
+type closureExecutionLayout struct {
+	Instrs           []func(*frame)
+	Recover          []func(*frame)
+	Blocks           []int
+	stack            []value
+	pool             *sync.Pool
+	base             int
+	nres, narg, nenv int
+	used, cached     int32
+	cacheRegs        []register
+	gcRegs           [][]register
+	gcReady          []atomic.Bool
+	gcPlan           *gcLivenessPlan
+	gcMu             sync.Mutex
+	clearRanges      []stackRange
+	localRefs        []register
+	hasGCRegs        bool
+	frameCacheSafe   bool
+	childFrameReg    register
+	memoFlags        uint8
+	metadata         functionMetadata
+}
+
+func TestInstructionDescriptionsColdLayout(t *testing.T) {
+	want := reflect.TypeOf(closureExecutionLayout{})
+	got := reflect.TypeOf(functionExecution{})
+	for i := 0; i < want.NumField(); i++ {
+		field := want.Field(i)
+		actual, ok := got.FieldByName(field.Name)
+		if !ok || actual.Offset != field.Offset || actual.Type != field.Type {
+			t.Fatalf("closure field %s changed: got %v, want %v", field.Name, actual, field)
+		}
+	}
+}
+
+func TestClosureBackendInstructionDescriptions(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("descriptions=%t", enabled), func(t *testing.T) {
+			mode := DisableMemo
+			if enabled {
+				mode |= EnableInstructionDescriptions
+			}
+			ctx := NewContext(mode)
+			interp, err := ctx.LoadInterp("closure_description.go", executionDescriptionSource)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer interp.UnsafeRelease()
+			for _, p := range interp.funcs {
+				if !enabled && p.Code != nil {
+					t.Fatal("default closure backend retained typed descriptions")
+				}
+			}
+			for _, name := range []string{"phi", "closure", "interfaceCall", "deferred", "recovered", "goroutine"} {
+				if got, err := interp.RunFunc(name); err != nil || got != 42 {
+					t.Fatalf("%s: got %v, %v; want 42", name, got, err)
+				}
+			}
+			// Description storage is optional even after compilation.
+			for _, p := range interp.funcs {
+				p.Code = nil
+			}
+			if got, err := interp.RunFunc("phi"); err != nil || got != 42 {
+				t.Fatalf("without descriptions: got %v, %v", got, err)
+			}
+		})
+	}
+}
+
+// Compilation and warm-up are excluded so these samples measure the closure
+// executor with and without retained typed instruction descriptions.
+func BenchmarkClosureInstructionDescriptions(b *testing.B) {
+	for _, enabled := range []bool{false, true} {
+		b.Run(fmt.Sprintf("descriptions=%t", enabled), func(b *testing.B) {
+			for _, name := range []string{"phi", "closure", "interfaceCall", "deferred", "recovered", "goroutine"} {
+				b.Run(name, func(b *testing.B) {
+					mode := DisableMemo
+					if enabled {
+						mode |= EnableInstructionDescriptions
+					}
+					ctx := NewContext(mode)
+					ctx.SetLeastCallForEnablePool(0)
+					interp, err := ctx.LoadInterp("closure_bench.go", executionDescriptionSource)
+					if err != nil {
+						b.Fatal(err)
+					}
+					b.Cleanup(interp.UnsafeRelease)
+					if got, err := interp.RunFunc(name); err != nil || got != 42 {
+						b.Fatalf("got %v, %v", got, err)
+					}
+					b.ReportAllocs()
+					b.ResetTimer()
+					for b.Loop() {
+						if got, err := interp.RunFunc(name); err != nil || got != 42 {
+							b.Fatalf("got %v, %v", got, err)
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestInstructionDescriptionModeIndependence(t *testing.T) {
+	for _, descriptions := range []bool{false, true} {
+		for _, plan := range []bool{false, true} {
+			t.Run(fmt.Sprintf("descriptions=%t/plan=%t", descriptions, plan), func(t *testing.T) {
+				mode := DisableMemo | ExperimentalSupportGC
+				if descriptions {
+					mode |= EnableInstructionDescriptions
+				}
+				if plan {
+					mode |= EnableGCExecutionPlan
+				}
+				source := "package main\nimport \"runtime\"\nfunc work(n int) *int { runtime.GC(); p := new(int); *p = n\n"
+				for i := 0; i < 1100; i++ {
+					source += "*p += 1\n"
+				}
+				source += "runtime.GC(); return p }"
+				interp, err := NewContext(mode).LoadInterp("mode_independence.go", source)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer interp.UnsafeRelease()
+				p := interp.funcs[interp.mainpkg.Func("work")]
+				if got := len(p.Code) != 0; got != descriptions {
+					t.Fatalf("descriptions = %t, want %t", got, descriptions)
+				}
+				if got := p.gcPlan != nil; got != plan {
+					t.Fatalf("GC plan = %t, want %t", got, plan)
+				}
+				if got, err := interp.RunFunc("work", 2); err != nil {
+					t.Fatalf("work = %v, %v", got, err)
+				} else if result, ok := got.(*int); !ok || *result != 1102 {
+					t.Fatalf("unexpected work result: %v", got)
+				}
+			})
+		}
+	}
+}
+
+func TestDescriptionValueMetadata(t *testing.T) {
+	const source = `package main
+ type Inner struct { A int; B string }
+ type Outer struct { Padding byte; Inner }
+ type Named int
+ func identity(v Inner) Inner { return v }
+ func field(v Inner) string { return identity(v).B }
+ func address(p *Outer) int { p.A++; return p.A }
+ func lookup(m map[string]int) int { return m["key"] }
+ func lookupOK(m map[string]int) bool { _,ok:=m["key"];return ok }
+ func assert(x any) int { return x.(int) }
+ func assertOK(x any) bool { _,ok:=x.(Named);return ok }
+ func assertInterface(x any) bool { _,ok:=x.(interface{ String() string });return ok }
+ func run() int { p:=Outer{Inner:Inner{A:3,B:"value"}}; if field(p.Inner)!="value" { panic("field") }; return address(&p) }
+ func named() bool { return assertOK(Named(1)) }
+ `
+	for _, mode := range []Mode{0, EnableCachedReg, ExperimentalSupportGC, ExperimentalSupportGC | EnableGCExecutionPlan} {
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
+			i, err := NewContext(DisableMemo|EnableInstructionDescriptions|mode).LoadInterp("value_metadata.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			counts := map[instructionOpcode]int{}
+			for _, p := range i.funcs {
+				for pc, d := range p.Code {
+					switch v := p.ssaInstrs[pc].(type) {
+					case *ssa.Field:
+						aux, ok := d.Aux.(fieldAux)
+						if !ok || aux.Index != v.Field {
+							t.Fatalf("field = %#v", d)
+						}
+						counts[d.Op]++
+					case *ssa.FieldAddr:
+						aux, ok := d.Aux.(fieldAux)
+						if !ok || aux.Index != v.Field {
+							t.Fatalf("field address = %#v", d)
+						}
+						counts[d.Op]++
+					case *ssa.Lookup:
+						aux, ok := d.Aux.(lookupAux)
+						if !ok || aux.CommaOk != v.CommaOk {
+							t.Fatalf("lookup = %#v", d)
+						}
+						counts[d.Op]++
+					case *ssa.TypeAssert:
+						aux, ok := d.Aux.(typeAssertAux)
+						if !ok || aux.CommaOk != v.CommaOk || aux.Source != i.preToType(v.X.Type()) || aux.Target != i.preToType(v.AssertedType) {
+							t.Fatalf("assertion = %#v", d)
+						}
+						counts[d.Op]++
+					default:
+						continue
+					}
+					if d.Result < 0 || len(d.Args) == 0 || d.Args[0] < 0 {
+						t.Fatalf("missing register operands: %#v", d)
+					}
+				}
+			}
+			for _, op := range []instructionOpcode{opField, opFieldAddr, opLookup, opTypeAssert} {
+				if counts[op] == 0 {
+					t.Fatalf("missing opcode %d", op)
+				}
+			}
+			cases := []struct {
+				name string
+				args []value
+				want value
+			}{
+				{"run", nil, 4}, {"named", nil, true},
+				{"lookup", []value{map[string]int{"key": 7}}, 7},
+				{"lookup", []value{map[string]int(nil)}, 0},
+				{"lookupOK", []value{map[string]int{}}, false},
+				{"lookupOK", []value{map[string]int{"key": 0}}, true},
+				{"assert", []value{42}, 42},
+				{"assertOK", []value{1}, false},
+				{"assertInterface", []value{1}, false},
+			}
+			for _, c := range cases {
+				got, err := i.RunFunc(c.name, c.args...)
+				if err != nil || !reflect.DeepEqual(got, c.want) {
+					t.Fatalf("%s = %v, %v; want %v", c.name, got, err, c.want)
+				}
+			}
+			if _, err := i.RunFunc("assert", "wrong"); err == nil {
+				t.Fatal("failed assertion should return error")
+			}
+		})
 	}
 }
