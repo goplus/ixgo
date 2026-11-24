@@ -2,15 +2,45 @@ package ixgo
 
 import (
 	"fmt"
+	"reflect"
+	"sync"
+	"sync/atomic"
 	"testing"
-	"unsafe"
 )
 
+// Snapshot of the closure executor layout before optional instruction metadata.
+type closureExecutionLayout struct {
+	Instrs           []func(*frame)
+	Recover          []func(*frame)
+	Blocks           []int
+	stack            []value
+	pool             *sync.Pool
+	base             int
+	nres, narg, nenv int
+	used, cached     int32
+	cacheRegs        []register
+	gcRegs           [][]register
+	gcReady          []atomic.Bool
+	gcPlan           *gcLivenessPlan
+	gcMu             sync.Mutex
+	clearRanges      []stackRange
+	localRefs        []register
+	hasGCRegs        bool
+	frameCacheSafe   bool
+	childFrameReg    register
+	memoFlags        uint8
+	metadata         functionMetadata
+}
+
 func TestInstructionDescriptionsColdLayout(t *testing.T) {
-	var execution functionExecution
-	// Optional metadata must follow the existing closure executor fields.
-	if unsafe.Offsetof(execution.Code) < unsafe.Offsetof(execution.metadata)+unsafe.Sizeof(execution.metadata) {
-		t.Fatal("instruction descriptions overlap the closure backend layout")
+	want := reflect.TypeOf(closureExecutionLayout{})
+	got := reflect.TypeOf(functionExecution{})
+	for i := 0; i < want.NumField(); i++ {
+		field := want.Field(i)
+		actual, ok := got.FieldByName(field.Name)
+		if !ok || actual.Offset != field.Offset || actual.Type != field.Type {
+			t.Fatalf("closure field %s changed: got %v, want %v", field.Name, actual, field)
+		}
 	}
 }
 

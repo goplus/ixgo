@@ -346,7 +346,7 @@ func (visit *visitor) function(fn *ssa.Function) {
 				continue
 			}
 			if descriptions != nil {
-				descriptions[index] = describeInstruction(pfn, instr, ops)
+				descriptions[index] = describeInstruction(pfn, instr, instr.Operands(buf[:0]))
 			}
 			if visit.intp.ctx.evalMode && fn.String() == "main.init" {
 				if visit.intp.ctx.evalInit == nil {

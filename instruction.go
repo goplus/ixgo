@@ -80,9 +80,17 @@ type returnAux struct{ Results int }
 
 func (returnAux) instructionAux() {}
 
-// typedInstruction is the first execution-description form. Args and Aux are
-// explicit compiler output; no runtime execution path needs to inspect SSA to
-// recover the register operands represented here.
+type extractAux struct{ Index int }
+
+func (extractAux) instructionAux() {}
+
+type nextAux struct{ IsString bool }
+
+func (nextAux) instructionAux() {}
+
+// typedInstruction records partial execution metadata alongside the closure
+// backend. Args preserve SSA operand order; -1 denotes an absent or unallocated
+// operand, including static call targets. Opcode-specific lowering is incremental.
 type typedInstruction struct {
 	Op     instructionOpcode
 	Result register
@@ -90,16 +98,25 @@ type typedInstruction struct {
 	Aux    instructionAux
 }
 
+func descriptionRegister(pfn *function, v ssa.Value) register {
+	if v != nil {
+		if encoded, ok := pfn.index[v]; ok {
+			return register(encoded & 0xffffff)
+		}
+	}
+	return -1
+}
+
 func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.Value) typedInstruction {
 	d := typedInstruction{Op: opcodeOf(instr), Result: -1}
 	for _, operand := range operands {
 		if operand != nil {
-			d.Args = append(d.Args, pfn.regIndex(*operand))
+			d.Args = append(d.Args, descriptionRegister(pfn, *operand))
 		}
 	}
 	if producesRegister(instr) {
 		if v, ok := instr.(ssa.Value); ok {
-			d.Result = pfn.regIndex(v)
+			d.Result = descriptionRegister(pfn, v)
 		}
 	}
 	switch v := instr.(type) {
@@ -116,6 +133,10 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 			}
 		}
 		d.Aux = aux
+	case *ssa.Extract:
+		d.Aux = extractAux{Index: v.Index}
+	case *ssa.Next:
+		d.Aux = nextAux{IsString: v.IsString}
 	case *ssa.Return:
 		d.Aux = returnAux{Results: len(v.Results)}
 	case *ssa.If:
