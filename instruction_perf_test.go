@@ -3,7 +3,16 @@ package ixgo
 import (
 	"fmt"
 	"testing"
+	"unsafe"
 )
+
+func TestInstructionDescriptionsColdLayout(t *testing.T) {
+	var execution functionExecution
+	// Optional metadata must follow the existing closure executor fields.
+	if unsafe.Offsetof(execution.Code) < unsafe.Offsetof(execution.metadata)+unsafe.Sizeof(execution.metadata) {
+		t.Fatal("instruction descriptions overlap the closure backend layout")
+	}
+}
 
 func TestClosureBackendInstructionDescriptions(t *testing.T) {
 	for _, enabled := range []bool{false, true} {

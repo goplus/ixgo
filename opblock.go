@@ -115,9 +115,6 @@ type function struct {
 // Some instruction closures still capture compiler objects.
 // Compilation fills the frame layout and metadata before execution begins.
 type functionExecution struct {
-	// Code is the typed execution description. Instrs remains the active
-	// closure backend while instructions are migrated incrementally.
-	Code             []typedInstruction
 	Instrs           []func(*frame)
 	Recover          []func(*frame)
 	Blocks           []int
@@ -138,6 +135,10 @@ type functionExecution struct {
 	childFrameReg    register
 	memoFlags        uint8
 	metadata         functionMetadata
+
+	// Keep optional descriptions after the closure backend fields so enabling
+	// instruction metadata does not shift the hot execution layout.
+	Code []typedInstruction
 }
 
 type functionMetadata struct {
