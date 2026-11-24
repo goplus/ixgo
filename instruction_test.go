@@ -158,6 +158,23 @@ func TestInstructionOpcodeClassification(t *testing.T) {
 	}
 }
 
+func TestInstructionAuxVariants(t *testing.T) {
+	variants := []instructionAux{
+		binaryOpAux{},
+		unaryOpAux{},
+		phiAux{},
+		branchAux{},
+		returnAux{},
+		extractAux{},
+		nextAux{},
+	}
+	for _, aux := range variants {
+		t.Run(reflect.TypeOf(aux).Name(), func(t *testing.T) {
+			aux.instructionAux()
+		})
+	}
+}
+
 func TestDescriptionRegisterLookup(t *testing.T) {
 	p := &function{}
 	p.index = make(map[ssa.Value]uint32)

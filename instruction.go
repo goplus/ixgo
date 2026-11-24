@@ -59,38 +59,40 @@ type instructionAux interface {
 
 type binaryOpAux struct{ Op token.Token }
 
-func (binaryOpAux) instructionAux() {}
+func (binaryOpAux) instructionAux() { return }
 
 type unaryOpAux struct {
 	Op      token.Token
 	CommaOk bool
 }
 
-func (unaryOpAux) instructionAux() {}
+func (unaryOpAux) instructionAux() { return }
 
 type phiAux struct{ Preds []int32 }
 
-func (phiAux) instructionAux() {}
+func (phiAux) instructionAux() { return }
 
 type branchAux struct{ Targets []int32 }
 
-func (branchAux) instructionAux() {}
+func (branchAux) instructionAux() { return }
 
 type returnAux struct{ Results int }
 
-func (returnAux) instructionAux() {}
+func (returnAux) instructionAux() { return }
 
 type extractAux struct{ Index int }
 
-func (extractAux) instructionAux() {}
+func (extractAux) instructionAux() { return }
 
 type nextAux struct{ IsString bool }
 
-func (nextAux) instructionAux() {}
+func (nextAux) instructionAux() { return }
 
 // typedInstruction records partial execution metadata alongside the closure
-// backend. Args preserve SSA operand order; -1 denotes an absent or unallocated
-// operand, including static call targets. Opcode-specific lowering is incremental.
+// backend. Each entry corresponds to one generated closure, so merged Phi groups
+// and result destinations of elided Extracts are not yet fully represented.
+// Args preserve SSA operand order; -1 denotes an absent or unallocated operand,
+// including static call targets. Opcode-specific lowering is incremental.
 type typedInstruction struct {
 	Op     instructionOpcode
 	Result register
