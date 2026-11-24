@@ -115,6 +115,9 @@ type function struct {
 // Some instruction closures still capture compiler objects.
 // Compilation fills the frame layout and metadata before execution begins.
 type functionExecution struct {
+	// Code is the typed execution description. Instrs remains the active
+	// closure backend while instructions are migrated incrementally.
+	Code             []typedInstruction
 	Instrs           []func(*frame)
 	Recover          []func(*frame)
 	Blocks           []int
@@ -198,6 +201,7 @@ func (p *function) UnsafeRelease() {
 	p.closureByResult = nil
 	p.elidedExtract = nil
 	p.elidedTuples = nil
+	p.Code = nil
 	p.Instrs = nil
 	p.Recover = nil
 	p.Blocks = nil
