@@ -177,6 +177,12 @@ func TestInstructionAuxVariants(t *testing.T) {
 		typeAssertAux{},
 		conversionAux{},
 		creationAux{},
+		selectAux{},
+		selectStateAux{},
+		sendAux{},
+		storeAux{},
+		mapUpdateAux{},
+		panicAux{},
 		indexAux{},
 		sliceAux{},
 		rangeAux{},
@@ -1058,5 +1064,96 @@ func TestDescriptionStringLookup(t *testing.T) {
 	aux := d.Aux.(lookupAux)
 	if aux.Source != reflect.TypeOf("") || aux.Key != reflect.TypeOf(0) || aux.Element != reflect.TypeOf(byte(0)) || aux.CommaOk {
 		t.Fatalf("string lookup = %#v", aux)
+	}
+}
+
+func TestDescriptionSideEffectMetadata(t *testing.T) {
+	const source = `package main
+func selectRecv(c chan int) int { select { case v := <-c: return v; default: return 0 } }
+func selectSend(c chan int, v int) { select { case c <- v: default: } }
+func send(c chan int, v int) { c <- v }
+func store(p *int, v int) { *p = v }
+func update(m map[string]int, v int) { m["x"] = v }
+func panicf(x any) { panic(x) }
+`
+	i, err := NewContext(DisableMemo|EnableInstructionDescriptions).LoadInterp("side_effect_metadata.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	counts := map[instructionOpcode]int{}
+	for _, p := range i.funcs {
+		for pc, d := range p.Code {
+			switch v := p.ssaInstrs[pc].(type) {
+			case *ssa.Select:
+				aux, ok := d.Aux.(selectAux)
+				if !ok || len(aux.States) != len(v.States) || aux.Blocking != v.Blocking {
+					t.Fatalf("select = %#v", d)
+				}
+				for j, state := range v.States {
+					if aux.States[j].Chan != i.preToType(state.Chan.Type()) || aux.States[j].Dir == reflect.SelectDefault {
+						t.Fatalf("select state = %#v", aux.States[j])
+					}
+					if state.Send == nil && aux.States[j].Send != nil {
+						t.Fatal("receive has send type")
+					}
+					if state.Send != nil && aux.States[j].Send != i.preToType(state.Send.Type()) {
+						t.Fatal("send type mismatch")
+					}
+				}
+			case *ssa.Send:
+				aux, ok := d.Aux.(sendAux)
+				if !ok || aux.Chan != i.preToType(v.Chan.Type()) || aux.Value != i.preToType(v.X.Type()) {
+					t.Fatalf("send = %#v", d)
+				}
+			case *ssa.Store:
+				aux, ok := d.Aux.(storeAux)
+				if !ok || aux.Address != i.preToType(v.Addr.Type()) || aux.Value != i.preToType(v.Val.Type()) {
+					t.Fatalf("store = %#v", d)
+				}
+			case *ssa.MapUpdate:
+				aux, ok := d.Aux.(mapUpdateAux)
+				if !ok || aux.Map != i.preToType(v.Map.Type()) || aux.Key != i.preToType(v.Key.Type()) || aux.Value != i.preToType(v.Value.Type()) {
+					t.Fatalf("map update = %#v", d)
+				}
+			case *ssa.Panic:
+				aux, ok := d.Aux.(panicAux)
+				if !ok || aux.Value != i.preToType(v.X.Type()) {
+					t.Fatalf("panic = %#v", d)
+				}
+			default:
+				continue
+			}
+			counts[d.Op]++
+		}
+	}
+	for _, op := range []instructionOpcode{opSelect, opSend, opStore, opMapUpdate, opPanic} {
+		if counts[op] == 0 {
+			t.Fatalf("missing metadata opcode %d", op)
+		}
+	}
+	c := make(chan int, 1)
+	if _, err := i.RunFunc("send", c, 7); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-c; got != 7 {
+		t.Fatalf("sent %d", got)
+	}
+	m := map[string]int{}
+	if _, err := i.RunFunc("update", m, 9); err != nil {
+		t.Fatal(err)
+	}
+	if m["x"] != 9 {
+		t.Fatalf("map update = %v", m)
+	}
+	v := 0
+	if _, err := i.RunFunc("store", &v, 5); err != nil {
+		t.Fatal(err)
+	}
+	if v != 5 {
+		t.Fatalf("store = %d", v)
+	}
+	if got, err := i.RunFunc("selectRecv", make(chan int)); err != nil || got != 0 {
+		t.Fatalf("select recv = %v, %v", got, err)
 	}
 }

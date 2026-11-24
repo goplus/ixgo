@@ -177,6 +177,48 @@ type creationAux struct {
 
 func (creationAux) instructionAux() { return }
 
+// selectStateAux describes one channel operation in a Select instruction.
+type selectStateAux struct {
+	Chan reflect.Type
+	Send reflect.Type
+	Dir  reflect.SelectDir
+}
+
+func (selectStateAux) instructionAux() { return }
+
+type selectAux struct {
+	States   []selectStateAux
+	Blocking bool
+}
+
+func (selectAux) instructionAux() { return }
+
+type sendAux struct {
+	Chan  reflect.Type
+	Value reflect.Type
+}
+
+func (sendAux) instructionAux() { return }
+
+type storeAux struct {
+	Address reflect.Type
+	Value   reflect.Type
+}
+
+func (storeAux) instructionAux() { return }
+
+type mapUpdateAux struct {
+	Map   reflect.Type
+	Key   reflect.Type
+	Value reflect.Type
+}
+
+func (mapUpdateAux) instructionAux() { return }
+
+type panicAux struct{ Value reflect.Type }
+
+func (panicAux) instructionAux() { return }
+
 // operandKind classifies the source of an input independently from its register.
 // operandFunction and operandBuiltin may still have a valid Args register; only
 // operandAbsent and operandUnallocated imply Args == -1.
@@ -329,6 +371,29 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 			aux.Key, aux.Element = reflect.TypeOf(int(0)), reflect.TypeOf(rune(0))
 		}
 		d.Aux = aux
+	case *ssa.Select:
+		aux := selectAux{Blocking: v.Blocking, States: make([]selectStateAux, len(v.States))}
+		for i, state := range v.States {
+			chanType := pfn.Interp.preToType(state.Chan.Type())
+			dir := reflect.SelectRecv
+			if state.Dir == types.SendOnly {
+				dir = reflect.SelectSend
+			}
+			var sendType reflect.Type
+			if state.Send != nil {
+				sendType = pfn.Interp.preToType(state.Send.Type())
+			}
+			aux.States[i] = selectStateAux{Chan: chanType, Send: sendType, Dir: dir}
+		}
+		d.Aux = aux
+	case *ssa.Send:
+		d.Aux = sendAux{Chan: pfn.Interp.preToType(v.Chan.Type()), Value: pfn.Interp.preToType(v.X.Type())}
+	case *ssa.Store:
+		d.Aux = storeAux{Address: pfn.Interp.preToType(v.Addr.Type()), Value: pfn.Interp.preToType(v.Val.Type())}
+	case *ssa.MapUpdate:
+		d.Aux = mapUpdateAux{Map: pfn.Interp.preToType(v.Map.Type()), Key: pfn.Interp.preToType(v.Key.Type()), Value: pfn.Interp.preToType(v.Value.Type())}
+	case *ssa.Panic:
+		d.Aux = panicAux{Value: pfn.Interp.preToType(v.X.Type())}
 	case *ssa.TypeAssert:
 		d.Aux = typeAssertAux{
 			Source:  pfn.Interp.preToType(v.X.Type()),
