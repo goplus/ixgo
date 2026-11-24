@@ -486,6 +486,8 @@ func (visit *visitor) function(fn *ssa.Function) {
 	visit.base += len(pfn.ssaInstrs) + 2
 	pfn.initPool()
 	pfn.finishMetadata()
+	// Code now owns destination slices; release temporary SSA-keyed lookup data.
+	pfn.callDests = nil
 }
 
 func loc(fset *token.FileSet, pos token.Pos) string {

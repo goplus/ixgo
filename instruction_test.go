@@ -453,28 +453,61 @@ func TestDescriptionUnallocatedAndUnelidedOperands(t *testing.T) {
 		t.Fatalf("unallocated operand = %#v", d)
 	}
 	i, err := NewContext(DisableMemo|EnableInstructionDescriptions).LoadInterp("unelided.go", `package main
-func lookup(m map[int]int) int { a,b:=m[0]; if b { return a }; return 0 }
-func pair() (int,int) { return 1,2 }
-func use() int { a,b:=pair();return a+b }
+func single(n int) int { return n+1 }
+func pair(n int) (int,int) { return n,n+1 }
+func use(n int) int { a,b:=pair(n); return single(a)+b }
 `)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer i.UnsafeRelease()
+	for fn, p := range i.funcs {
+		if p.callDests != nil {
+			t.Fatalf("%s retained temporary call destinations", fn)
+		}
+	}
 	p = i.funcs[i.mainpkg.Func("use")]
+	var ordinary, elided int
 	for pc, instr := range p.ssaInstrs {
 		call, ok := instr.(*ssa.Call)
 		if !ok {
 			continue
 		}
-		saved := p.elidedExtract
-		p.elidedExtract = nil
-		desc := describeInstruction(p, call, call.Operands(nil), nil)
-		p.elidedExtract = saved
-		if desc.Aux.(callAux).ExtractResults != nil {
-			t.Fatalf("pc %d: unelided call has extract destinations", pc)
+		desc := p.Code[pc]
+		aux := desc.Aux.(callAux)
+		switch call.Call.StaticCallee().Name() {
+		case "single":
+			ordinary++
+			if aux.ExtractResults != nil || desc.Result < 0 || desc.Result != descriptionRegister(p, call) {
+				t.Fatalf("ordinary result = %#v", desc)
+			}
+		case "pair":
+			elided++
+			if desc.Result != -1 || len(aux.ExtractResults) != 2 {
+				t.Fatalf("elided result = %#v", desc)
+			}
+			for _, ref := range *call.Referrers() {
+				if ex, ok := ref.(*ssa.Extract); ok {
+					if aux.ExtractResults[ex.Index] < 0 || aux.ExtractResults[ex.Index] != descriptionRegister(p, ex) {
+						t.Fatal("cleanup lost extract destination")
+					}
+				}
+			}
 		}
-		return
 	}
-	t.Fatal("missing call")
+	if ordinary != 1 || elided != 1 {
+		t.Fatalf("call counts = %d/%d, want 1/1", ordinary, elided)
+	}
+	if got, err := i.RunFunc("use", 3); err != nil || got != 8 {
+		t.Fatalf("use = %v, %v; want 8", got, err)
+	}
+}
+
+func TestCallDestinationsUnsafeRelease(t *testing.T) {
+	p := &function{}
+	p.callDests = map[ssa.Value][]register{&ssa.Function{}: {1, 2}}
+	p.UnsafeRelease()
+	if p.callDests != nil {
+		t.Fatal("UnsafeRelease retained temporary call destinations")
+	}
 }

@@ -111,7 +111,7 @@ const (
 // ExtractResults means the call still uses its ordinary result register. A -1
 // entry denotes an unused result. Static target resolution remains incremental.
 type callAux struct {
-	// ExtractResults is the exact destination slice passed to the call closure.
+	// ExtractResults is a copy of the destinations used by the call closure.
 	// A nil slice means the call writes its ordinary result register.
 	ExtractResults []register
 }
@@ -122,7 +122,8 @@ func (callAux) instructionAux() { return }
 // backend. Each entry corresponds to one generated closure; Phi auxiliary data
 // covers the entire group; the common Result and Args fields still refer to
 // the first Phi entry. Args preserve SSA operand order; ArgKinds distinguishes
-// the source class independently from whether Args has a valid register. Opcode-specific lowering and static target resolution are incremental.
+// the source class independently from whether Args has a valid register.
+// Opcode-specific lowering and static target resolution are incremental.
 type typedInstruction struct {
 	Op       instructionOpcode
 	Result   register

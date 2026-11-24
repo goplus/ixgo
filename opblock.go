@@ -202,6 +202,7 @@ func (p *function) UnsafeRelease() {
 	p.closureCaptures = nil
 	p.closureByResult = nil
 	p.elidedExtract = nil
+	p.callDests = nil
 	p.elidedTuples = nil
 	p.Code = nil
 	p.Instrs = nil
