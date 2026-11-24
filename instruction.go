@@ -68,7 +68,13 @@ type unaryOpAux struct {
 
 func (unaryOpAux) instructionAux() { return }
 
-type phiAux struct{ Preds []int32 }
+// phiAux describes the parallel assignment performed by one grouped closure.
+// Edges[i][j] supplies Results[i] when control arrives from Preds[j].
+type phiAux struct {
+	Preds   []int32
+	Results []register
+	Edges   [][]register
+}
 
 func (phiAux) instructionAux() { return }
 
@@ -88,16 +94,42 @@ type nextAux struct{ IsString bool }
 
 func (nextAux) instructionAux() { return }
 
+// operandKind classifies the source of an input independently from its register.
+// operandFunction and operandBuiltin may still have a valid Args register; only
+// operandAbsent and operandUnallocated imply Args == -1.
+type operandKind uint8
+
+const (
+	operandAbsent operandKind = iota
+	operandRegister
+	operandFunction
+	operandBuiltin
+	operandUnallocated
+)
+
+// callAux describes result placement after tuple extraction elision. A nil
+// ExtractResults means the call still uses its ordinary result register. A -1
+// entry denotes an unused result. Static target resolution remains incremental.
+type callAux struct {
+	// ExtractResults is a copy of the destinations used by the call closure.
+	// A nil slice means the call writes its ordinary result register.
+	ExtractResults []register
+}
+
+func (callAux) instructionAux() { return }
+
 // typedInstruction records partial execution metadata alongside the closure
-// backend. Each entry corresponds to one generated closure, so merged Phi groups
-// and result destinations of elided Extracts are not yet fully represented.
-// Args preserve SSA operand order; -1 denotes an absent or unallocated operand,
-// including static call targets. Opcode-specific lowering is incremental.
+// backend. Each entry corresponds to one generated closure; Phi auxiliary data
+// covers the entire group; the common Result and Args fields still refer to
+// the first Phi entry. Args preserve SSA operand order; ArgKinds distinguishes
+// the source class independently from whether Args has a valid register.
+// Opcode-specific lowering and static target resolution are incremental.
 type typedInstruction struct {
-	Op     instructionOpcode
-	Result register
-	Args   []register
-	Aux    instructionAux
+	Op       instructionOpcode
+	Result   register
+	Args     []register
+	ArgKinds []operandKind
+	Aux      instructionAux
 }
 
 func descriptionRegister(pfn *function, v ssa.Value) register {
@@ -109,11 +141,26 @@ func descriptionRegister(pfn *function, v ssa.Value) register {
 	return -1
 }
 
-func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.Value) typedInstruction {
+func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.Value, elidedResults []register) typedInstruction {
 	d := typedInstruction{Op: opcodeOf(instr), Result: -1}
 	for _, operand := range operands {
 		if operand != nil {
-			d.Args = append(d.Args, descriptionRegister(pfn, *operand))
+			r := descriptionRegister(pfn, *operand)
+			kind := operandRegister
+			switch (*operand).(type) {
+			case nil:
+				kind = operandAbsent
+			case *ssa.Function:
+				kind = operandFunction
+			case *ssa.Builtin:
+				kind = operandBuiltin
+			default:
+				if r < 0 {
+					kind = operandUnallocated
+				}
+			}
+			d.Args = append(d.Args, r)
+			d.ArgKinds = append(d.ArgKinds, kind)
 		}
 	}
 	if producesRegister(instr) {
@@ -127,14 +174,31 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 	case *ssa.UnOp:
 		d.Aux = unaryOpAux{Op: v.Op, CommaOk: v.CommaOk}
 	case *ssa.Phi:
-		aux := phiAux{Preds: make([]int32, 0)}
+		aux := phiAux{}
 		if block := v.Block(); block != nil {
 			aux.Preds = make([]int32, len(block.Preds))
 			for i, pred := range block.Preds {
 				aux.Preds[i] = int32(pred.Index)
 			}
+			for _, instr := range block.Instrs {
+				phi, ok := instr.(*ssa.Phi)
+				if !ok {
+					break
+				}
+				aux.Results = append(aux.Results, descriptionRegister(pfn, phi))
+				edges := make([]register, len(phi.Edges))
+				for i, edge := range phi.Edges {
+					edges[i] = descriptionRegister(pfn, edge)
+				}
+				aux.Edges = append(aux.Edges, edges)
+			}
 		}
 		d.Aux = aux
+	case *ssa.Call:
+		if elidedResults != nil {
+			d.Result = -1
+		}
+		d.Aux = callAux{ExtractResults: elidedResults}
 	case *ssa.Extract:
 		d.Aux = extractAux{Index: v.Index}
 	case *ssa.Next:
