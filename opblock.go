@@ -161,6 +161,7 @@ func (fr *frame) jump(target int32) {
 
 type functionCompilation struct {
 	Fn              *ssa.Function
+	callDests       map[ssa.Value][]register
 	index           map[ssa.Value]uint32
 	ssaInstrs       []ssa.Instruction
 	gcLiveOnce      sync.Once
@@ -1465,6 +1466,12 @@ func elideCallExtracts(pfn *function, instr ssa.Value, nres int) []register {
 		}
 	}
 	pfn.elidedTuples = append(pfn.elidedTuples, pfn.regIndex(instr))
+	if pfn.Interp != nil && pfn.Interp.ctx.Mode&EnableInstructionDescriptions != 0 {
+		if pfn.callDests == nil {
+			pfn.callDests = make(map[ssa.Value][]register)
+		}
+		pfn.callDests[instr] = append([]register(nil), dests...)
+	}
 	return dests
 }
 

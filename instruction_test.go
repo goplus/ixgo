@@ -188,7 +188,7 @@ func TestDescriptionRegisterLookup(t *testing.T) {
 		t.Fatal("unallocated operand must use -1")
 	}
 	before := len(p.index)
-	d := describeInstruction(p, &ssa.MakeClosure{Fn: &ssa.Function{}}, nil)
+	d := describeInstruction(p, &ssa.MakeClosure{Fn: &ssa.Function{}}, nil, nil)
 	if d.Result != -1 || len(p.index) != before || len(p.stack) != 0 {
 		t.Fatal("description allocated a register")
 	}
@@ -403,6 +403,9 @@ func closure(n int) int { f := func() int { return n }; return f() }
 			if len(aux.ExtractResults) != 2 {
 				t.Fatalf("%s: expected two result slots, got %v", name, aux.ExtractResults)
 			}
+			if d.Result != -1 {
+				t.Fatalf("%s: elided call result = %d, want -1", name, d.Result)
+			}
 			for index, dest := range aux.ExtractResults {
 				unused := name == "partial" && index == 0
 				if (dest < 0) != unused {
@@ -445,7 +448,7 @@ func closure(n int) int { f := func() int { return n }; return f() }
 func TestDescriptionUnallocatedAndUnelidedOperands(t *testing.T) {
 	p := &function{}
 	operand := ssa.Value(&ssa.Parameter{})
-	d := describeInstruction(p, &ssa.DebugRef{}, []*ssa.Value{&operand})
+	d := describeInstruction(p, &ssa.DebugRef{}, []*ssa.Value{&operand}, nil)
 	if len(d.ArgKinds) != 1 || d.ArgKinds[0] != operandUnallocated || d.Args[0] != -1 {
 		t.Fatalf("unallocated operand = %#v", d)
 	}
@@ -466,7 +469,7 @@ func use() int { a,b:=pair();return a+b }
 		}
 		saved := p.elidedExtract
 		p.elidedExtract = nil
-		desc := describeInstruction(p, call, call.Operands(nil))
+		desc := describeInstruction(p, call, call.Operands(nil), nil)
 		p.elidedExtract = saved
 		if desc.Aux.(callAux).ExtractResults != nil {
 			t.Fatalf("pc %d: unelided call has extract destinations", pc)

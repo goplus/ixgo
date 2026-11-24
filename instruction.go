@@ -94,7 +94,9 @@ type nextAux struct{ IsString bool }
 
 func (nextAux) instructionAux() { return }
 
-// operandKind distinguishes non-register inputs without retaining SSA values.
+// operandKind classifies the source of an input independently from its register.
+// operandFunction and operandBuiltin may still have a valid Args register; only
+// operandAbsent and operandUnallocated imply Args == -1.
 type operandKind uint8
 
 const (
@@ -109,6 +111,8 @@ const (
 // ExtractResults means the call still uses its ordinary result register. A -1
 // entry denotes an unused result. Static target resolution remains incremental.
 type callAux struct {
+	// ExtractResults is the exact destination slice passed to the call closure.
+	// A nil slice means the call writes its ordinary result register.
 	ExtractResults []register
 }
 
@@ -116,9 +120,9 @@ func (callAux) instructionAux() { return }
 
 // typedInstruction records partial execution metadata alongside the closure
 // backend. Each entry corresponds to one generated closure; Phi auxiliary data
-// covers the entire group. Args preserve SSA operand order and use -1 for inputs
-// without a register; ArgKinds distinguishes absent, static and unallocated
-// inputs. Opcode-specific lowering and static target resolution are incremental.
+// covers the entire group; the common Result and Args fields still refer to
+// the first Phi entry. Args preserve SSA operand order; ArgKinds distinguishes
+// the source class independently from whether Args has a valid register. Opcode-specific lowering and static target resolution are incremental.
 type typedInstruction struct {
 	Op       instructionOpcode
 	Result   register
@@ -136,7 +140,7 @@ func descriptionRegister(pfn *function, v ssa.Value) register {
 	return -1
 }
 
-func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.Value) typedInstruction {
+func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.Value, elidedResults []register) typedInstruction {
 	d := typedInstruction{Op: opcodeOf(instr), Result: -1}
 	for _, operand := range operands {
 		if operand != nil {
@@ -190,28 +194,10 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 		}
 		d.Aux = aux
 	case *ssa.Call:
-		aux := callAux{}
-		if refs := v.Referrers(); refs != nil {
-			for _, ref := range *refs {
-				ex, ok := ref.(*ssa.Extract)
-				if !ok {
-					continue
-				}
-				if _, elided := pfn.elidedExtract[ex]; !elided {
-					continue
-				}
-				if aux.ExtractResults == nil {
-					aux.ExtractResults = make([]register, callResultCount(&v.Call))
-					for j := range aux.ExtractResults {
-						aux.ExtractResults[j] = -1
-					}
-				}
-				if uses := ex.Referrers(); uses != nil && len(*uses) > 0 {
-					aux.ExtractResults[ex.Index] = descriptionRegister(pfn, ex)
-				}
-			}
+		if elidedResults != nil {
+			d.Result = -1
 		}
-		d.Aux = aux
+		d.Aux = callAux{ExtractResults: elidedResults}
 	case *ssa.Extract:
 		d.Aux = extractAux{Index: v.Index}
 	case *ssa.Next:

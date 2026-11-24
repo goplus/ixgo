@@ -346,7 +346,11 @@ func (visit *visitor) function(fn *ssa.Function) {
 				continue
 			}
 			if descriptions != nil {
-				descriptions[index] = describeInstruction(pfn, instr, instr.Operands(buf[:0]))
+				var dests []register
+				if call, ok := instr.(ssa.Value); ok {
+					dests = pfn.callDests[call]
+				}
+				descriptions[index] = describeInstruction(pfn, instr, instr.Operands(buf[:0]), dests)
 			}
 			if visit.intp.ctx.evalMode && fn.String() == "main.init" {
 				if visit.intp.ctx.evalInit == nil {
