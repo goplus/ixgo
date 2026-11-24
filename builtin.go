@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"go/ast"
+	"go/constant"
 	"go/token"
 	"go/types"
 	"reflect"
@@ -580,18 +581,34 @@ func (interp *Interp) makeBuiltinByStack(pfn *function, fn *ssa.Builtin, ssaArgs
 		return func(fr *frame) {
 			fr.setReg(ir, unsafe.StringData(fr.string(ia[0])))
 		}
-	case "Sizeof": // instance of generic function
-		return func(fr *frame) {
-			typ := reflect.TypeOf(fr.reg(ia[0]))
-			fr.setReg(ir, uintptr(typ.Size()))
+	case "Sizeof", "Alignof": // instances of generic functions
+		typ := ssaArgs[0].Type()
+		if len(ssaArgs) == 2 {
+			// unsaferewrite.Rewrite carries the operand type in a typed pointer.
+			typ = typ.Underlying().(*types.Pointer).Elem()
 		}
-	case "Alignof": // instance of generic function
-		return func(fr *frame) {
-			typ := reflect.TypeOf(fr.reg(ia[0]))
-			fr.setReg(ir, uintptr(typ.Align()))
+		var result uintptr
+		if fn.Name() == "Sizeof" {
+			result = uintptr(interp.ctx.sizes.Sizeof(typ))
+		} else {
+			result = uintptr(interp.ctx.sizes.Alignof(typ))
 		}
+		return func(fr *frame) { fr.setReg(ir, result) }
 	case "Offsetof": // instance of generic function
-		offset, err := builtinOffsetof(interp.ctx, pos, ssaArgs)
+		var offset int64
+		var err error
+		if len(ssaArgs) > 1 {
+			// unsaferewrite.Rewrite carries the struct type and field-index path.
+			typ := ssaArgs[0].Type().Underlying().(*types.Pointer).Elem()
+			for _, arg := range ssaArgs[1:] {
+				index, _ := constant.Int64Val(arg.(*ssa.Const).Value)
+				st := typ.Underlying().(*types.Struct)
+				offset += structOffsetsof(interp.ctx.sizes, st)[int(index)]
+				typ = st.Field(int(index)).Type()
+			}
+		} else {
+			offset, err = builtinOffsetof(interp.ctx, pos, ssaArgs)
+		}
 		if err != nil {
 			msg := err.Error()
 			return func(fr *frame) {
@@ -773,9 +790,9 @@ func selOffsetof(sizes types.Sizes, typ types.Type, index []int, sel string) (in
 }
 
 func structOffsetsof(sizes types.Sizes, t *types.Struct) []int64 {
-	var fields []*types.Var
-	for i := 0; i < t.NumFields(); i++ {
-		fields = append(fields, t.Field(i))
+	fields := make([]*types.Var, t.NumFields())
+	for i := range fields {
+		fields[i] = t.Field(i)
 	}
 	return sizes.Offsetsof(fields)
 }

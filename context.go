@@ -39,6 +39,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/goplus/ixgo/internal/unsaferewrite"
 	"github.com/goplus/ixgo/load"
 	"github.com/goplus/ixgo/load/list"
 	"github.com/goplus/reflectx"
@@ -688,7 +689,7 @@ func (ctx *Context) LoadFile(filename string, src interface{}) (*ssa.Package, er
 	}
 	root, _ := filepath.Split(filename)
 	ctx.setRoot(root)
-	return ctx.LoadAstFile(file.Name.Name, file)
+	return ctx.loadAstFile(file.Name.Name, file)
 }
 
 func (ctx *Context) ParseFile(filename string, src interface{}) (*ast.File, error) {
@@ -705,6 +706,10 @@ func (ctx *Context) ParseFile(filename string, src interface{}) (*ast.File, erro
 }
 
 func (ctx *Context) LoadAstFile(path string, file *ast.File) (*ssa.Package, error) {
+	return ctx.loadAstFile(path, unsaferewrite.Isolate(file))
+}
+
+func (ctx *Context) loadAstFile(path string, file *ast.File) (*ssa.Package, error) {
 	files := []*ast.File{file}
 	if ctx.Mode&DisableCustomBuiltin == 0 {
 		if f, err := ParseBuiltin(ctx.FileSet, file.Name.Name); err == nil {
@@ -741,7 +746,7 @@ func (ctx *Context) LoadAstFile(path string, file *ast.File) (*ssa.Package, erro
 func (ctx *Context) LoadAstPackage(path string, apkg *ast.Package) (*ssa.Package, error) {
 	var files []*ast.File
 	for _, f := range apkg.Files {
-		files = append(files, f)
+		files = append(files, unsaferewrite.Isolate(f))
 	}
 	if ctx.Mode&DisableCustomBuiltin == 0 {
 		if f, err := ParseBuiltin(ctx.FileSet, apkg.Name); err == nil {
@@ -1049,6 +1054,7 @@ func (b *SSABuilder) BuildPackages(pkgs []*types.Package) {
 						fmt.Println("# source", p.Path(), "<memory>")
 					}
 				}
+				unsaferewrite.Rewrite(pkg.Files, pkg.Info)
 				b.prog.CreatePackage(pkg.Package, pkg.Files, pkg.Info, true).Build()
 			} else {
 				b.BuildImports(p, false)
@@ -1070,6 +1076,10 @@ func (b *SSABuilder) BuildPackages(pkgs []*types.Package) {
 	}
 }
 
+// BuildMain builds SSA for sp and its imports. It rewrites sp.Files and sp.Info
+// in place for generic unsafe layout operations. Callers supplying a SourcePackage
+// must give the builder exclusive ownership of its syntax and type information;
+// generic instances may continue to use them after this method returns.
 func (b *SSABuilder) BuildMain(sp *SourcePackage) (pkg *ssa.Package, err error) {
 	b.BuildImports(sp.Package, true)
 	ctx := b.ctx
@@ -1081,6 +1091,7 @@ func (b *SSABuilder) BuildMain(sp *SourcePackage) (pkg *ssa.Package, err error) 
 		}
 	}
 	// Create and build the primary package.
+	unsaferewrite.Rewrite(sp.Files, sp.Info)
 	pkg = b.prog.CreatePackage(sp.Package, sp.Files, sp.Info, false)
 	pkg.Build()
 	return
