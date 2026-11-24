@@ -295,7 +295,10 @@ func (visit *visitor) function(fn *ssa.Function) {
 	for _, b := range fn.Blocks {
 		Instrs := make([]func(*frame), len(b.Instrs))
 		ssaInstrs := make([]ssa.Instruction, len(b.Instrs))
-		descriptions := make([]typedInstruction, len(b.Instrs))
+		var descriptions []typedInstruction
+		if visit.intp.ctx.Mode&EnableInstructionDescriptions != 0 {
+			descriptions = make([]typedInstruction, len(b.Instrs))
+		}
 		var index int
 		n := len(b.Instrs)
 		for i := 0; i < n; i++ {
@@ -342,7 +345,9 @@ func (visit *visitor) function(fn *ssa.Function) {
 			if ifn == nil {
 				continue
 			}
-			description := describeInstruction(pfn, instr, ops)
+			if descriptions != nil {
+				descriptions[index] = describeInstruction(pfn, instr, ops)
+			}
 			if visit.intp.ctx.evalMode && fn.String() == "main.init" {
 				if visit.intp.ctx.evalInit == nil {
 					visit.intp.ctx.evalInit = make(map[string]bool)
@@ -429,7 +434,6 @@ func (visit *visitor) function(fn *ssa.Function) {
 					}
 				}
 			}
-			descriptions[index] = description
 			Instrs[index] = ifn
 			ssaInstrs[index] = instr
 			index++
@@ -438,7 +442,9 @@ func (visit *visitor) function(fn *ssa.Function) {
 		pfn.Blocks = append(pfn.Blocks, offset)
 		pfn.Instrs = append(pfn.Instrs, Instrs[:index]...)
 		pfn.ssaInstrs = append(pfn.ssaInstrs, ssaInstrs[:index]...)
-		pfn.Code = append(pfn.Code, descriptions[:index]...)
+		if descriptions != nil {
+			pfn.Code = append(pfn.Code, descriptions[:index]...)
+		}
 		if b == fn.Recover && visit.intp.ctx.Mode&DisableRecover == 0 {
 			pfn.Recover = pfn.Instrs[offset:]
 		}

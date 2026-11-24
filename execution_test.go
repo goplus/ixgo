@@ -1671,7 +1671,8 @@ func Check() {}
 }
 
 func TestTypedInstructionDescription(t *testing.T) {
-	interp, err := NewContext(DisableMemo).LoadInterp("typed_instruction.go", `package main
+	ctx := NewContext(DisableMemo | EnableInstructionDescriptions)
+	interp, err := ctx.LoadInterp("typed_instruction.go", `package main
 func branch(n int) int {
 	if n > 0 { return n + 1 }
 	return n - 1
@@ -1691,11 +1692,28 @@ func branch(n int) int {
 	if len(p.Code) == 0 {
 		t.Fatal("empty typed code")
 	}
+	var sawBranch bool
 	for pc, desc := range p.Code {
+		if desc.Op == opIf || desc.Op == opJump {
+			sawBranch = true
+			aux, ok := desc.Aux.(branchAux)
+			if !ok || len(aux.Targets) == 0 {
+				t.Fatalf("missing branch targets at pc %d", pc)
+			}
+		}
+		if desc.Op == opBinOp {
+			aux, ok := desc.Aux.(binaryOpAux)
+			if !ok || aux.Op == token.ILLEGAL {
+				t.Fatalf("missing binary operator at pc %d", pc)
+			}
+		}
 		if desc.Op == opInvalid {
 			t.Fatalf("invalid opcode at pc %d", pc)
 		}
 		_ = p.PosForPC(pc) // Some synthetic instructions have no source position.
+	}
+	if !sawBranch {
+		t.Fatal("missing branch instruction")
 	}
 	if len(p.Blocks) == 0 || p.Blocks[0] != 0 {
 		t.Fatalf("block entries = %v", p.Blocks)

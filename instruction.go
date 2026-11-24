@@ -1,6 +1,10 @@
 package ixgo
 
-import "golang.org/x/tools/go/ssa"
+import (
+	"go/token"
+
+	"golang.org/x/tools/go/ssa"
+)
 
 // instructionOpcode identifies an execution instruction independently of its
 // SSA representation. The closure backend remains the executor while this
@@ -47,6 +51,35 @@ const (
 	opDebugRef
 )
 
+// instructionAux stores metadata whose shape depends on the opcode. Keeping
+// it typed makes each instruction's execution inputs explicit before encoding.
+type instructionAux interface {
+	instructionAux()
+}
+
+type binaryOpAux struct{ Op token.Token }
+
+func (binaryOpAux) instructionAux() {}
+
+type unaryOpAux struct {
+	Op      token.Token
+	CommaOk bool
+}
+
+func (unaryOpAux) instructionAux() {}
+
+type phiAux struct{ Preds []int32 }
+
+func (phiAux) instructionAux() {}
+
+type branchAux struct{ Targets []int32 }
+
+func (branchAux) instructionAux() {}
+
+type returnAux struct{ Results int }
+
+func (returnAux) instructionAux() {}
+
 // typedInstruction is the first execution-description form. Args and Aux are
 // explicit compiler output; no runtime execution path needs to inspect SSA to
 // recover the register operands represented here.
@@ -54,11 +87,11 @@ type typedInstruction struct {
 	Op     instructionOpcode
 	Result register
 	Args   []register
-	Aux    int32
+	Aux    instructionAux
 }
 
 func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.Value) typedInstruction {
-	d := typedInstruction{Op: opcodeOf(instr), Result: -1, Aux: -1}
+	d := typedInstruction{Op: opcodeOf(instr), Result: -1}
 	for _, operand := range operands {
 		if operand != nil {
 			d.Args = append(d.Args, pfn.regIndex(*operand))
@@ -67,6 +100,34 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 	if producesRegister(instr) {
 		if v, ok := instr.(ssa.Value); ok {
 			d.Result = pfn.regIndex(v)
+		}
+	}
+	switch v := instr.(type) {
+	case *ssa.BinOp:
+		d.Aux = binaryOpAux{Op: v.Op}
+	case *ssa.UnOp:
+		d.Aux = unaryOpAux{Op: v.Op, CommaOk: v.CommaOk}
+	case *ssa.Phi:
+		aux := phiAux{Preds: make([]int32, 0)}
+		if block := v.Block(); block != nil {
+			aux.Preds = make([]int32, len(block.Preds))
+			for i, pred := range block.Preds {
+				aux.Preds[i] = int32(pred.Index)
+			}
+		}
+		d.Aux = aux
+	case *ssa.Return:
+		d.Aux = returnAux{Results: len(v.Results)}
+	case *ssa.If:
+		if block := v.Block(); block != nil && len(block.Succs) >= 2 {
+			d.Aux = branchAux{Targets: []int32{
+				int32(block.Succs[0].Index),
+				int32(block.Succs[1].Index),
+			}}
+		}
+	case *ssa.Jump:
+		if block := v.Block(); block != nil && len(block.Succs) >= 1 {
+			d.Aux = branchAux{Targets: []int32{int32(block.Succs[0].Index)}}
 		}
 	}
 	return d
