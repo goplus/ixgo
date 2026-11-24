@@ -2,6 +2,8 @@ package ixgo
 
 import (
 	"fmt"
+	"go/constant"
+	"go/types"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -173,6 +175,11 @@ func TestInstructionAuxVariants(t *testing.T) {
 		fieldAux{},
 		lookupAux{},
 		typeAssertAux{},
+		conversionAux{},
+		creationAux{},
+		indexAux{},
+		sliceAux{},
+		rangeAux{},
 	}
 	for _, aux := range variants {
 		t.Run(reflect.TypeOf(aux).Name(), func(t *testing.T) {
@@ -764,5 +771,292 @@ func TestDescriptionValueMetadata(t *testing.T) {
 				t.Fatal("failed assertion should return error")
 			}
 		})
+	}
+}
+
+func TestDescriptionTypeMetadata(t *testing.T) {
+	const source = `package main
+ type Named int
+ type Wide interface { A(); B() }
+ type Narrow interface { A() }
+ func narrow(x Wide) Narrow { return x }
+ func named(n int) Named { return Named(n) }
+ func number(n int) int64 { return int64(n) }
+ func box(n int) any { return n }
+ func bytes(s string) []byte { return []byte(s) }
+ func text(b []byte) string { return string(b) }
+ func pointer(s []int) *[2]int { return (*[2]int)(s) }
+ func heap(n int) *int { p:=new(int);*p=n;return p }
+ func local(n int) int { p:=new(int);*p=n;return *p }
+ func slice(n int) int { s:=make([]int,n,n+1);return cap(s) }
+ func mapping(n int) int { m:=make(map[string]int,n);m["x"]=n;return m["x"] }
+ func channel(n int) int { c:=make(chan int,n);return cap(c) }
+ `
+	for _, mode := range []Mode{0, EnableCachedReg, ExperimentalSupportGC, ExperimentalSupportGC | EnableGCExecutionPlan} {
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
+			i, err := NewContext(DisableMemo|EnableInstructionDescriptions|mode).LoadInterp("type_metadata.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			counts := map[instructionOpcode]int{}
+			for _, p := range i.funcs {
+				for pc, d := range p.Code {
+					switch aux := d.Aux.(type) {
+					case conversionAux:
+						if aux.Source == nil || aux.Target == nil {
+							t.Fatalf("missing conversion types: %#v", d)
+						}
+						switch p.Fn.Name() {
+						case "number":
+							if aux.Source != reflect.TypeOf(0) || aux.Target != reflect.TypeOf(int64(0)) {
+								t.Fatalf("numeric types = %#v", aux)
+							}
+						case "named":
+							if aux.Source.Kind() != reflect.Int || aux.Target.Kind() != reflect.Int {
+								t.Fatalf("named types = %#v", aux)
+							}
+						case "box":
+							if aux.Source != reflect.TypeOf(0) || aux.Target.Kind() != reflect.Interface {
+								t.Fatalf("box types = %#v", aux)
+							}
+						case "narrow":
+							if aux.Source.Kind() != reflect.Interface || aux.Source.NumMethod() != 2 || aux.Target.Kind() != reflect.Interface || aux.Target.NumMethod() != 1 {
+								t.Fatalf("interface types = %#v", aux)
+							}
+						case "bytes":
+							if aux.Source != reflect.TypeOf("") || aux.Target != reflect.TypeOf([]byte(nil)) {
+								t.Fatalf("byte conversion = %#v", aux)
+							}
+						case "text":
+							if aux.Source != reflect.TypeOf([]byte(nil)) || aux.Target != reflect.TypeOf("") {
+								t.Fatalf("string conversion = %#v", aux)
+							}
+						case "pointer":
+							if aux.Source != reflect.TypeOf([]int(nil)) || aux.Target != reflect.TypeOf((*[2]int)(nil)) {
+								t.Fatalf("array pointer conversion = %#v", aux)
+							}
+						}
+					case creationAux:
+						if aux.Target == nil {
+							t.Fatal("missing creation type")
+						}
+						switch v := p.ssaInstrs[pc].(type) {
+						case *ssa.Alloc:
+							if aux.Target.Kind() != reflect.Pointer || aux.Heap != v.Heap {
+								t.Fatalf("allocation = %#v", aux)
+							}
+						case *ssa.MakeSlice:
+							if aux.Target != reflect.TypeOf([]int(nil)) || len(d.Args) != 2 {
+								t.Fatalf("slice = %#v", d)
+							}
+						case *ssa.MakeMap:
+							if aux.Target != reflect.TypeOf(map[string]int(nil)) || len(d.Args) != 1 {
+								t.Fatalf("map = %#v", d)
+							}
+						case *ssa.MakeChan:
+							if aux.Target != reflect.TypeOf((chan int)(nil)) || len(d.Args) != 1 {
+								t.Fatalf("chan = %#v", d)
+							}
+						default:
+							t.Fatalf("unexpected creation opcode %T", v)
+						}
+					default:
+						continue
+					}
+					counts[d.Op]++
+					if d.Result < 0 {
+						t.Fatalf("missing result: %#v", d)
+					}
+				}
+			}
+			for _, op := range []instructionOpcode{opChangeType, opConvert, opChangeInterface, opMakeInterface, opAlloc, opMakeSlice, opMakeMap, opMakeChan, opSliceToArrayPointer} {
+				if counts[op] == 0 {
+					t.Fatalf("missing metadata opcode %d", op)
+				}
+			}
+			cases := []struct {
+				name string
+				args []value
+				want value
+			}{
+				{"number", []value{3}, int64(3)}, {"box", []value{3}, 3},
+				{"bytes", []value{"ab"}, []byte("ab")}, {"text", []value{[]byte(nil)}, ""},
+				{"local", []value{4}, 4}, {"slice", []value{0}, 1}, {"slice", []value{3}, 4},
+				{"mapping", []value{0}, 0}, {"channel", []value{0}, 0}, {"channel", []value{2}, 2},
+			}
+			for _, c := range cases {
+				got, err := i.RunFunc(c.name, c.args...)
+				if err != nil || !reflect.DeepEqual(got, c.want) {
+					t.Fatalf("%s = %v, %v; want %v", c.name, got, err, c.want)
+				}
+			}
+			if got, err := i.RunFunc("heap", 7); err != nil || *got.(*int) != 7 {
+				t.Fatalf("heap = %v, %v", got, err)
+			}
+			if got, err := i.RunFunc("pointer", []int{1, 2}); err != nil || *got.(*[2]int) != [2]int{1, 2} {
+				t.Fatalf("pointer = %v, %v", got, err)
+			}
+			for _, name := range []string{"slice", "channel"} {
+				if _, err := i.RunFunc(name, -1); err == nil {
+					t.Fatalf("%s negative size should fail", name)
+				}
+			}
+			if _, err := i.RunFunc("pointer", []int{1}); err == nil {
+				t.Fatal("short slice should fail")
+			}
+		})
+	}
+}
+
+func TestDescriptionBoundsMetadata(t *testing.T) {
+	const source = `package main
+ type Record struct { Pad byte; Value int64 }
+ type Named []int
+ func record(p *Record) int64 { return p.Value }
+ func array(a [3]int, n int) int { return a[n] }
+ func index(s []int,n int) int { return s[n] }
+ func text(s string,n int) byte { return s[n] }
+ func all(s []int) []int { return s[:] }
+ func full(s []int,a,b,c int) []int { return s[a:b:c] }
+ func named(s Named) Named { return s[:] }
+ func allocated(n int) []int { a := [3]int{1,2,3}; return a[:n] }
+ func ranges(m map[string]int,s string) int { n:=0;for _,v:=range m {n+=v};for _,r:=range s {n+=int(r)};return n }
+ func lookup(m map[string]int) int { return m["x"] }
+ `
+	for _, mode := range []Mode{0, EnableCachedReg, ExperimentalSupportGC, ExperimentalSupportGC | EnableGCExecutionPlan} {
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
+			i, err := NewContext(DisableMemo|EnableInstructionDescriptions|mode).LoadInterp("bounds_metadata.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			var fields, indexes, slices, ranges, lookups int
+			for _, p := range i.funcs {
+				for _, d := range p.Code {
+					switch aux := d.Aux.(type) {
+					case fieldAux:
+						fields++
+						typ := aux.Source
+						if typ.Kind() == reflect.Pointer {
+							typ = typ.Elem()
+						}
+						f := typ.Field(aux.Index)
+						if aux.Field != f.Type || aux.Offset != f.Offset {
+							t.Fatal("field layout mismatch")
+						}
+						if f.Name == "Value" && (aux.Field != reflect.TypeOf(int64(0)) || aux.Offset == 0) {
+							t.Fatal("missing padded field layout")
+						}
+					case indexAux:
+						indexes++
+						typ := aux.Source
+						if typ.Kind() == reflect.Pointer {
+							typ = typ.Elem()
+						}
+						if typ.Kind() == reflect.Array && typ.Len() != 3 {
+							t.Fatal("array length mismatch")
+						}
+						target := aux.Target
+						if target.Kind() == reflect.Pointer {
+							target = target.Elem()
+						}
+						element := reflect.TypeOf(byte(0))
+						if typ.Kind() != reflect.String {
+							element = typ.Elem()
+						}
+						if target != element {
+							t.Fatal("index element mismatch")
+						}
+					case sliceAux:
+						slices++
+						if len(d.Args) != 4 {
+							t.Fatal("slice operand positions changed")
+						}
+						for j, present := range []bool{aux.Low, aux.High, aux.Max} {
+							if present != (d.ArgKinds[j+1] != operandAbsent) {
+								t.Fatal("slice omitted boundary mismatch")
+							}
+						}
+						if p.Fn.Name() == "all" && (aux.Low || aux.High || aux.Max) {
+							t.Fatal("default boundaries present")
+						}
+						if p.Fn.Name() == "full" && (!aux.Low || !aux.High || !aux.Max) {
+							t.Fatal("three-index boundaries missing")
+						}
+						if p.Fn.Name() == "allocated" && !aux.MakeSliceCheck {
+							t.Fatal("allocation check missing")
+						}
+						if aux.Target.Kind() != reflect.Slice {
+							t.Fatal("slice target missing")
+						}
+					case rangeAux:
+						ranges++
+						if aux.Source.Kind() == reflect.Map {
+							if aux.Key != reflect.TypeOf("") || aux.Element != reflect.TypeOf(0) {
+								t.Fatal("map iterator types")
+							}
+						} else if aux.Source.Kind() != reflect.String || aux.Key != reflect.TypeOf(0) || aux.Element != reflect.TypeOf(rune(0)) {
+							t.Fatal("string iterator types")
+						}
+					case lookupAux:
+						lookups++
+						if aux.Source.Kind() == reflect.Map {
+							if aux.Key != reflect.TypeOf("") || aux.Element != reflect.TypeOf(0) {
+								t.Fatal("map lookup types")
+							}
+						} else if aux.Source.Kind() != reflect.String || aux.Element != reflect.TypeOf(byte(0)) {
+							t.Fatal("string lookup types")
+						}
+					}
+				}
+			}
+			if fields == 0 || indexes == 0 || slices == 0 || ranges != 2 || lookups == 0 {
+				t.Fatalf("missing metadata: %d/%d/%d/%d/%d", fields, indexes, slices, ranges, lookups)
+			}
+			cases := []struct {
+				name string
+				args []value
+				want value
+			}{
+				{"array", []value{[3]int{1, 2, 3}, 2}, 3}, {"index", []value{[]int{4}, 0}, 4}, {"text", []value{"ab", 1}, byte('b')},
+				{"all", []value{[]int(nil)}, []int(nil)}, {"full", []value{[]int{1, 2, 3}, 1, 2, 2}, []int{2}},
+				{"allocated", []value{2}, []int{1, 2}}, {"ranges", []value{map[string]int{"x": 2}, "a"}, 99},
+			}
+			for _, c := range cases {
+				got, err := i.RunFunc(c.name, c.args...)
+				if err != nil || !reflect.DeepEqual(got, c.want) {
+					t.Fatalf("%s = %v, %v; want %v", c.name, got, err, c.want)
+				}
+			}
+			failures := []struct {
+				name string
+				args []value
+			}{
+				{"index", []value{[]int(nil), 0}}, {"index", []value{[]int{1}, -1}}, {"array", []value{[3]int{}, 3}},
+				{"text", []value{"", 0}}, {"full", []value{[]int{1}, 0, 1, 2}}, {"full", []value{[]int{1}, 1, 0, 1}}, {"allocated", []value{4}},
+			}
+			for _, c := range failures {
+				if _, err := i.RunFunc(c.name, c.args...); err == nil {
+					t.Fatalf("%s invalid bounds should fail", c.name)
+				}
+			}
+		})
+	}
+}
+
+func TestDescriptionStringLookup(t *testing.T) {
+	i, err := NewContext(DisableMemo|EnableInstructionDescriptions).LoadInterp("string_lookup.go", "package main; func f() {}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	p := i.funcs[i.mainpkg.Func("f")]
+	// Older SSA producers may use Lookup for string indexing.
+	instr := &ssa.Lookup{X: ssa.NewConst(constant.MakeString("ab"), types.Typ[types.String]), Index: ssa.NewConst(constant.MakeInt64(1), types.Typ[types.Int])}
+	d := describeInstruction(p, instr, instr.Operands(nil), nil)
+	aux := d.Aux.(lookupAux)
+	if aux.Source != reflect.TypeOf("") || aux.Key != reflect.TypeOf(0) || aux.Element != reflect.TypeOf(byte(0)) || aux.CommaOk {
+		t.Fatalf("string lookup = %#v", aux)
 	}
 }
