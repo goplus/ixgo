@@ -1,3 +1,5 @@
+//go:build instruction
+
 package ixgo
 
 import (

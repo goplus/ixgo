@@ -1997,3 +1997,24 @@ func builtinInterfaceArgs(i *Interp, name string, args []ssa.Value) []bool {
 	}
 	return result
 }
+
+// phiDirectAssignment reports whether the existing Phi order is safe to run
+// as sequential register copies for every predecessor.
+func phiDirectAssignment(results []register, edges [][]register) bool {
+	if len(results) == 0 || len(edges) == 0 {
+		return false
+	}
+	for pred := range edges[0] {
+		written := make(map[register]bool, len(results))
+		for i, result := range results {
+			source := edges[i][pred]
+			if written[source] {
+				return false
+			}
+			if source != result {
+				written[result] = true
+			}
+		}
+	}
+	return true
+}

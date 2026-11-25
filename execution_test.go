@@ -1,3 +1,5 @@
+//go:build instruction
+
 /*
  * Copyright (c) 2026 The GoPlus Authors (goplus.org). All rights reserved.
  *
