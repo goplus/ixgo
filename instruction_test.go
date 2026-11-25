@@ -2453,24 +2453,8 @@ func TestEmptyPhiDescription(t *testing.T) {
 }
 
 func TestPhiDirectAssignment(t *testing.T) {
-	for _, c := range []struct {
-		name    string
-		results []register
-		edges   [][]register
-		safe    bool
-	}{
-		{"single", []register{0}, [][]register{{0, 2}}, true},
-		{"independent", []register{0, 1}, [][]register{{2, 3}, {3, 2}}, true},
-		{"safe-chain", []register{0, 1}, [][]register{{1}, {2}}, true},
-		{"unsafe-chain", []register{0, 1}, [][]register{{2}, {0}}, false},
-		{"swap", []register{0, 1}, [][]register{{1}, {0}}, false},
-		{"self", []register{0, 1}, [][]register{{0}, {0}}, true},
-		{"mixed-predecessors", []register{0, 1}, [][]register{{2, 1}, {3, 0}}, false},
-	} {
+	for _, c := range phiDirectAssignmentCases[2:] {
 		t.Run(c.name, func(t *testing.T) {
-			if got := phiDirectAssignment(c.results, c.edges); got != c.safe {
-				t.Fatalf("safe=%t want %t", got, c.safe)
-			}
 			preds := make([]int32, len(c.edges[0]))
 			for j := range preds {
 				preds[j] = int32(j + 1)

@@ -2110,23 +2110,29 @@ func selects() int { a:=make(chan int,1);n:=0;for i:=0;i<100;i++ { a<-2;select {
 	}
 }
 
+type phiDirectAssignmentCase struct {
+	name    string
+	results []register
+	edges   [][]register
+	safe    bool
+}
+
+var phiDirectAssignmentCases = []phiDirectAssignmentCase{
+	{"empty", nil, nil, false},
+	{"empty-results", []register{0}, nil, false},
+	{"single", []register{0}, [][]register{{0, 2}}, true},
+	{"independent", []register{0, 1}, [][]register{{2, 3}, {3, 2}}, true},
+	{"safe-chain", []register{0, 1}, [][]register{{1}, {2}}, true},
+	{"unsafe-chain", []register{0, 1}, [][]register{{2}, {0}}, false},
+	{"swap", []register{0, 1}, [][]register{{1}, {0}}, false},
+	{"self", []register{0, 1}, [][]register{{0}, {0}}, true},
+	{"mixed-predecessors", []register{0, 1}, [][]register{{2, 1}, {3, 0}}, false},
+}
+
 func TestPhiDirectAssignmentDependencies(t *testing.T) {
-	for _, c := range []struct {
-		results []register
-		edges   [][]register
-		want    bool
-	}{
-		{nil, nil, false}, {[]register{0}, nil, false},
-		{[]register{0}, [][]register{{0, 2}}, true},
-		{[]register{0, 1}, [][]register{{2, 3}, {3, 2}}, true},
-		{[]register{0, 1}, [][]register{{1}, {2}}, true},
-		{[]register{0, 1}, [][]register{{2}, {0}}, false},
-		{[]register{0, 1}, [][]register{{1}, {0}}, false},
-		{[]register{0, 1}, [][]register{{0}, {0}}, true},
-		{[]register{0, 1}, [][]register{{2, 1}, {3, 0}}, false},
-	} {
-		if got := phiDirectAssignment(c.results, c.edges); got != c.want {
-			t.Fatalf("results=%v edges=%v: %t want %t", c.results, c.edges, got, c.want)
+	for _, c := range phiDirectAssignmentCases {
+		if got := phiDirectAssignment(c.results, c.edges); got != c.safe {
+			t.Fatalf("%s: safe=%t want %t", c.name, got, c.safe)
 		}
 	}
 }
