@@ -2436,6 +2436,20 @@ func TestUnaryDescriptionGlobalReceive(t *testing.T) {
 	}
 }
 
+func TestEmptyPhiDescription(t *testing.T) {
+	for _, aux := range []phiAux{{}, {Results: []register{0}}, {Edges: [][]register{{0}}}} {
+		execute := makeInstruction(typedInstruction{Op: opPhi, Aux: aux})
+		if execute == nil {
+			t.Fatal("empty Phi returned nil executor")
+		}
+		fr := &frame{stack: []value{1}}
+		execute(fr)
+		if fr.phiVals != nil || fr.reg(0) != 1 {
+			t.Fatalf("empty Phi changed frame: %#v", fr)
+		}
+	}
+}
+
 func TestPhiDirectAssignment(t *testing.T) {
 	for _, c := range []struct {
 		name    string

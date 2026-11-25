@@ -36,6 +36,9 @@ func makeInstruction(d typedInstruction) func(*frame) {
 	case opPhi:
 		aux := d.Aux.(phiAux)
 		ir, ie, preds := aux.Results, aux.Edges, aux.Preds
+		if len(ir) == 0 || len(ie) == 0 {
+			return func(*frame) {}
+		}
 		if len(ir) == 1 {
 			result, edges := ir[0], ie[0]
 			return func(fr *frame) {
@@ -93,6 +96,9 @@ func makeInstruction(d typedInstruction) func(*frame) {
 // phiDirectAssignment checks that each source survives all earlier writes for
 // every predecessor. Self assignments preserve the register's old value.
 func phiDirectAssignment(results []register, edges [][]register) bool {
+	if len(results) == 0 || len(edges) == 0 {
+		return false
+	}
 	for pred := range edges[0] {
 		written := make(map[register]bool, len(results))
 		for i, result := range results {
