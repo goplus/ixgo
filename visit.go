@@ -351,6 +351,10 @@ func (visit *visitor) function(fn *ssa.Function) {
 					dests = pfn.callDests[call]
 				}
 				descriptions[index] = describeInstruction(pfn, instr, instr.Operands(buf[:0]), dests)
+				// Lower first to preserve register allocation and instruction elision.
+				if described, ok := makeControlInstruction(descriptions[index]); ok {
+					ifn = described
+				}
 			}
 			if visit.intp.ctx.evalMode && fn.String() == "main.init" {
 				if visit.intp.ctx.evalInit == nil {

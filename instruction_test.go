@@ -47,6 +47,28 @@ func TestDescriptionPreservesFrameLayout(t *testing.T) {
 				if !reflect.DeepEqual(registers(p), registers(old)) {
 					t.Fatalf("%s register mapping changed: got %v want %v", fn, registers(p), registers(old))
 				}
+				if len(p.Code) != len(p.Instrs) || len(p.Instrs) != len(old.Instrs) ||
+					!reflect.DeepEqual(p.Blocks, old.Blocks) {
+					t.Fatalf("%s execution PC alignment changed: Code=%d, closures=%d/%d, blocks=%v/%v", fn, len(p.Code), len(p.Instrs), len(old.Instrs), p.Blocks, old.Blocks)
+				}
+				for pc := range p.Instrs {
+					wantPos := p.ssaInstrs[pc].Pos()
+					if _, ok := p.ssaInstrs[pc].(*ssa.RunDefers); ok && p.Fn.Syntax() != nil {
+						wantPos = p.Fn.Syntax().End()
+					}
+					if p.PosForPC(pc) != wantPos {
+						t.Fatalf("%s source position misaligned at PC %d", fn, pc)
+					}
+					// Generated builtin declarations may have a different source order.
+					if pos := p.PositionForPC(pc); pos.Filename == "description_layout.go" && pos != old.PositionForPC(pc) {
+						t.Fatalf("%s source position changed at PC %d: %v/%v", fn, pc, pos, old.PositionForPC(pc))
+					}
+				}
+				for pc := range p.gcRegs {
+					if !reflect.DeepEqual(p.gcRegsForPC(pc), old.gcRegsForPC(pc)) {
+						t.Fatalf("%s GC registers changed at PC %d", fn, pc)
+					}
+				}
 			}
 			if len(described.funcs) != len(baseline.funcs) {
 				t.Fatal("function count changed")
@@ -318,7 +340,7 @@ func swap(n int) int {
 						}
 					}
 				}
-				// Execute the original closure with only the grouped description available
+				// Execute the selected closure with only the grouped description available
 				// to the test oracle. Cyclic inputs must be read before any result is stored.
 				initial := append([]value(nil), p.stack...)
 				for k, result := range aux.Results {
@@ -1461,6 +1483,139 @@ func TestDescriptionCallSiteMetadata(t *testing.T) {
 					t.Fatalf("%s = %v, %v; want %d", c.name, got, err, c.want)
 				}
 			}
+		})
+	}
+}
+
+func TestControlDescriptionExecution(t *testing.T) {
+	const source = `package main
+ type flag bool
+ func branch(v flag) int { if v { return 7 }; return 9 }
+ func named(n int) int { return branch(flag(n > 0)) }
+ func constant(n int) int { for { if true { break } }; return n }
+ func choosePointer(n int) int { a,b:=new(int),new(int); *a=7; *b=9; p:=a; if n>0 { p=b }; return *p }
+ func swap(n int) int { a,b:=1,2; for j:=0;j<n;j++ { a,b=b,a }; return a*10+b }
+ func choose(n int) int { x:=3; if n>0 { x=4 } else if n<0 { x=5 };return x }
+ `
+	for _, descriptions := range []bool{false, true} {
+		for _, extra := range []Mode{0, EnableCachedReg, ExperimentalSupportGC | EnableGCExecutionPlan} {
+			t.Run(fmt.Sprintf("descriptions=%t/mode=%v", descriptions, extra), func(t *testing.T) {
+				mode := DisableMemo | extra
+				if descriptions {
+					mode |= EnableInstructionDescriptions
+				}
+				i, err := NewContext(mode).LoadInterp("control_description.go", source)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer i.UnsafeRelease()
+				for _, p := range i.funcs {
+					if descriptions {
+						for pc, d := range p.Code {
+							executor, ok := makeControlInstruction(d)
+							want := d.Op == opJump || d.Op == opIf || d.Op == opPhi
+							if ok != want || (ok && executor == nil) {
+								t.Fatalf("pc %d: control builder mismatch", pc)
+							}
+						}
+					}
+					p.functionCompilation = functionCompilation{}
+				}
+				for _, c := range []struct {
+					name string
+					arg  int
+					want int
+				}{
+					{"swap", 0, 12}, {"swap", 1, 21}, {"swap", 10, 12}, {"swap", 11, 21},
+					{"choose", 0, 3}, {"choose", 1, 4}, {"choose", -1, 5},
+					{"named", 0, 9}, {"named", 1, 7}, {"constant", 42, 42},
+					{"choosePointer", 0, 7}, {"choosePointer", 1, 9},
+				} {
+					if got, err := i.RunFunc(c.name, c.arg); err != nil || got != c.want {
+						t.Fatalf("%s(%d)=%v,%v;want %d", c.name, c.arg, got, err, c.want)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestControlDescriptionBranchAndPhi(t *testing.T) {
+	// A named bool must use the runtime boolean accessor.
+	type flag bool
+	for _, condition := range []value{true, false, flag(true), flag(false)} {
+		d := typedInstruction{Op: opIf, Args: []register{0}, Aux: branchAux{Targets: []int32{1, 2}}}
+		execute, _ := makeControlInstruction(d)
+		p := &function{}
+		p.Blocks = []int{0, 4, 8}
+		fr := &frame{pfn: p, stack: []value{condition}}
+		execute(fr)
+		want := int32(8)
+		if reflect.ValueOf(condition).Bool() {
+			want = 4
+		}
+		if fr.ipc != want {
+			t.Fatalf("condition %v: pc=%d want %d", condition, fr.ipc, want)
+		}
+	}
+	jump, ok := makeControlInstruction(typedInstruction{Op: opJump, Aux: branchAux{Targets: []int32{1}}})
+	if !ok {
+		t.Fatal("missing Jump executor")
+	}
+	p := &function{}
+	p.Blocks = []int{0, 4}
+	jumpFrame := &frame{pfn: p, block: 0}
+	jump(jumpFrame)
+	if jumpFrame.ipc != 4 || jumpFrame.block != 1 || jumpFrame.pred != 0 {
+		t.Fatalf("Jump state: pc=%d block=%d pred=%d", jumpFrame.ipc, jumpFrame.block, jumpFrame.pred)
+	}
+	d := typedInstruction{Op: opPhi, Aux: phiAux{Preds: []int32{1}, Results: []register{0, 1}, Edges: [][]register{{1}, {0}}}}
+	execute, _ := makeControlInstruction(d)
+	fr := &frame{pred: 1, stack: []value{1, 2}}
+	execute(fr)
+	if fr.reg(0) != 2 || fr.reg(1) != 1 {
+		t.Fatal("Phi assignment is not parallel")
+	}
+	fr.pred = 99
+	execute(fr)
+	if fr.reg(0) != 2 || fr.reg(1) != 1 {
+		t.Fatal("unknown predecessor changed registers")
+	}
+}
+
+func BenchmarkControlDescription(b *testing.B) {
+	for _, descriptions := range []bool{false, true} {
+		mode := DisableMemo
+		if descriptions {
+			mode |= EnableInstructionDescriptions
+		}
+		b.Run(fmt.Sprintf("descriptions=%t", descriptions), func(b *testing.B) {
+			b.Run("execute", func(b *testing.B) {
+				ctx := NewContext(mode)
+				ctx.SetLeastCallForEnablePool(0)
+				i, err := ctx.LoadInterp("control_bench.go", executionDescriptionSource)
+				if err != nil {
+					b.Fatal(err)
+				}
+				b.Cleanup(i.UnsafeRelease)
+				b.ReportAllocs()
+				b.ResetTimer()
+				for b.Loop() {
+					if got, err := i.RunFunc("phi"); err != nil || got != 42 {
+						b.Fatalf("phi = %v, %v", got, err)
+					}
+				}
+			})
+			b.Run("load", func(b *testing.B) {
+				b.ReportAllocs()
+				for b.Loop() {
+					i, err := NewContext(mode).LoadInterp("control_bench.go", executionDescriptionSource)
+					if err != nil {
+						b.Fatal(err)
+					}
+					i.UnsafeRelease()
+				}
+			})
 		})
 	}
 }
