@@ -726,6 +726,29 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 		for i, pred := range block.Preds {
 			preds[i] = int32(pred.Index)
 		}
+		if len(ir) == 1 {
+			result, edges := ir[0], ie[0]
+			return func(fr *frame) {
+				for i, pred := range preds {
+					if fr.pred == pred {
+						fr.setReg(result, fr.reg(edges[i]))
+						return
+					}
+				}
+			}
+		}
+		if phiDirectAssignment(ir, ie) {
+			return func(fr *frame) {
+				for j, pred := range preds {
+					if fr.pred == pred {
+						for i, result := range ir {
+							fr.setReg(result, fr.reg(ie[i][j]))
+						}
+						return
+					}
+				}
+			}
+		}
 		return func(fr *frame) {
 			predIndex := -1
 			for i, pred := range preds {

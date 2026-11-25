@@ -2435,3 +2435,84 @@ func TestUnaryDescriptionGlobalReceive(t *testing.T) {
 		}
 	}
 }
+
+func TestPhiDirectAssignment(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		results []register
+		edges   [][]register
+		safe    bool
+	}{
+		{"single", []register{0}, [][]register{{0, 2}}, true},
+		{"independent", []register{0, 1}, [][]register{{2, 3}, {3, 2}}, true},
+		{"safe-chain", []register{0, 1}, [][]register{{1}, {2}}, true},
+		{"unsafe-chain", []register{0, 1}, [][]register{{2}, {0}}, false},
+		{"swap", []register{0, 1}, [][]register{{1}, {0}}, false},
+		{"self", []register{0, 1}, [][]register{{0}, {0}}, true},
+		{"mixed-predecessors", []register{0, 1}, [][]register{{2, 1}, {3, 0}}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := phiDirectAssignment(c.results, c.edges); got != c.safe {
+				t.Fatalf("safe=%t want %t", got, c.safe)
+			}
+			preds := make([]int32, len(c.edges[0]))
+			for j := range preds {
+				preds[j] = int32(j + 1)
+			}
+			execute := makeInstruction(typedInstruction{Op: opPhi, Aux: phiAux{Results: c.results, Edges: c.edges, Preds: preds}})
+			unknown := &frame{pred: -1, stack: []value{10, 20, 30, 40}}
+			execute(unknown)
+			if !reflect.DeepEqual(unknown.stack, []value{10, 20, 30, 40}) || unknown.phiVals != nil {
+				t.Fatal("unknown predecessor changed frame")
+			}
+			for j, pred := range preds {
+				initial := []value{10, 20, 30, 40}
+				fr := &frame{pred: pred, stack: append([]value(nil), initial...)}
+				execute(fr)
+				for k, result := range c.results {
+					if fr.reg(result) != initial[c.edges[k][j]] {
+						t.Fatalf("pred %d result %d=%v want %v", pred, result, fr.reg(result), initial[c.edges[k][j]])
+					}
+				}
+				if c.safe && fr.phiVals != nil {
+					t.Fatal("direct assignment allocated scratch")
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkPhiAssignment(b *testing.B) {
+	const source = `package main
+ func single(n int) int {x:=1;if n>0{x=2};return x}
+ func independent(n int) int {a,c:=1,2;for j:=0;j<n;j++{a=a+1;c=c+2};return a+c}
+ func swap(n int) int {a,c:=1,2;for j:=0;j<n;j++{a,c=c,a};return a*10+c}
+ func rotate(n int) int {a,c,d:=1,2,3;for j:=0;j<n;j++{a,c,d=c,d,a};return a*100+c*10+d}
+ `
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution} {
+		for _, c := range []struct {
+			name    string
+			n, want int
+		}{{"single", 100, 2}, {"independent", 100, 303}, {"swap", 100, 12}, {"rotate", 99, 123}} {
+			b.Run(fmt.Sprintf("mode=%v/%s", mode, c.name), func(b *testing.B) {
+				ctx := NewContext(DisableMemo | mode)
+				ctx.SetLeastCallForEnablePool(0)
+				i, err := ctx.LoadInterp("phi_assignment.go", source)
+				if err != nil {
+					b.Fatal(err)
+				}
+				b.Cleanup(i.UnsafeRelease)
+				if got, err := i.RunFunc(c.name, c.n); err != nil || got != c.want {
+					b.Fatal(got, err)
+				}
+				b.ReportAllocs()
+				b.ResetTimer()
+				for b.Loop() {
+					if got, err := i.RunFunc(c.name, c.n); err != nil || got != c.want {
+						b.Fatal(got, err)
+					}
+				}
+			})
+		}
+	}
+}
