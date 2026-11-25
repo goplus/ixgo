@@ -153,7 +153,36 @@ func TestInstructionOpcodeClassification(t *testing.T) {
 	for _, test := range tests {
 		expected[reflect.TypeOf(test.instr)] = test.op
 	}
-	i, err := NewContext(DisableMemo|EnableInstructionDescriptions).LoadInterp("opcode_classification.go", executionDescriptionSource)
+	ctx := NewContext(DisableMemo | EnableInstructionDescriptions)
+	ctx.SetDebug(func(*DebugInfo) {})
+	source := executionDescriptionSource + `
+type opcodeWide interface { A(); B() }
+type opcodeNarrow interface { A() }
+func opcodeNarrower(v opcodeWide) opcodeNarrow { return v }
+type opcodeRecord struct { A int; B string }
+func opcodeIdentity(v opcodeRecord) opcodeRecord { return v }
+func opcodeField(v opcodeRecord) string { return opcodeIdentity(v).B }
+func opcodeContainers(n int,s string,p *opcodeRecord) int {
+ p.A=n
+ m:=make(map[int]int,n);m[n]=n
+ a:=make([]int,n,n+1)
+ a=a[:n]
+ return len(a)+len(m)+int(s[n])
+}
+func opcodeExtra(m map[string]int, s string, a []int, x any, c chan int) int {
+ m["x"] = 1
+ n,ok := m["x"]
+ if ok { n++ }
+ for _,v := range m { n += v }
+ for _,r := range s { n += int(r) }
+ if v,ok := x.(int);ok { n += v }
+ p := (*[2]int)(a)
+ n += p[0]
+ select {case v := <-c: n += v; default:}
+ return n
+}
+`
+	i, err := ctx.LoadInterp("opcode_classification.go", source)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,13 +198,14 @@ func TestInstructionOpcodeClassification(t *testing.T) {
 			seen[d.Op] = true
 		}
 	}
-	if len(seen) == 0 {
-		t.Fatal("no instruction descriptions checked")
+	for _, test := range tests {
+		if !seen[test.op] {
+			t.Errorf("%T: opcode %v not exercised", test.instr, test.op)
+		}
 	}
 	if describeInstruction(&function{}, nil, nil, nil).Op != opInvalid {
 		t.Fatal("unknown instruction must be invalid")
 	}
-
 }
 
 func TestInstructionAuxVariants(t *testing.T) {
