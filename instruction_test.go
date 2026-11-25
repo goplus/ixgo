@@ -15,8 +15,14 @@ import (
 )
 
 func TestDescriptionPreservesFrameLayout(t *testing.T) {
-	for _, extra := range []Mode{0, ExperimentalSupportGC, EnableCachedReg, ExperimentalSupportGC | EnableGCExecutionPlan} {
-		t.Run(fmt.Sprint(extra), func(t *testing.T) {
+	for _, config := range []struct{ extra, descriptions Mode }{
+		{0, EnableInstructionDescriptions}, {0, EnableInstructionExecution}, {0, EnableInstructionDescriptions | EnableInstructionExecution},
+		{ExperimentalSupportGC, EnableInstructionExecution}, {EnableCachedReg, EnableInstructionExecution},
+		{ExperimentalSupportGC | EnableGCExecutionPlan, EnableInstructionDescriptions},
+		{ExperimentalSupportGC | EnableGCExecutionPlan, EnableInstructionExecution},
+	} {
+		extra := config.extra
+		t.Run(fmt.Sprintf("mode=%v/descriptions=%v", extra, config.descriptions), func(t *testing.T) {
 			load := func(mode Mode) *Interp {
 				source := strings.Replace(executionDescriptionSource, "package main", "package main\nimport \"runtime\"", 1)
 				source += `
@@ -29,7 +35,7 @@ func gcPhi(n int) int { a,b:=new(int),new(int); *a=7; *b=9; p:=a; if n>0 { p=b }
 				t.Cleanup(i.UnsafeRelease)
 				return i
 			}
-			baseline, described := load(0), load(EnableInstructionDescriptions)
+			baseline, described := load(0), load(config.descriptions)
 			byName := make(map[string]*function)
 			for fn, p := range baseline.funcs {
 				byName[fn.String()] = p
@@ -302,7 +308,7 @@ func TestDescriptionPhiGroup(t *testing.T) {
 		t.Run(fmt.Sprint(enabled), func(t *testing.T) {
 			mode := DisableMemo
 			if enabled {
-				mode |= EnableInstructionDescriptions
+				mode |= EnableInstructionExecution
 			}
 			i, err := NewContext(mode).LoadInterp("phi_group.go", `package main
 func swap(n int) int {
@@ -363,7 +369,7 @@ func swap(n int) int {
 					initial[result] = 100 + k
 				}
 				for j, pred := range aux.Preds {
-					fr := &frame{pfn: p, pred: pred, stack: append([]value(nil), initial...)}
+					fr := &frame{pfn: &function{}, pred: pred, stack: append([]value(nil), initial...)}
 					// The installed description executor must read the description's edges.
 					original := aux.Edges[0][j]
 					for _, result := range aux.Results {
@@ -376,11 +382,8 @@ func swap(n int) int {
 					for k := range want {
 						want[k] = fr.reg(aux.Edges[k][j])
 					}
-					compilation := p.functionCompilation
-					p.functionCompilation = functionCompilation{}
 					p.Instrs[pc](fr)
 					aux.Edges[0][j] = original
-					p.functionCompilation = compilation
 					for k, result := range aux.Results {
 						if !reflect.DeepEqual(fr.reg(result), want[k]) {
 							t.Fatalf("parallel assignment %d: got %v, want %v", k, fr.reg(result), want[k])
@@ -1523,13 +1526,10 @@ func TestControlDescriptionExecution(t *testing.T) {
  func swap(n int) int { a,b:=1,2; for j:=0;j<n;j++ { a,b=b,a }; return a*10+b }
  func choose(n int) int { x:=3; if n>0 { x=4 } else if n<0 { x=5 };return x }
  `
-	for _, descriptions := range []bool{false, true} {
+	for _, descriptionMode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
 		for _, extra := range []Mode{0, EnableCachedReg, ExperimentalSupportGC | EnableGCExecutionPlan} {
-			t.Run(fmt.Sprintf("descriptions=%t/mode=%v", descriptions, extra), func(t *testing.T) {
-				mode := DisableMemo | extra
-				if descriptions {
-					mode |= EnableInstructionDescriptions
-				}
+			t.Run(fmt.Sprintf("descriptions=%v/mode=%v", descriptionMode, extra), func(t *testing.T) {
+				mode := DisableMemo | extra | descriptionMode
 				i, err := NewContext(mode).LoadInterp("control_description.go", source)
 				if err != nil {
 					t.Fatal(err)
@@ -1540,7 +1540,7 @@ func TestControlDescriptionExecution(t *testing.T) {
 					if len(p.gcRegs) > 0 {
 						gcFunctions++
 					}
-					if descriptions {
+					if descriptionMode != 0 {
 						for pc, d := range p.Code {
 							executor, ok := makeControlInstruction(d)
 							want := d.Op == opJump || d.Op == opIf || d.Op == opPhi
@@ -1550,11 +1550,17 @@ func TestControlDescriptionExecution(t *testing.T) {
 							if ok {
 								name := runtime.FuncForPC(reflect.ValueOf(p.Instrs[pc]).Pointer()).Name()
 								helper := "makeControlInstruction"
-								if !strings.Contains(name, helper) {
-									t.Fatalf("pc %d: installed %s, want %s", pc, name, helper)
+								if got, want := strings.Contains(name, helper), descriptionMode&EnableInstructionExecution != 0; got != want {
+									t.Fatalf("pc %d: installed %s, description executor=%t, want %t", pc, name, got, want)
 								}
 							}
 						}
+					}
+					if descriptionMode == 0 && len(p.Code) != 0 {
+						t.Fatal("default path generated descriptions")
+					}
+					if descriptionMode != 0 && len(p.Code) != len(p.Instrs) {
+						t.Fatal("description PC count mismatch")
 					}
 					p.functionCompilation = functionCompilation{}
 				}
@@ -1624,12 +1630,9 @@ func TestControlDescriptionBranchAndPhi(t *testing.T) {
 }
 
 func BenchmarkControlDescription(b *testing.B) {
-	for _, descriptions := range []bool{false, true} {
-		mode := DisableMemo
-		if descriptions {
-			mode |= EnableInstructionDescriptions
-		}
-		b.Run(fmt.Sprintf("descriptions=%t", descriptions), func(b *testing.B) {
+	for _, descriptions := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		mode := DisableMemo | descriptions
+		b.Run(fmt.Sprintf("descriptions=%v", descriptions), func(b *testing.B) {
 			b.Run("execute", func(b *testing.B) {
 				ctx := NewContext(mode)
 				ctx.SetLeastCallForEnablePool(0)
@@ -1709,13 +1712,10 @@ func BenchmarkControlDescriptionBranch(b *testing.B) {
  func named(v flag) int { if v { return 7 }; return 9 }
  func loop() int { n:=0; for j:=0;j<100;j++ { if j&1==0 { n+=1 } else { n+=2 } }; return n }
  `
-	for _, descriptions := range []bool{false, true} {
-		mode := DisableMemo
-		if descriptions {
-			mode |= EnableInstructionDescriptions
-		}
+	for _, descriptions := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		mode := DisableMemo | descriptions
 		for _, name := range []string{"basic", "named", "loop"} {
-			b.Run(fmt.Sprintf("descriptions=%t/%s", descriptions, name), func(b *testing.B) {
+			b.Run(fmt.Sprintf("descriptions=%v/%s", descriptions, name), func(b *testing.B) {
 				ctx := NewContext(mode)
 				ctx.SetLeastCallForEnablePool(0)
 				i, err := ctx.LoadInterp("branch_bench.go", source)
@@ -1738,5 +1738,16 @@ func BenchmarkControlDescriptionBranch(b *testing.B) {
 				}
 			})
 		}
+	}
+}
+
+func TestControlDescriptionWithoutBlock(t *testing.T) {
+	jump := describeInstruction(&function{}, &ssa.Jump{}, nil, nil)
+	if aux, ok := jump.Aux.(jumpAux); jump.Op != opJump || !ok || aux.Target != 0 {
+		t.Fatalf("Jump without block: %#v", jump)
+	}
+	branch := describeInstruction(&function{}, &ssa.If{Cond: ssa.NewConst(constant.MakeBool(true), types.Typ[types.Bool])}, nil, nil)
+	if aux, ok := branch.Aux.(ifAux); branch.Op != opIf || !ok || aux.Targets != [2]int32{} || !aux.Constant || !aux.Condition {
+		t.Fatalf("If without block: %#v", branch)
 	}
 }

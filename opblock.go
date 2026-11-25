@@ -1467,7 +1467,7 @@ func elideCallExtracts(pfn *function, instr ssa.Value, nres int) []register {
 		}
 	}
 	pfn.elidedTuples = append(pfn.elidedTuples, pfn.regIndex(instr))
-	if pfn.Interp != nil && pfn.Interp.ctx.Mode&EnableInstructionDescriptions != 0 {
+	if pfn.Interp != nil && pfn.Interp.ctx.Mode&(EnableInstructionDescriptions|EnableInstructionExecution) != 0 {
 		if pfn.callDests == nil {
 			pfn.callDests = make(map[ssa.Value][]register)
 		}

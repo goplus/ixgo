@@ -522,9 +522,11 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 		d.Aux = aux
 	case *ssa.Jump:
 		d.Op = opJump
+		aux := jumpAux{}
 		if block := v.Block(); block != nil && len(block.Succs) >= 1 {
-			d.Aux = jumpAux{Target: int32(block.Succs[0].Index)}
+			aux.Target = int32(block.Succs[0].Index)
 		}
+		d.Aux = aux
 	case *ssa.RunDefers:
 		d.Op = opRunDefers
 	case *ssa.DebugRef:
