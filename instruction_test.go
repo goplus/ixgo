@@ -149,18 +149,33 @@ func TestInstructionOpcodeClassification(t *testing.T) {
 		{&ssa.MapUpdate{}, opMapUpdate},
 		{&ssa.DebugRef{}, opDebugRef},
 	}
+	expected := make(map[reflect.Type]instructionOpcode)
 	for _, test := range tests {
-		if got := opcodeOf(test.instr); got != test.op {
-			t.Fatalf("%T: opcode %v, want %v", test.instr, got, test.op)
-		}
-		_, isValue := test.instr.(ssa.Value)
-		if got := producesRegister(test.instr); got != isValue {
-			t.Fatalf("%T: produces register = %t, want %t", test.instr, got, isValue)
+		expected[reflect.TypeOf(test.instr)] = test.op
+	}
+	i, err := NewContext(DisableMemo|EnableInstructionDescriptions).LoadInterp("opcode_classification.go", executionDescriptionSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	seen := make(map[instructionOpcode]bool)
+	for _, p := range i.funcs {
+		for pc, d := range p.Code {
+			instr := p.ssaInstrs[pc]
+			want, ok := expected[reflect.TypeOf(instr)]
+			if !ok || d.Op != want {
+				t.Fatalf("%T: opcode %v, want %v", instr, d.Op, want)
+			}
+			seen[d.Op] = true
 		}
 	}
-	if opcodeOf(nil) != opInvalid {
+	if len(seen) == 0 {
+		t.Fatal("no instruction descriptions checked")
+	}
+	if describeInstruction(&function{}, nil, nil, nil).Op != opInvalid {
 		t.Fatal("unknown instruction must be invalid")
 	}
+
 }
 
 func TestInstructionAuxVariants(t *testing.T) {
