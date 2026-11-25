@@ -217,6 +217,16 @@ type panicAux struct{ Value reflect.Type }
 
 func (panicAux) instructionAux() { return }
 
+// closureAux records the signature and capture order without retaining SSA.
+// Signature does not identify the function body; target resolution is pending.
+// A binding of -1 means that no register was allocated for that input.
+type closureAux struct {
+	Signature reflect.Type
+	Bindings  []register
+}
+
+func (closureAux) instructionAux() { return }
+
 // operandKind classifies the source of an input independently from its register.
 // operandFunction and operandBuiltin may still have a valid Args register; only
 // operandAbsent and operandUnallocated imply Args == -1.
@@ -317,6 +327,14 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 			}
 		}
 		d.Aux = aux
+	case *ssa.MakeClosure:
+		fn := v.Fn.(*ssa.Function)
+		signature := pfn.Interp.preToType(fn.Type())
+		bindings := make([]register, len(v.Bindings))
+		for i, binding := range v.Bindings {
+			bindings[i] = descriptionRegister(pfn, binding)
+		}
+		d.Aux = closureAux{Signature: signature, Bindings: bindings}
 	case *ssa.Call:
 		if elidedResults != nil {
 			d.Result = -1

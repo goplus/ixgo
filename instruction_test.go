@@ -183,6 +183,7 @@ func TestInstructionAuxVariants(t *testing.T) {
 		storeAux{},
 		mapUpdateAux{},
 		panicAux{},
+		closureAux{},
 		indexAux{},
 		sliceAux{},
 		rangeAux{},
@@ -206,7 +207,7 @@ func TestDescriptionRegisterLookup(t *testing.T) {
 		t.Fatal("unallocated operand must use -1")
 	}
 	before := len(p.index)
-	d := describeInstruction(p, &ssa.MakeClosure{Fn: &ssa.Function{}}, nil, nil)
+	d := describeInstruction(p, &ssa.BinOp{}, nil, nil)
 	if d.Result != -1 || len(p.index) != before || len(p.stack) != 0 {
 		t.Fatal("description allocated a register")
 	}
@@ -1204,5 +1205,94 @@ func panicf(x any) { panic(x) }
 				t.Fatalf("panic result = %v", err)
 			}
 		})
+	}
+}
+
+func TestDescriptionClosureMetadata(t *testing.T) {
+	const source = `package main
+func noCapture(n int) int { f:=func(x int) int { return x+1 }; return f(n) }
+func captures(a,b int) int { f:=func(x int) int { return x+a+b }; return f(3) }
+func nested(a int) func(int) int { return func(x int) int { return x+a } }
+func top() func(int) int { return func(x int) int { return x+1 } }
+type Counter struct { Base int }
+func (c Counter) Add(n int) int { return c.Base+n }
+func method(n int) func(int) int { c:=Counter{Base:n};return c.Add }
+`
+	i, err := NewContext(DisableMemo|EnableInstructionDescriptions).LoadInterp("closure_metadata.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	var one, two, methods int
+	for _, p := range i.funcs {
+		for pc, d := range p.Code {
+			v, ok := p.ssaInstrs[pc].(*ssa.MakeClosure)
+			if !ok {
+				continue
+			}
+			aux, ok := d.Aux.(closureAux)
+			if !ok || aux.Signature == nil {
+				t.Fatalf("closure metadata = %#v", d)
+			}
+			fn, ok := v.Fn.(*ssa.Function)
+			if !ok || fn.Signature == nil {
+				t.Fatalf("closure target = %T", v.Fn)
+			}
+			if aux.Signature != i.preToType(v.Fn.Type()) || aux.Signature.NumIn() != fn.Signature.Params().Len() || aux.Signature.NumOut() != fn.Signature.Results().Len() {
+				t.Fatalf("closure signature = %#v", aux)
+			}
+			if len(aux.Bindings) != len(v.Bindings) || len(aux.Bindings) != len(fn.FreeVars) {
+				t.Fatalf("closure bindings = %#v", aux)
+			}
+			for j, binding := range v.Bindings {
+				if aux.Bindings[j] < 0 || aux.Bindings[j] != p.regIndex(binding) {
+					t.Fatalf("binding %d = %v", j, aux.Bindings[j])
+				}
+			}
+			if p.Fn.Name() == "method" {
+				methods++
+			}
+			switch len(aux.Bindings) {
+			case 1:
+				one++
+			case 2:
+				two++
+			}
+		}
+	}
+	if one == 0 || two == 0 || methods != 1 {
+		t.Fatalf("capture cases = one:%d two:%d methods:%d", one, two, methods)
+	}
+	// No-capture literals use static SSA functions, so these cases test runtime
+	// behavior without exercising MakeClosure metadata.
+	for _, c := range []struct {
+		name string
+		args []value
+		want value
+	}{
+		{"noCapture", []value{4}, 5}, {"captures", []value{2, 4}, 9},
+	} {
+		if got, err := i.RunFunc(c.name, c.args...); err != nil || got != c.want {
+			t.Fatalf("%s = %v, %v; want %v", c.name, got, err, c.want)
+		}
+	}
+	for _, c := range []struct {
+		name string
+		args []value
+		want int
+	}{
+		{"nested", []value{7}, 10}, {"top", nil, 4}, {"method", []value{8}, 11},
+	} {
+		got, err := i.RunFunc(c.name, c.args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fn, ok := got.(func(int) int)
+		if !ok {
+			t.Fatalf("%s returned %T", c.name, got)
+		}
+		if result := fn(3); result != c.want {
+			t.Fatalf("%s(3) = %d, want %d", c.name, result, c.want)
+		}
 	}
 }
