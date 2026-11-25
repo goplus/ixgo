@@ -1696,9 +1696,15 @@ func branch(n int) int {
 	for pc, desc := range p.Code {
 		if desc.Op == opIf || desc.Op == opJump {
 			sawBranch = true
-			aux, ok := desc.Aux.(branchAux)
-			if !ok || len(aux.Targets) == 0 {
-				t.Fatalf("missing branch targets at pc %d", pc)
+			switch desc.Op {
+			case opIf:
+				if _, ok := desc.Aux.(ifAux); !ok {
+					t.Fatalf("missing If targets at pc %d", pc)
+				}
+			case opJump:
+				if _, ok := desc.Aux.(jumpAux); !ok {
+					t.Fatalf("missing Jump target at pc %d", pc)
+				}
 			}
 		}
 		if desc.Op == opBinOp {

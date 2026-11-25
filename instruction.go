@@ -1,6 +1,7 @@
 package ixgo
 
 import (
+	"go/constant"
 	"go/token"
 	"go/types"
 	"reflect"
@@ -82,10 +83,20 @@ type phiAux struct {
 
 func (phiAux) instructionAux() {}
 
-// branchAux records successor block IDs: one for Jump, true then false for If.
-type branchAux struct{ Targets []int32 }
+// jumpAux records the successor block ID.
+type jumpAux struct{ Target int32 }
 
-func (branchAux) instructionAux() {}
+func (jumpAux) instructionAux() {}
+
+// ifAux records true/false successor block IDs and condition specialization.
+type ifAux struct {
+	Targets   [2]int32
+	Constant  bool
+	Condition bool
+	BasicBool bool
+}
+
+func (ifAux) instructionAux() {}
 
 // returnAux records the number of returned values, whose registers are in Args.
 type returnAux struct{ Results int }
@@ -500,16 +511,19 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 		d.Aux = returnAux{Results: len(v.Results)}
 	case *ssa.If:
 		d.Op = opIf
-		if block := v.Block(); block != nil && len(block.Succs) >= 2 {
-			d.Aux = branchAux{Targets: []int32{
-				int32(block.Succs[0].Index),
-				int32(block.Succs[1].Index),
-			}}
+		aux := ifAux{}
+		if c, ok := v.Cond.(*ssa.Const); ok {
+			aux.Constant, aux.Condition = true, constant.BoolVal(c.Value)
 		}
+		_, aux.BasicBool = v.Cond.Type().(*types.Basic)
+		if block := v.Block(); block != nil && len(block.Succs) >= 2 {
+			aux.Targets = [2]int32{int32(block.Succs[0].Index), int32(block.Succs[1].Index)}
+		}
+		d.Aux = aux
 	case *ssa.Jump:
 		d.Op = opJump
 		if block := v.Block(); block != nil && len(block.Succs) >= 1 {
-			d.Aux = branchAux{Targets: []int32{int32(block.Succs[0].Index)}}
+			d.Aux = jumpAux{Target: int32(block.Succs[0].Index)}
 		}
 	case *ssa.RunDefers:
 		d.Op = opRunDefers

@@ -67,7 +67,7 @@ const (
 	EnableCachedReg                                                            // Enable per-frame cache registers.
 	DisableMemo                                                                // Disable the optional memo optimizer.
 	EnableGCExecutionPlan                                                      // Precompute SSA-free GC liveness plans at load time; requires ExperimentalSupportGC.
-	EnableInstructionDescriptions                                              // Build experimental typed instruction metadata at load time; independent of GC plans.
+	EnableInstructionDescriptions                                              // Build typed metadata and use description-built Jump/If/Phi executors; independent of GC plans.
 	OptionLoadDefaultImethod       = 0                                         // Option load default imethod.
 	LastMode                       = EnableInstructionDescriptions             // Last Mode
 )
