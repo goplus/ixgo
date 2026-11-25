@@ -17,6 +17,7 @@ import (
 func TestDescriptionPreservesFrameLayout(t *testing.T) {
 	for _, config := range []struct{ extra, descriptions Mode }{
 		{0, EnableInstructionDescriptions}, {0, EnableInstructionExecution}, {0, EnableInstructionDescriptions | EnableInstructionExecution},
+		{ExperimentalSupportGC, EnableInstructionDescriptions},
 		{ExperimentalSupportGC, EnableInstructionExecution}, {EnableCachedReg, EnableInstructionExecution},
 		{ExperimentalSupportGC | EnableGCExecutionPlan, EnableInstructionDescriptions},
 		{ExperimentalSupportGC | EnableGCExecutionPlan, EnableInstructionExecution},
@@ -304,12 +305,9 @@ func TestDescriptionRegisterLookup(t *testing.T) {
 }
 
 func TestDescriptionPhiGroup(t *testing.T) {
-	for _, enabled := range []bool{false, true} {
-		t.Run(fmt.Sprint(enabled), func(t *testing.T) {
-			mode := DisableMemo
-			if enabled {
-				mode |= EnableInstructionExecution
-			}
+	for _, descriptions := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		t.Run(fmt.Sprint(descriptions), func(t *testing.T) {
+			mode := DisableMemo | descriptions
 			i, err := NewContext(mode).LoadInterp("phi_group.go", `package main
 func swap(n int) int {
  a, b := 1, 2
@@ -370,12 +368,14 @@ func swap(n int) int {
 				}
 				for j, pred := range aux.Preds {
 					fr := &frame{pfn: &function{}, pred: pred, stack: append([]value(nil), initial...)}
-					// The installed description executor must read the description's edges.
 					original := aux.Edges[0][j]
-					for _, result := range aux.Results {
-						if result != original {
-							aux.Edges[0][j] = result
-							break
+					if descriptions&EnableInstructionExecution != 0 {
+						// The installed description executor must read the description's edges.
+						for _, result := range aux.Results {
+							if result != original {
+								aux.Edges[0][j] = result
+								break
+							}
 						}
 					}
 					want := make([]value, len(aux.Results))
@@ -391,10 +391,10 @@ func swap(n int) int {
 					}
 				}
 			}
-			if enabled && groups != 1 {
+			if descriptions != 0 && groups != 1 {
 				t.Fatalf("Phi group count = %d, want 1", groups)
 			}
-			if !enabled && len(p.Code) != 0 {
+			if descriptions == 0 && len(p.Code) != 0 {
 				t.Fatal("default backend generated descriptions")
 			}
 			for _, n := range []int{0, 1, 2, 3, 10, 11} {
