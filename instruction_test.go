@@ -1349,16 +1349,16 @@ func TestDescriptionCallSiteMetadata(t *testing.T) {
 						}
 					}
 					if b, ok := call.Value.(*ssa.Builtin); ok {
-						if aux.Kind != callBuiltin || aux.Builtin != b.Name() || aux.Signature != nil || aux.Method != "" {
+						if aux.Kind != callBuiltin || aux.Name != b.Name() || aux.Signature != nil {
 							t.Fatalf("builtin metadata = %#v", aux)
 						}
 					} else {
-						if aux.Signature == nil || aux.Signature.Kind() != reflect.Func || aux.Builtin != "" {
+						if aux.Signature == nil || aux.Signature.Kind() != reflect.Func {
 							t.Fatalf("function signature = %#v", aux)
 						}
 						switch {
 						case call.IsInvoke():
-							if aux.Kind != callInvoke || aux.Method != call.Method.Id() || aux.Target < 0 {
+							if aux.Kind != callInvoke || aux.Name != call.Method.Id() || aux.Target < 0 {
 								t.Fatalf("invoke = %#v", aux)
 							}
 						default:
@@ -1367,7 +1367,7 @@ func TestDescriptionCallSiteMetadata(t *testing.T) {
 							if static {
 								want = callStatic
 							}
-							if aux.Kind != want || aux.Method != "" {
+							if aux.Kind != want || aux.Name != "" {
 								t.Fatalf("call kind = %#v", aux)
 							}
 						}

@@ -253,14 +253,15 @@ const (
 // the function-value register or invoke receiver register, or -1 if absent.
 // Arguments exclude the invoke receiver; static method arguments include it.
 // Builtins have no Signature because internal rewritten calls may not have a
-// representable Go function signature. Method uses go/types method identity.
+// representable Go function signature.
 type callSiteAux struct {
 	Kind      callKind
 	Signature reflect.Type
 	Target    register
 	Arguments []register
-	Builtin   string
-	Method    string
+	// Name is the builtin name for callBuiltin or the method ID for callInvoke.
+	// It is empty for callStatic and callDynamic.
+	Name string
 }
 
 func (callSiteAux) instructionAux() { return }
@@ -473,12 +474,12 @@ func describeCallSite(pfn *function, call *ssa.CallCommon) callSiteAux {
 		aux.Arguments[i] = descriptionRegister(pfn, arg)
 	}
 	if builtin, ok := call.Value.(*ssa.Builtin); ok {
-		aux.Kind, aux.Builtin = callBuiltin, builtin.Name()
+		aux.Kind, aux.Name = callBuiltin, builtin.Name()
 		return aux
 	}
 	aux.Signature = pfn.Interp.preToType(call.Signature())
 	if call.IsInvoke() {
-		aux.Kind, aux.Method = callInvoke, call.Method.Id()
+		aux.Kind, aux.Name = callInvoke, call.Method.Id()
 	} else if _, ok := call.Value.(*ssa.Function); ok {
 		aux.Kind = callStatic
 	}
