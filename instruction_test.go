@@ -173,6 +173,7 @@ func TestInstructionAuxVariants(t *testing.T) {
 		extractAux{},
 		nextAux{},
 		callAux{},
+		callSiteAux{},
 		fieldAux{},
 		lookupAux{},
 		typeAssertAux{},
@@ -1294,5 +1295,106 @@ func method(n int) func(int) int { c:=Counter{Base:n};return c.Add }
 		if result := fn(3); result != c.want {
 			t.Fatalf("%s(3) = %d, want %d", c.name, result, c.want)
 		}
+	}
+}
+
+func TestDescriptionCallSiteMetadata(t *testing.T) {
+	const source = `package main
+ type Value int
+ func (v Value) Add(n int) int { return int(v)+n }
+ type Adder interface { Add(int) int }
+ func static(n int) int { return n+1 }
+ func dynamic(f func(int)int,n int)int { return f(n) }
+ func invoke(v Adder,n int)int {return v.Add(n)}
+ func ordinary()int {return static(2)+invoke(Value(4),3)+dynamic(static,1)}
+ func async()int { c:=make(chan int,1);go func(){c<-8}();return <-c }
+ func delayed()(r int){defer func(){r++}();return 4}
+ func builtinLen()int {s:=[]int{1,2};return len(s)}
+ func deferredBuiltin()int {c:=make(chan int);defer close(c);return 1}
+ `
+	for _, mode := range []Mode{0, EnableCachedReg, ExperimentalSupportGC, ExperimentalSupportGC | EnableGCExecutionPlan} {
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
+			i, err := NewContext(DisableMemo|EnableInstructionDescriptions|mode).LoadInterp("call_site.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			kinds := map[callKind]int{}
+			ops := map[instructionOpcode]int{}
+			for _, p := range i.funcs {
+				for pc, d := range p.Code {
+					var call *ssa.CallCommon
+					var aux callSiteAux
+					switch v := p.ssaInstrs[pc].(type) {
+					case *ssa.Call:
+						call = &v.Call
+						aux = d.Aux.(callAux).callSiteAux
+					case *ssa.Go:
+						call = &v.Call
+						aux = d.Aux.(callSiteAux)
+					case *ssa.Defer:
+						call = &v.Call
+						aux = d.Aux.(callSiteAux)
+					default:
+						continue
+					}
+					kinds[aux.Kind]++
+					ops[d.Op]++
+					if aux.Target != descriptionRegister(p, call.Value) || len(aux.Arguments) != len(call.Args) {
+						t.Fatalf("call register layout = %#v", aux)
+					}
+					for j, arg := range call.Args {
+						if aux.Arguments[j] != p.regIndex(arg) {
+							t.Fatal("argument register mismatch")
+						}
+					}
+					if b, ok := call.Value.(*ssa.Builtin); ok {
+						if aux.Kind != callBuiltin || aux.Builtin != b.Name() || aux.Signature != nil || aux.Method != "" {
+							t.Fatalf("builtin metadata = %#v", aux)
+						}
+					} else {
+						if aux.Signature == nil || aux.Signature.Kind() != reflect.Func || aux.Builtin != "" {
+							t.Fatalf("function signature = %#v", aux)
+						}
+						switch {
+						case call.IsInvoke():
+							if aux.Kind != callInvoke || aux.Method != call.Method.Id() || aux.Target < 0 {
+								t.Fatalf("invoke = %#v", aux)
+							}
+						default:
+							_, static := call.Value.(*ssa.Function)
+							want := callDynamic
+							if static {
+								want = callStatic
+							}
+							if aux.Kind != want || aux.Method != "" {
+								t.Fatalf("call kind = %#v", aux)
+							}
+						}
+						if p.Fn.Name() == "dynamic" && (aux.Kind != callDynamic || aux.Signature != reflect.TypeOf(func(int) int { return 0 })) {
+							t.Fatal("dynamic signature mismatch")
+						}
+					}
+				}
+			}
+			for _, kind := range []callKind{callStatic, callDynamic, callBuiltin, callInvoke} {
+				if kinds[kind] == 0 {
+					t.Fatalf("missing kind %d", kind)
+				}
+			}
+			for _, op := range []instructionOpcode{opCall, opGo, opDefer} {
+				if ops[op] == 0 {
+					t.Fatalf("missing call opcode %d", op)
+				}
+			}
+			for _, c := range []struct {
+				name string
+				want int
+			}{{"ordinary", 12}, {"async", 8}, {"delayed", 5}, {"builtinLen", 2}, {"deferredBuiltin", 1}} {
+				if got, err := i.RunFunc(c.name); err != nil || got != c.want {
+					t.Fatalf("%s = %v, %v; want %d", c.name, got, err, c.want)
+				}
+			}
+		})
 	}
 }

@@ -240,10 +240,36 @@ const (
 	operandUnallocated
 )
 
+type callKind uint8
+
+const (
+	callDynamic callKind = iota
+	callStatic
+	callBuiltin
+	callInvoke
+)
+
+// callSiteAux classifies a call without resolving a function body. Target is
+// the function-value register or invoke receiver register, or -1 if absent.
+// Arguments exclude the invoke receiver; static method arguments include it.
+// Builtins have no Signature because internal rewritten calls may not have a
+// representable Go function signature. Method uses go/types method identity.
+type callSiteAux struct {
+	Kind      callKind
+	Signature reflect.Type
+	Target    register
+	Arguments []register
+	Builtin   string
+	Method    string
+}
+
+func (callSiteAux) instructionAux() { return }
+
 // callAux describes result placement after tuple extraction elision. A nil
 // ExtractResults means the call still uses its ordinary result register. A -1
 // entry denotes an unused result. Static target resolution remains incremental.
 type callAux struct {
+	callSiteAux
 	// ExtractResults is a copy of the destinations used by the call closure.
 	// A nil slice means the call writes its ordinary result register.
 	ExtractResults []register
@@ -339,7 +365,11 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 		if elidedResults != nil {
 			d.Result = -1
 		}
-		d.Aux = callAux{ExtractResults: elidedResults}
+		d.Aux = callAux{callSiteAux: describeCallSite(pfn, &v.Call), ExtractResults: elidedResults}
+	case *ssa.Go:
+		d.Aux = describeCallSite(pfn, &v.Call)
+	case *ssa.Defer:
+		d.Aux = describeCallSite(pfn, &v.Call)
 	case *ssa.ChangeType:
 		d.Aux = describeConversion(pfn, v.X, v.Type())
 	case *ssa.Convert:
@@ -435,6 +465,24 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 		}
 	}
 	return d
+}
+
+func describeCallSite(pfn *function, call *ssa.CallCommon) callSiteAux {
+	aux := callSiteAux{Kind: callDynamic, Target: descriptionRegister(pfn, call.Value), Arguments: make([]register, len(call.Args))}
+	for i, arg := range call.Args {
+		aux.Arguments[i] = descriptionRegister(pfn, arg)
+	}
+	if builtin, ok := call.Value.(*ssa.Builtin); ok {
+		aux.Kind, aux.Builtin = callBuiltin, builtin.Name()
+		return aux
+	}
+	aux.Signature = pfn.Interp.preToType(call.Signature())
+	if call.IsInvoke() {
+		aux.Kind, aux.Method = callInvoke, call.Method.Id()
+	} else if _, ok := call.Value.(*ssa.Function); ok {
+		aux.Kind = callStatic
+	}
+	return aux
 }
 
 func describeField(pfn *function, source ssa.Value, index int) fieldAux {
