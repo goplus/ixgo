@@ -61,14 +61,14 @@ type instructionAux interface {
 
 type binaryOpAux struct{ Op token.Token }
 
-func (binaryOpAux) instructionAux() { return }
+func (binaryOpAux) instructionAux() {}
 
 type unaryOpAux struct {
 	Op      token.Token
 	CommaOk bool
 }
 
-func (unaryOpAux) instructionAux() { return }
+func (unaryOpAux) instructionAux() {}
 
 // phiAux describes the parallel assignment performed by one grouped closure.
 // Edges[i][j] supplies Results[i] when control arrives from Preds[j].
@@ -78,23 +78,23 @@ type phiAux struct {
 	Edges   [][]register
 }
 
-func (phiAux) instructionAux() { return }
+func (phiAux) instructionAux() {}
 
 type branchAux struct{ Targets []int32 }
 
-func (branchAux) instructionAux() { return }
+func (branchAux) instructionAux() {}
 
 type returnAux struct{ Results int }
 
-func (returnAux) instructionAux() { return }
+func (returnAux) instructionAux() {}
 
 type extractAux struct{ Index int }
 
-func (extractAux) instructionAux() { return }
+func (extractAux) instructionAux() {}
 
 type nextAux struct{ IsString bool }
 
-func (nextAux) instructionAux() { return }
+func (nextAux) instructionAux() {}
 
 // fieldAux.Source is the operand type, a pointer for FieldAddr. Field and
 // Offset describe the field within the struct, after dereferencing Source;
@@ -106,7 +106,7 @@ type fieldAux struct {
 	Offset uintptr
 }
 
-func (fieldAux) instructionAux() { return }
+func (fieldAux) instructionAux() {}
 
 // lookupAux records map key/element types. For a string Source, Key is the
 // index operand type and Element is byte.
@@ -117,7 +117,7 @@ type lookupAux struct {
 	CommaOk bool
 }
 
-func (lookupAux) instructionAux() { return }
+func (lookupAux) instructionAux() {}
 
 // indexAux.Source retains fixed array lengths; slice/string lengths and index
 // bounds are checked against the runtime value. Target is the produced type.
@@ -126,7 +126,7 @@ type indexAux struct {
 	Target reflect.Type
 }
 
-func (indexAux) instructionAux() { return }
+func (indexAux) instructionAux() {}
 
 // Slice Args are source, low, high, max, including -1 for omitted bounds.
 // MakeSliceCheck preserves the checks used when slicing an allocation.
@@ -137,7 +137,7 @@ type sliceAux struct {
 	MakeSliceCheck bool
 }
 
-func (sliceAux) instructionAux() { return }
+func (sliceAux) instructionAux() {}
 
 // rangeAux records map iterator types. For a string Source, Key and Element
 // are int and rune, respectively.
@@ -147,7 +147,7 @@ type rangeAux struct {
 	Element reflect.Type
 }
 
-func (rangeAux) instructionAux() { return }
+func (rangeAux) instructionAux() {}
 
 // Reflect types are the in-memory runtime representation. A portable type table
 // remains future work; these descriptions retain no SSA instruction or value.
@@ -157,7 +157,7 @@ type typeAssertAux struct {
 	CommaOk bool
 }
 
-func (typeAssertAux) instructionAux() { return }
+func (typeAssertAux) instructionAux() {}
 
 // conversionAux records in-memory types, independently of the SSA values.
 // Conversion behavior is selected by the instruction opcode and these types.
@@ -166,7 +166,7 @@ type conversionAux struct {
 	Target reflect.Type
 }
 
-func (conversionAux) instructionAux() { return }
+func (conversionAux) instructionAux() {}
 
 // creationAux.Target is the produced type (a pointer for Alloc). Heap is only
 // meaningful for Alloc; sizes and capacities retain their SSA order in Args.
@@ -175,7 +175,7 @@ type creationAux struct {
 	Heap   bool
 }
 
-func (creationAux) instructionAux() { return }
+func (creationAux) instructionAux() {}
 
 // selectStateAux describes one channel operation in a Select instruction.
 type selectStateAux struct {
@@ -189,21 +189,21 @@ type selectAux struct {
 	Blocking bool
 }
 
-func (selectAux) instructionAux() { return }
+func (selectAux) instructionAux() {}
 
 type sendAux struct {
 	Chan  reflect.Type
 	Value reflect.Type
 }
 
-func (sendAux) instructionAux() { return }
+func (sendAux) instructionAux() {}
 
 type storeAux struct {
 	Address reflect.Type
 	Value   reflect.Type
 }
 
-func (storeAux) instructionAux() { return }
+func (storeAux) instructionAux() {}
 
 type mapUpdateAux struct {
 	Map   reflect.Type
@@ -211,11 +211,11 @@ type mapUpdateAux struct {
 	Value reflect.Type
 }
 
-func (mapUpdateAux) instructionAux() { return }
+func (mapUpdateAux) instructionAux() {}
 
 type panicAux struct{ Value reflect.Type }
 
-func (panicAux) instructionAux() { return }
+func (panicAux) instructionAux() {}
 
 // closureAux records the signature and capture order without retaining SSA.
 // Signature does not identify the function body; target resolution is pending.
@@ -225,7 +225,7 @@ type closureAux struct {
 	Bindings  []register
 }
 
-func (closureAux) instructionAux() { return }
+func (closureAux) instructionAux() {}
 
 // operandKind classifies the source of an input independently from its register.
 // operandFunction and operandBuiltin may still have a valid Args register; only
@@ -264,7 +264,7 @@ type callSiteAux struct {
 	Name string
 }
 
-func (callSiteAux) instructionAux() { return }
+func (callSiteAux) instructionAux() {}
 
 // callAux describes result placement after tuple extraction elision. A nil
 // ExtractResults means the call still uses its ordinary result register. A -1
@@ -276,7 +276,7 @@ type callAux struct {
 	ExtractResults []register
 }
 
-func (callAux) instructionAux() { return }
+func (callAux) instructionAux() {}
 
 // typedInstruction records partial execution metadata alongside the closure
 // backend. Each entry corresponds to one generated closure; Phi auxiliary data
