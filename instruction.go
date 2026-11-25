@@ -251,7 +251,8 @@ const (
 
 // callSiteAux classifies a call without resolving a function body. Target is
 // the function-value register or invoke receiver register, or -1 if absent.
-// Arguments exclude the invoke receiver; static method arguments include it.
+// Arguments exclude the invoke receiver; static method arguments and Signature
+// both include the receiver as their first input.
 // Builtins have no Signature because internal rewritten calls may not have a
 // representable Go function signature.
 type callSiteAux struct {
@@ -260,13 +261,15 @@ type callSiteAux struct {
 	Target    register
 	Arguments []register
 	// Name is the builtin name for callBuiltin or the method ID for callInvoke.
-	// It is empty for callStatic and callDynamic.
+	// Method IDs include package identity for unexported names; execution method
+	// sets currently dispatch on the plain method name. Empty for other kinds.
 	Name string
 }
 
 func (callSiteAux) instructionAux() {}
 
-// callAux describes result placement after tuple extraction elision. A nil
+// opCall uses callAux; opGo and opDefer use callSiteAux directly.
+// callAux includes call-site data and result placement after tuple extraction. A nil
 // ExtractResults means the call still uses its ordinary result register. A -1
 // entry denotes an unused result. Static target resolution remains incremental.
 type callAux struct {
@@ -477,7 +480,11 @@ func describeCallSite(pfn *function, call *ssa.CallCommon) callSiteAux {
 		aux.Kind, aux.Name = callBuiltin, builtin.Name()
 		return aux
 	}
-	aux.Signature = pfn.Interp.preToType(call.Signature())
+	sig := call.Signature()
+	if !call.IsInvoke() && sig.Recv() != nil {
+		sig = wrapMethodType(sig)
+	}
+	aux.Signature = pfn.Interp.preToType(sig)
 	if call.IsInvoke() {
 		aux.Kind, aux.Name = callInvoke, call.Method.Id()
 	} else if _, ok := call.Value.(*ssa.Function); ok {

@@ -1307,6 +1307,8 @@ func TestDescriptionCallSiteMetadata(t *testing.T) {
  func dynamic(f func(int)int,n int)int { return f(n) }
  func invoke(v Adder,n int)int {return v.Add(n)}
  func ordinary()int {return static(2)+invoke(Value(4),3)+dynamic(static,1)}
+ func direct()int {return Value(4).Add(1)}
+ func bound()int {v:=Value(4);f:=v.Add;return f(3)}
  func async()int { c:=make(chan int,1);go func(){c<-8}();return <-c }
  func delayed()(r int){defer func(){r++}();return 4}
  func builtinLen()int {s:=[]int{1,2};return len(s)}
@@ -1321,6 +1323,7 @@ func TestDescriptionCallSiteMetadata(t *testing.T) {
 			defer i.UnsafeRelease()
 			kinds := map[callKind]int{}
 			ops := map[instructionOpcode]int{}
+			var directCalls, boundCalls int
 			for _, p := range i.funcs {
 				for pc, d := range p.Code {
 					var call *ssa.CallCommon
@@ -1362,6 +1365,21 @@ func TestDescriptionCallSiteMetadata(t *testing.T) {
 								t.Fatalf("invoke = %#v", aux)
 							}
 						default:
+							if aux.Signature.NumIn() != len(aux.Arguments) {
+								t.Fatalf("%s: signature %v has %d inputs for %d arguments", p.Fn, aux.Signature, aux.Signature.NumIn(), len(aux.Arguments))
+							}
+							if p.Fn.Name() == "direct" {
+								directCalls++
+								if aux.Kind != callStatic || aux.Signature.NumIn() != 2 {
+									t.Fatalf("direct method = %#v", aux)
+								}
+							}
+							if p.Fn.Name() == "bound" {
+								boundCalls++
+								if aux.Kind != callDynamic || aux.Signature.NumIn() != 1 {
+									t.Fatalf("bound method = %#v", aux)
+								}
+							}
 							_, static := call.Value.(*ssa.Function)
 							want := callDynamic
 							if static {
@@ -1377,6 +1395,9 @@ func TestDescriptionCallSiteMetadata(t *testing.T) {
 					}
 				}
 			}
+			if directCalls != 1 || boundCalls != 1 {
+				t.Fatalf("method call coverage direct=%d bound=%d", directCalls, boundCalls)
+			}
 			for _, kind := range []callKind{callStatic, callDynamic, callBuiltin, callInvoke} {
 				if kinds[kind] == 0 {
 					t.Fatalf("missing kind %d", kind)
@@ -1390,7 +1411,7 @@ func TestDescriptionCallSiteMetadata(t *testing.T) {
 			for _, c := range []struct {
 				name string
 				want int
-			}{{"ordinary", 12}, {"async", 8}, {"delayed", 5}, {"builtinLen", 2}, {"deferredBuiltin", 1}} {
+			}{{"direct", 5}, {"bound", 7}, {"ordinary", 12}, {"async", 8}, {"delayed", 5}, {"builtinLen", 2}, {"deferredBuiltin", 1}} {
 				if got, err := i.RunFunc(c.name); err != nil || got != c.want {
 					t.Fatalf("%s = %v, %v; want %d", c.name, got, err, c.want)
 				}
