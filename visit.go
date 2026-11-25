@@ -296,7 +296,7 @@ func (visit *visitor) function(fn *ssa.Function) {
 		Instrs := make([]func(*frame), len(b.Instrs))
 		ssaInstrs := make([]ssa.Instruction, len(b.Instrs))
 		var descriptions []typedInstruction
-		if visit.intp.ctx.Mode&EnableInstructionDescriptions != 0 {
+		if visit.intp.ctx.Mode&(EnableInstructionDescriptions|EnableInstructionExecution) != 0 {
 			descriptions = make([]typedInstruction, len(b.Instrs))
 		}
 		var index int
@@ -345,12 +345,18 @@ func (visit *visitor) function(fn *ssa.Function) {
 			if ifn == nil {
 				continue
 			}
-			if visit.intp.ctx.Mode&EnableInstructionDescriptions != 0 {
+			if visit.intp.ctx.Mode&(EnableInstructionDescriptions|EnableInstructionExecution) != 0 {
 				var dests []register
 				if call, ok := instr.(ssa.Value); ok {
 					dests = pfn.callDests[call]
 				}
 				descriptions[index] = describeInstruction(pfn, instr, instr.Operands(buf[:0]), dests)
+				if visit.intp.ctx.Mode&EnableInstructionExecution != 0 {
+					// Lower first to preserve register allocation and instruction elision.
+					if described, ok := makeControlInstruction(descriptions[index]); ok {
+						ifn = described
+					}
+				}
 			}
 			if visit.intp.ctx.evalMode && fn.String() == "main.init" {
 				if visit.intp.ctx.evalInit == nil {
@@ -446,7 +452,7 @@ func (visit *visitor) function(fn *ssa.Function) {
 		pfn.Blocks = append(pfn.Blocks, offset)
 		pfn.Instrs = append(pfn.Instrs, Instrs[:index]...)
 		pfn.ssaInstrs = append(pfn.ssaInstrs, ssaInstrs[:index]...)
-		if visit.intp.ctx.Mode&EnableInstructionDescriptions != 0 {
+		if visit.intp.ctx.Mode&(EnableInstructionDescriptions|EnableInstructionExecution) != 0 {
 			pfn.Code = append(pfn.Code, descriptions[:index]...)
 		}
 		if b == fn.Recover && visit.intp.ctx.Mode&DisableRecover == 0 {
@@ -486,7 +492,7 @@ func (visit *visitor) function(fn *ssa.Function) {
 	visit.base += len(pfn.ssaInstrs) + 2
 	pfn.initPool()
 	pfn.finishMetadata()
-	if visit.intp.ctx.Mode&EnableInstructionDescriptions != 0 {
+	if visit.intp.ctx.Mode&(EnableInstructionDescriptions|EnableInstructionExecution) != 0 {
 		// Code now owns destination slices; release temporary SSA-keyed lookup data.
 		pfn.callDests = nil
 	}
