@@ -1,20 +1,20 @@
 package ixgo
 
-// makeControlInstruction builds a closure solely from execution metadata.
-// Other opcodes retain their existing lowering until their descriptions can
-// supply all execution inputs.
-func makeControlInstruction(d typedInstruction) (func(*frame), bool) {
+// makeInstruction builds supported closures solely from execution metadata.
+// It returns nil when the description has no executor implementation.
+// Unsupported instructions retain their existing lowering.
+func makeInstruction(d typedInstruction) func(*frame) {
 	switch d.Op {
 	case opJump:
 		target := d.Aux.(jumpAux).Target
-		return func(fr *frame) { fr.jump(target) }, true
+		return func(fr *frame) { fr.jump(target) }
 	case opIf:
 		aux := d.Aux.(ifAux)
 		if aux.Constant {
 			if aux.Condition {
-				return func(fr *frame) { fr.jump(aux.Targets[0]) }, true
+				return func(fr *frame) { fr.jump(aux.Targets[0]) }
 			}
-			return func(fr *frame) { fr.jump(aux.Targets[1]) }, true
+			return func(fr *frame) { fr.jump(aux.Targets[1]) }
 		}
 		condition := d.Args[0]
 		if aux.BasicBool {
@@ -24,7 +24,7 @@ func makeControlInstruction(d typedInstruction) (func(*frame), bool) {
 				} else {
 					fr.jump(aux.Targets[1])
 				}
-			}, true
+			}
 		}
 		return func(fr *frame) {
 			if fr.bool(condition) {
@@ -32,7 +32,7 @@ func makeControlInstruction(d typedInstruction) (func(*frame), bool) {
 			} else {
 				fr.jump(aux.Targets[1])
 			}
-		}, true
+		}
 	case opPhi:
 		aux := d.Aux.(phiAux)
 		ir, ie, preds := aux.Results, aux.Edges, aux.Preds
@@ -58,8 +58,11 @@ func makeControlInstruction(d typedInstruction) (func(*frame), bool) {
 			for i := range ir {
 				fr.setReg(ir[i], values[i])
 			}
-		}, true
-	default:
-		return nil, false
+		}
+	case opBinOp:
+		return makeBinaryInstruction(d)
+	case opUnOp:
+		return makeUnaryInstruction(d)
 	}
+	return nil
 }

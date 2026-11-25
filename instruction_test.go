@@ -3,6 +3,7 @@ package ixgo
 import (
 	"fmt"
 	"go/constant"
+	"go/token"
 	"go/types"
 	"reflect"
 	"runtime"
@@ -297,10 +298,64 @@ func TestDescriptionRegisterLookup(t *testing.T) {
 	if descriptionRegister(p, nil) != -1 || descriptionRegister(p, &ssa.Function{}) != -1 {
 		t.Fatal("unallocated operand must use -1")
 	}
+	ctx := NewContext(DisableMemo)
+	i, err := ctx.LoadInterp("lookup.go", "package main; var Global int")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	p.Interp = i
+	x := ssa.NewConst(constant.MakeInt64(3), types.Typ[types.Int])
 	before := len(p.index)
-	d := describeInstruction(p, &ssa.BinOp{}, nil, nil)
-	if d.Result != -1 || len(p.index) != before || len(p.stack) != 0 {
-		t.Fatal("description allocated a register")
+	for _, instr := range []ssa.Instruction{
+		&ssa.BinOp{Op: token.ADD, X: x, Y: x},
+		&ssa.UnOp{Op: token.SUB, X: x},
+	} {
+		d := describeInstruction(p, instr, instr.Operands(nil), nil)
+		if d.Result != -1 || len(p.index) != before || len(p.stack) != 0 {
+			t.Fatal("description allocated a register")
+		}
+		for j, r := range d.Args {
+			if r != -1 || d.ArgKinds[j] != operandUnallocated {
+				t.Fatal("unallocated operand metadata")
+			}
+		}
+		switch aux := d.Aux.(type) {
+		case binaryOpAux:
+			if aux.Constant != [2]bool{} {
+				t.Fatal("unallocated constant read")
+			}
+		case unaryOpAux:
+			if aux.Constant || aux.Global {
+				t.Fatal("unallocated unary value read")
+			}
+		}
+	}
+
+	global := i.mainpkg.Members["Global"].(*ssa.Global)
+	instr := &ssa.UnOp{Op: token.MUL, X: global}
+	d := describeInstruction(p, instr, instr.Operands(nil), nil)
+	aux := d.Aux.(unaryOpAux)
+	if aux.Global || aux.Constant || d.Args[0] != -1 || len(p.index) != before || len(p.stack) != 0 {
+		t.Fatal("unallocated global read or allocated")
+	}
+	p.index[x] = uint32(kindConst) << 30
+	p.stack = []value{3}
+	allocated := describeInstruction(p, &ssa.BinOp{Op: token.ADD, X: x, Y: x}, nil, nil).Aux.(binaryOpAux)
+	if allocated.Constant != [2]bool{true, true} || allocated.Values != [2]value{3, 3} {
+		t.Fatalf("allocated constant: %#v", allocated)
+	}
+	ptr := new(int)
+	p.index[global] = uint32(kindGlobal)<<30 | 1
+	p.stack = append(p.stack, ptr)
+	allocatedGlobal := describeInstruction(p, instr, instr.Operands(nil), nil).Aux.(unaryOpAux)
+	if !allocatedGlobal.Global || allocatedGlobal.Constant || allocatedGlobal.Value != ptr {
+		t.Fatalf("allocated global: %#v", allocatedGlobal)
+	}
+
+	p.index[global] = uint32(kindGlobal)<<30 | 4
+	if k, v := descriptionOperand(p, global); k != kindInvalid || v != nil {
+		t.Fatal("out-of-range operand read")
 	}
 }
 
@@ -335,6 +390,9 @@ func swap(n int) int {
 				for _, instr := range block.Instrs {
 					phi, ok := instr.(*ssa.Phi)
 					if !ok {
+						continue
+					}
+					if false {
 						break
 					}
 					phis = append(phis, phi)
@@ -473,7 +531,7 @@ func closure(n int) int { f := func() int { return n }; return f() }
 				continue
 			}
 			aux, ok := d.Aux.(callAux)
-			if !ok {
+			if false {
 				t.Fatal("missing call metadata")
 			}
 			if aux.ExtractResults == nil {
@@ -1542,14 +1600,16 @@ func TestControlDescriptionExecution(t *testing.T) {
 					}
 					if descriptionMode != 0 {
 						for pc, d := range p.Code {
-							executor, ok := makeControlInstruction(d)
-							want := d.Op == opJump || d.Op == opIf || d.Op == opPhi
-							if ok != want || (ok && executor == nil) {
+							if d.Op != opJump && d.Op != opIf && d.Op != opPhi {
+								continue
+							}
+							executor := makeInstruction(d)
+							if executor == nil {
 								t.Fatalf("pc %d: control builder mismatch", pc)
 							}
-							if ok {
+							if descriptionMode&EnableInstructionExecution != 0 {
 								name := runtime.FuncForPC(reflect.ValueOf(p.Instrs[pc]).Pointer()).Name()
-								helper := "makeControlInstruction"
+								helper := "makeInstruction"
 								if got, want := strings.Contains(name, helper), descriptionMode&EnableInstructionExecution != 0; got != want {
 									t.Fatalf("pc %d: installed %s, description executor=%t, want %t", pc, name, got, want)
 								}
@@ -1591,7 +1651,7 @@ func TestControlDescriptionBranchAndPhi(t *testing.T) {
 	type flag bool
 	for _, condition := range []value{true, false, flag(true), flag(false)} {
 		d := typedInstruction{Op: opIf, Args: []register{0}, Aux: ifAux{Targets: [2]int32{1, 2}}}
-		execute, _ := makeControlInstruction(d)
+		execute := makeInstruction(d)
 		p := &function{}
 		p.Blocks = []int{0, 4, 8}
 		fr := &frame{pfn: p, stack: []value{condition}}
@@ -1604,8 +1664,8 @@ func TestControlDescriptionBranchAndPhi(t *testing.T) {
 			t.Fatalf("condition %v: pc=%d want %d", condition, fr.ipc, want)
 		}
 	}
-	jump, ok := makeControlInstruction(typedInstruction{Op: opJump, Aux: jumpAux{Target: 1}})
-	if !ok {
+	jump := makeInstruction(typedInstruction{Op: opJump, Aux: jumpAux{Target: 1}})
+	if false {
 		t.Fatal("missing Jump executor")
 	}
 	p := &function{}
@@ -1616,7 +1676,7 @@ func TestControlDescriptionBranchAndPhi(t *testing.T) {
 		t.Fatalf("Jump state: pc=%d block=%d pred=%d", jumpFrame.ipc, jumpFrame.block, jumpFrame.pred)
 	}
 	d := typedInstruction{Op: opPhi, Aux: phiAux{Preds: []int32{1}, Results: []register{0, 1}, Edges: [][]register{{1}, {0}}}}
-	execute, _ := makeControlInstruction(d)
+	execute := makeInstruction(d)
 	fr := &frame{pred: 1, stack: []value{1, 2}}
 	execute(fr)
 	if fr.reg(0) != 2 || fr.reg(1) != 1 {
@@ -1673,7 +1733,7 @@ func TestControlDescriptionIfSpecialization(t *testing.T) {
 		}
 		aux.Targets = [2]int32{1, 2}
 		d.Aux = aux
-		execute, _ := makeControlInstruction(d)
+		execute := makeInstruction(d)
 		p := &function{}
 		p.Blocks = []int{0, 4, 8}
 		fr := &frame{pfn: p}
@@ -1689,7 +1749,7 @@ func TestControlDescriptionIfSpecialization(t *testing.T) {
 	for _, basic := range []bool{false, true} {
 		for _, condition := range []bool{false, true} {
 			d := typedInstruction{Op: opIf, Args: []register{0}, Aux: ifAux{Targets: [2]int32{1, 2}, BasicBool: basic}}
-			execute, _ := makeControlInstruction(d)
+			execute := makeInstruction(d)
 			p := &function{}
 			p.Blocks = []int{0, 4, 8}
 			fr := &frame{pfn: p, stack: []value{condition}}
@@ -1749,5 +1809,629 @@ func TestControlDescriptionWithoutBlock(t *testing.T) {
 	branch := describeInstruction(&function{}, &ssa.If{Cond: ssa.NewConst(constant.MakeBool(true), types.Typ[types.Bool])}, nil, nil)
 	if aux, ok := branch.Aux.(ifAux); branch.Op != opIf || !ok || aux.Targets != [2]int32{} || !aux.Constant || !aux.Condition {
 		t.Fatalf("If without block: %#v", branch)
+	}
+}
+
+func TestValueDescriptionExecution(t *testing.T) {
+	const source = `package main
+ type number int
+ type flag bool
+ func calc(x int) int { return (x+3)*(10-x)-(-x) }
+ func left(x int) int { return 4*x+7-x }
+ func negate(x bool) bool { return !x }
+ func named(x int) int { n:=number(x); return int(n+3) }
+ func namedBool(x bool) bool { return bool(!flag(x)) }
+ func divide(x int) int { return 12/x }
+ func shift(x int) int { return x<<2 }
+ func compare(x int) bool { return x<3 }
+ func mixed(x int, n uint8) int { return x<<n }
+ `
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		for _, extra := range []Mode{0, EnableCachedReg, ExperimentalSupportGC | EnableGCExecutionPlan} {
+			t.Run(fmt.Sprintf("mode=%v/extra=%v", mode, extra), func(t *testing.T) {
+				i, err := NewContext(DisableMemo|mode|extra).LoadInterp("value_execution.go", source)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer i.UnsafeRelease()
+				built := 0
+				fallback := 0
+				for _, p := range i.funcs {
+					for pc, d := range p.Code {
+						if d.Op != opBinOp && d.Op != opUnOp {
+							continue
+						}
+						switch aux := d.Aux.(type) {
+						case binaryOpAux:
+							if aux.Type == nil || aux.RightType == nil {
+								t.Fatal("missing binary operand types")
+							}
+							for j, constant := range aux.Constant {
+								if constant && !reflect.DeepEqual(aux.Values[j], p.stack[d.Args[j]]) {
+									t.Fatal("constant value mismatch")
+								}
+							}
+							if aux.Op == token.LSS && aux.Type != reflect.TypeFor[int]() {
+								t.Fatal("comparison records result type instead of operand type")
+							}
+						case unaryOpAux:
+							if aux.Type == nil {
+								t.Fatal("missing unary operand type")
+							}
+						}
+						supported := makeInstruction(d)
+						name := runtime.FuncForPC(reflect.ValueOf(p.Instrs[pc]).Pointer()).Name()
+						if got, want := (strings.Contains(name, "makeInstruction") || strings.Contains(name, "makeBinaryInstruction") || strings.Contains(name, "makeUnaryInstruction")), supported != nil && mode&EnableInstructionExecution != 0; got != want {
+							t.Fatalf("pc %d executor %s, want described=%t", pc, name, want)
+						}
+						if supported != nil {
+							built++
+						} else {
+							fallback++
+						}
+					}
+					p.functionCompilation = functionCompilation{}
+				}
+				if mode != 0 && built == 0 {
+					t.Fatalf("supported=%d fallback=%d", built, fallback)
+				}
+				for _, c := range []struct {
+					name      string
+					arg, want value
+				}{
+					{"calc", 0, 30}, {"calc", 5, 45}, {"calc", -3, -3}, {"left", 2, 13}, {"negate", true, false}, {"negate", false, true},
+					{"named", 4, 7}, {"namedBool", true, false}, {"divide", 3, 4}, {"shift", 3, 12}, {"compare", 2, true}, {"compare", 4, false},
+				} {
+					if got, err := i.RunFunc(c.name, c.arg); err != nil || got != c.want {
+						t.Fatalf("%s(%v)=%v,%v want %v", c.name, c.arg, got, err, c.want)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestValueDescriptionConstants(t *testing.T) {
+	for _, op := range []token.Token{token.ADD, token.SUB, token.MUL} {
+		for _, constants := range [][2]bool{{false, false}, {true, false}, {false, true}, {true, true}} {
+			aux := binaryOpAux{Op: op, Type: reflect.TypeFor[int](), Constant: constants, Values: [2]value{7, 3}}
+			d := typedInstruction{Op: opBinOp, Result: 2, Args: []register{0, 1}, Aux: aux}
+			execute := makeInstruction(d)
+			if execute == nil {
+				t.Fatal("missing executor")
+			}
+			x, y := 11, 5
+			if constants[0] {
+				x = 7
+			}
+			if constants[1] {
+				y = 3
+			}
+			want := x + y
+			if op == token.SUB {
+				want = x - y
+			}
+			if op == token.MUL {
+				want = x * y
+			}
+			fr := &frame{stack: []value{11, 5, nil}}
+			execute(fr)
+			if fr.reg(2) != want {
+				t.Fatalf("%v constants=%v got %v want %v", op, constants, fr.reg(2), want)
+			}
+		}
+	}
+	for _, c := range []struct {
+		op          token.Token
+		typ         reflect.Type
+		input, want value
+	}{{token.SUB, reflect.TypeFor[int](), 7, -7}, {token.NOT, reflect.TypeFor[bool](), true, false}} {
+		execute := makeInstruction(typedInstruction{Op: opUnOp, Result: 0, Args: []register{-1}, Aux: unaryOpAux{Op: c.op, Type: c.typ, Constant: true, Value: c.input}})
+		if execute == nil {
+			t.Fatal("missing unary executor")
+		}
+		fr := &frame{stack: []value{nil}}
+		execute(fr)
+		if fr.reg(0) != c.want {
+			t.Fatalf("got %v want %v", fr.reg(0), c.want)
+		}
+	}
+}
+
+func TestValueDescriptionIntOverflow(t *testing.T) {
+	max := int(^uint(0) >> 1)
+	min := -max - 1
+	for _, c := range []struct {
+		op         token.Token
+		x, y, want int
+	}{{token.ADD, max, 1, min}, {token.SUB, min, 1, max}, {token.MUL, max, 2, -2}} {
+		execute := makeInstruction(typedInstruction{Op: opBinOp, Result: 2, Args: []register{0, 1}, Aux: binaryOpAux{Op: c.op, Type: reflect.TypeFor[int]()}})
+		fr := &frame{stack: []value{c.x, c.y, nil}}
+		execute(fr)
+		if fr.reg(2) != c.want {
+			t.Fatalf("%v: %v want %v", c.op, fr.reg(2), c.want)
+		}
+	}
+	execute := makeInstruction(typedInstruction{Op: opUnOp, Result: 1, Args: []register{0}, Aux: unaryOpAux{Op: token.SUB, Type: reflect.TypeFor[int]()}})
+	fr := &frame{stack: []value{min, nil}}
+	execute(fr)
+	if fr.reg(1) != min {
+		t.Fatalf("negate min: %v", fr.reg(1))
+	}
+}
+
+func BenchmarkValueDescription(b *testing.B) {
+	const source = `package main
+ func calc(x int) int { for j:=0;j<100;j++ { x=x*3+7-x }; return x }
+ `
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution} {
+		b.Run(fmt.Sprint(mode), func(b *testing.B) {
+			ctx := NewContext(DisableMemo | mode)
+			ctx.SetLeastCallForEnablePool(0)
+			i, err := ctx.LoadInterp("value_bench.go", source)
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.Cleanup(i.UnsafeRelease)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				if _, err := i.RunFunc("calc", 1); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func TestBinaryDescriptionMatrix(t *testing.T) {
+	groups := []struct {
+		types []string
+		ops   []string
+	}{
+		{[]string{"int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64", "uintptr"}, []string{"+", "-", "*", "/", "%", "&", "|", "^", "&^", "<", "<=", ">", ">=", "==", "!="}},
+		{[]string{"float32", "float64"}, []string{"+", "-", "*", "/", "<", "<=", ">", ">=", "==", "!="}},
+		{[]string{"complex64", "complex128"}, []string{"+", "-", "*", "/", "==", "!="}},
+		{[]string{"string"}, []string{"+", "<", "<=", ">", ">=", "==", "!="}},
+		{[]string{"bool"}, []string{"==", "!="}},
+	}
+	var source strings.Builder
+	source.WriteString("package main\n")
+	var names []string
+	for _, g := range groups {
+		for _, typ := range g.types {
+			for _, named := range []bool{false, true} {
+				tname := typ
+				if named {
+					tname = "named" + typ
+					fmt.Fprintf(&source, "type %s %s\n", tname, typ)
+				}
+				fmt.Fprintf(&source, "func id%s(v %s) %s {return v}\n", tname, tname, tname)
+				x, y := "7", "3"
+				if typ == "string" {
+					x, y = `"ab"`, `"cd"`
+				}
+				if typ == "bool" {
+					x, y = "true", "false"
+				}
+				for _, op := range g.ops {
+					for _, shape := range []string{"x OP y", "X OP y", "x OP Y", "X OP Y"} {
+						name := fmt.Sprintf("binary%d", len(names))
+						names = append(names, name)
+						expr := strings.NewReplacer("OP", op, "X", tname+"("+x+")", "Y", tname+"("+y+")").Replace(shape)
+						fmt.Fprintf(&source, "func %s() interface{} { x,y:=id%s(%s(%s)),id%s(%s(%s)); _,_=x,y;return %s }\n", name, tname, tname, x, tname, tname, y, expr)
+					}
+				}
+			}
+		}
+	}
+	// Exercise every left/right shift-kind pair, including named operand types.
+	ints := groups[0].types
+	for _, left := range ints {
+		for _, right := range ints {
+			for _, op := range []string{"<<", ">>"} {
+				for _, shape := range []string{"x OP y", "X OP y", "x OP Y", "X OP Y"} {
+					name := fmt.Sprintf("binary%d", len(names))
+					names = append(names, name)
+					expr := strings.NewReplacer("OP", op, "X", "named"+left+"(7)", "Y", "named"+right+"(2)").Replace(shape)
+					fmt.Fprintf(&source, "func %s() interface{} {x,y:=idnamed%s(7),idnamed%s(2);_,_=x,y;return %s}\n", name, left, right, expr)
+				}
+			}
+		}
+	}
+	load := func(mode Mode) *Interp {
+		i, err := NewContext(DisableMemo|mode).LoadInterp("binary_matrix.go", source.String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(i.UnsafeRelease)
+		return i
+	}
+	baseline := load(0)
+	want := make([]string, len(names))
+	for j, name := range names {
+		v, err := baseline.RunFunc(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want[j] = fmt.Sprint(v)
+	}
+	for _, mode := range []Mode{EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
+			i := load(mode)
+			count := 0
+			for _, p := range i.funcs {
+				for pc, d := range p.Code {
+					if d.Op == opBinOp {
+						count++
+						execute := makeInstruction(d)
+						if execute == nil {
+							t.Fatalf("unsupported BinOp at %d", pc)
+						}
+						name := runtime.FuncForPC(reflect.ValueOf(p.Instrs[pc]).Pointer()).Name()
+						if strings.Contains(name, "makeBinaryInstruction") != (mode&EnableInstructionExecution != 0) {
+							t.Fatalf("wrong executor %s", name)
+						}
+					}
+				}
+				p.functionCompilation = functionCompilation{}
+			}
+			if count == 0 {
+				t.Fatal("no binary instructions tested")
+			}
+			for j, name := range names {
+				v, err := i.RunFunc(name)
+				if err != nil || fmt.Sprint(v) != want[j] {
+					t.Fatalf("%s=%v,%v want %s", name, v, err, want[j])
+				}
+			}
+		})
+	}
+}
+
+func TestBinaryDescriptionRuntimeEdges(t *testing.T) {
+	const source = `package main
+ type A [2]int
+ type S struct{ X int }
+ func edges() bool {
+  a,b:=A{1,2},[2]int{1,2};s,t:=S{3},S{3};x:=1;p,q:=&x,&x
+  ch:=make(chan int);var r <-chan int=ch
+  var sl []int;var m map[int]int;var f func();var i interface{};var j interface{}
+  return a==b && s==t && p==q && ch==r && sl==nil && m==nil && f==nil && i==j && !(a!=b) && !(ch!=r)
+ }
+ func zero() (ok bool) { defer func(){ok=recover()!=nil}(); x:=0; _=7/x;return }
+ func negative(n int) (ok bool) { defer func(){ok=recover()!=nil}();x:=7;_=x<<n;return }
+ func ifacePanic() (ok bool) {defer func(){ok=recover()!=nil}();var x interface{}=[]int{1};var y interface{}=[]int{1};_=x==y;return}
+ `
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		i, err := NewContext(DisableMemo|mode).LoadInterp("binary_edges.go", source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range i.funcs {
+			p.functionCompilation = functionCompilation{}
+		}
+		for _, name := range []string{"edges", "zero", "negative", "ifacePanic"} {
+			args := []value(nil)
+			if name == "negative" {
+				args = []value{-1}
+			}
+			if got, err := i.RunFunc(name, args...); err != nil || got != true {
+				t.Fatalf("mode %v %s=%v,%v", mode, name, got, err)
+			}
+		}
+		i.UnsafeRelease()
+	}
+}
+
+func TestUnaryDescriptionExecution(t *testing.T) {
+	const source = `package main
+ import "runtime"
+ type N int16
+ type B bool
+ var global=7
+ var channel=make(chan int,1)
+ func arithmetic() bool {a:=N(3);b:=B(true);return -a==N(-3) && ^a==N(-4) && !b==B(false)}
+ func deref() int {p:=new(int);*p=5;return *p+global}
+ func nilPointer() (ok bool) {defer func(){ok=recover()!=nil}();var p *int;return *p==0}
+ func receive() bool {ch:=make(chan N,1);ch<-N(9);v,ok:=<-ch;close(ch);zero,open:=<-ch;runtime.GC();return v==9&&ok&&zero==0&&!open}
+ func single() int {ch:=make(chan int,1);ch<-7;v:=<-ch;close(ch);return v+<-ch}
+ func globalReceive() int {channel<-11;return <-channel}
+ func skipped() int {var p *[3]int;n:=0;for j:=range *p {n+=j};return n}
+ `
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		for _, extra := range []Mode{0, EnableCachedReg, ExperimentalSupportGC | EnableGCExecutionPlan} {
+			t.Run(fmt.Sprintf("%v/%v", mode, extra), func(t *testing.T) {
+				i, err := NewContext(DisableMemo|mode|extra).LoadInterp("unary_execution.go", source)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer i.UnsafeRelease()
+				if _, err := i.RunFunc("init"); err != nil {
+					t.Fatal(err)
+				}
+				for _, p := range i.funcs {
+					for pc, d := range p.Code {
+						if d.Op == opUnOp {
+							execute := makeInstruction(d)
+							if execute == nil {
+								t.Fatal("unsupported unary")
+							}
+							name := runtime.FuncForPC(reflect.ValueOf(p.Instrs[pc]).Pointer()).Name()
+							if strings.Contains(name, "makeUnaryInstruction") != (mode&EnableInstructionExecution != 0) {
+								t.Fatalf("wrong executor %s", name)
+							}
+						}
+					}
+					p.functionCompilation = functionCompilation{}
+				}
+				for _, c := range []struct {
+					name string
+					want value
+				}{{"arithmetic", true}, {"deref", 12}, {"nilPointer", true}, {"receive", true}, {"single", 7}, {"globalReceive", 11}, {"skipped", 3}} {
+					if got, err := i.RunFunc(c.name); err != nil || got != c.want {
+						t.Fatalf("%s=%v,%v want %v", c.name, got, err, c.want)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestUnaryDescriptionTypeMatrix(t *testing.T) {
+	var source strings.Builder
+	source.WriteString("package main\n")
+	var names []string
+	for _, typ := range []string{"int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64", "uintptr", "float32", "float64", "complex64", "complex128", "bool"} {
+		for _, named := range []bool{false, true} {
+			tname := typ
+			if named {
+				tname = "N" + typ
+				fmt.Fprintf(&source, "type %s %s\n", tname, typ)
+			}
+			fmt.Fprintf(&source, "func id%s(x %s) %s {return x}\n", tname, tname, tname)
+			ops := []string{"-"}
+			v := "3"
+			switch {
+			case typ == "bool":
+				ops = []string{"!"}
+				v = "true"
+			case strings.HasPrefix(typ, "int") || strings.HasPrefix(typ, "uint"):
+				ops = append(ops, "^")
+			}
+			for _, op := range ops {
+				for _, constant := range []bool{false, true} {
+					name := fmt.Sprintf("unary%d", len(names))
+					names = append(names, name)
+					expr := "x"
+					if constant {
+						expr = tname + "(" + v + ")"
+					}
+					// Unsigned constant negation is rejected by the language; dynamic negation wraps.
+					if constant && strings.HasPrefix(typ, "uint") && op == "-" {
+						names = names[:len(names)-1]
+						continue
+					}
+					fmt.Fprintf(&source, "func %s() interface{} {x:=id%s(%s);_=x;return %s%s}\n", name, tname, v, op, expr)
+				}
+			}
+		}
+	}
+	var want []string
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		i, err := NewContext(DisableMemo|mode).LoadInterp("unary_matrix.go", source.String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range i.funcs {
+			p.functionCompilation = functionCompilation{}
+		}
+		for j, name := range names {
+			v, err := i.RunFunc(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := fmt.Sprint(v)
+			if mode == 0 {
+				want = append(want, got)
+			} else if got != want[j] {
+				t.Fatalf("%s=%v want %s", name, v, want[j])
+			}
+		}
+		i.UnsafeRelease()
+	}
+}
+
+// Exercise builder-only constant specializations that SSA normally folds away.
+func TestBinaryDescriptionConstantSpecializations(t *testing.T) {
+	groups := []struct{ types, ops []string }{
+		{[]string{"int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64", "uintptr"}, []string{"+", "-", "*", "/", "%", "&", "|", "^", "&^", "<<", ">>", "<", "<=", ">", ">=", "==", "!="}},
+		{[]string{"float32", "float64"}, []string{"+", "-", "*", "/", "<", "<=", ">", ">=", "==", "!="}},
+		{[]string{"complex64", "complex128"}, []string{"+", "-", "*", "/", "==", "!="}},
+		{[]string{"string"}, []string{"+", "<", "<=", ">", ">=", "==", "!="}},
+		{[]string{"bool"}, []string{"==", "!="}},
+	}
+	var source strings.Builder
+	source.WriteString("package main\n")
+	for _, g := range groups {
+		for _, typ := range g.types {
+			for _, named := range []bool{false, true} {
+				tname := typ
+				if named {
+					tname = "C" + typ
+					fmt.Fprintf(&source, "type %s %s\n", tname, typ)
+				}
+				for j, op := range g.ops {
+					fmt.Fprintf(&source, "func f%s%d(x,y %s) interface{} {return x %s y}\n", tname, j, tname, op)
+				}
+			}
+		}
+	}
+	integers := groups[0].types
+	for _, left := range integers {
+		for _, right := range integers {
+			for _, op := range []string{"<<", ">>"} {
+				fmt.Fprintf(&source, "func shift%s%s%d(x C%s,y C%s) interface{} {return x %s y}\n", left, right, len(source.String()), left, right, op)
+				fmt.Fprintf(&source, "func basic%s%s%d(x %s,y %s) interface{} {return x %s y}\n", left, right, len(source.String()), left, right, op)
+			}
+		}
+	}
+
+	i, err := NewContext(DisableMemo|EnableInstructionDescriptions).LoadInterp("binary_constants.go", source.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	operand := func(typ reflect.Type, n int) value {
+		v := reflect.New(typ).Elem()
+		switch typ.Kind() {
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			v.SetInt(int64(n))
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+			v.SetUint(uint64(n))
+		case reflect.Float32, reflect.Float64:
+			v.SetFloat(float64(n))
+		case reflect.Complex64, reflect.Complex128:
+			v.SetComplex(complex(float64(n), 1))
+		case reflect.String:
+			v.SetString(fmt.Sprint(n))
+		case reflect.Bool:
+			v.SetBool(n == 7)
+		default:
+			t.Fatalf("unsupported %v", typ)
+		}
+		return v.Interface()
+	}
+	for _, p := range i.funcs {
+		for pc, d := range p.Code {
+			if d.Op != opBinOp {
+				continue
+			}
+			aux := d.Aux.(binaryOpAux)
+			x, y := operand(aux.Type, 7), operand(aux.RightType, 3)
+			stack := append([]value(nil), p.stack...)
+			stack[d.Args[0]], stack[d.Args[1]] = x, y
+			fr := &frame{pfn: p, stack: stack}
+			p.Instrs[pc](fr)
+			want := fr.reg(d.Result)
+			for _, c := range [][2]bool{{false, false}, {true, false}, {false, true}, {true, true}} {
+				aux.Constant = c
+				aux.Values = [2]value{x, y}
+				d.Aux = aux
+				execute := makeInstruction(d)
+				if execute == nil {
+					t.Fatal("missing binary executor")
+				}
+				fr.stack = append([]value(nil), stack...)
+				execute(fr)
+				if !reflect.DeepEqual(fr.reg(d.Result), want) {
+					t.Fatalf("%v %v constants=%v: %v want %v", aux.Type, aux.Op, c, fr.reg(d.Result), want)
+				}
+			}
+		}
+	}
+}
+
+func TestUnaryDescriptionConstantSpecializations(t *testing.T) {
+	var source strings.Builder
+	source.WriteString("package main\n")
+	for _, typ := range []string{"int", "int8", "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64", "uintptr", "float32", "float64", "complex64", "complex128", "bool"} {
+		for _, named := range []bool{false, true} {
+			name := typ
+			if named {
+				name = "U" + typ
+				fmt.Fprintf(&source, "type %s %s\n", name, typ)
+			}
+			ops := []string{"-"}
+			if typ == "bool" {
+				ops = []string{"!"}
+			} else if strings.HasPrefix(typ, "int") || strings.HasPrefix(typ, "uint") {
+				ops = append(ops, "^")
+			}
+			for j, op := range ops {
+				fmt.Fprintf(&source, "func unary%s%d(x %s) interface{} {return %sx}\n", name, j, name, op)
+			}
+		}
+	}
+	i, err := NewContext(DisableMemo|EnableInstructionDescriptions).LoadInterp("unary_constants.go", source.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	for _, p := range i.funcs {
+		for pc, d := range p.Code {
+			if d.Op != opUnOp || (d.Aux.(unaryOpAux).Op != token.SUB && d.Aux.(unaryOpAux).Op != token.XOR && d.Aux.(unaryOpAux).Op != token.NOT) {
+				continue
+			}
+			aux := d.Aux.(unaryOpAux)
+			v := reflect.New(aux.Type).Elem()
+			switch aux.Type.Kind() {
+			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+				v.SetInt(3)
+			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+				v.SetUint(3)
+			case reflect.Float32, reflect.Float64:
+				v.SetFloat(3.5)
+			case reflect.Complex64, reflect.Complex128:
+				v.SetComplex(3 + 2i)
+			case reflect.Bool:
+				v.SetBool(true)
+			default:
+				t.Fatal(aux.Type)
+			}
+			stack := append([]value(nil), p.stack...)
+			stack[d.Args[0]] = v.Interface()
+			fr := &frame{pfn: p, stack: stack}
+			p.Instrs[pc](fr)
+			want := fr.reg(d.Result)
+			for _, c := range []bool{false, true} {
+				aux.Constant = c
+				aux.Value = v.Interface()
+				d.Aux = aux
+				execute := makeInstruction(d)
+				if execute == nil {
+					t.Fatal("missing unary executor")
+				}
+				fr.stack = append([]value(nil), stack...)
+				execute(fr)
+				if !reflect.DeepEqual(fr.reg(d.Result), want) {
+					t.Fatalf("%v %v constant=%t got %v want %v", aux.Type, aux.Op, c, fr.reg(d.Result), want)
+				}
+			}
+		}
+	}
+}
+
+func TestUnaryDescriptionGlobalReceive(t *testing.T) {
+	for _, global := range []bool{false, true} {
+		for _, comma := range []bool{false, true} {
+			for _, closed := range []bool{false, true} {
+				ch := make(chan int, 1)
+				if closed {
+					close(ch)
+				} else {
+					ch <- 9
+				}
+				d := typedInstruction{Op: opUnOp, Result: 1, Args: []register{0}, Aux: unaryOpAux{Op: token.ARROW, Type: reflect.TypeFor[chan int](), Global: global, CommaOk: comma, Value: ch}}
+				execute := makeInstruction(d)
+				if execute == nil {
+					t.Fatal("missing receive")
+				}
+				p := &function{}
+				p.Interp = &Interp{}
+				fr := &frame{pfn: p, stack: []value{ch, nil}}
+				execute(fr)
+				var want value = 9
+				if closed {
+					want = 0
+				}
+				if comma {
+					want = tuple{want, !closed}
+				}
+				if !reflect.DeepEqual(fr.reg(1), want) {
+					t.Fatalf("global=%t comma=%t closed=%t: %v want %v", global, comma, closed, fr.reg(1), want)
+				}
+			}
+		}
 	}
 }

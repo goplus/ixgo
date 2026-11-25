@@ -60,15 +60,25 @@ type instructionAux interface {
 	instructionAux()
 }
 
-// binaryOpAux records the arithmetic, comparison or bitwise operator for BinOp.
-type binaryOpAux struct{ Op token.Token }
+// binaryOpAux records the operator, operand type and constant specialization.
+type binaryOpAux struct {
+	Op        token.Token
+	Type      reflect.Type
+	RightType reflect.Type
+	Constant  [2]bool
+	Values    [2]value
+}
 
 func (binaryOpAux) instructionAux() {}
 
 // unaryOpAux records the unary operator; CommaOk requests the receive-ok result.
 type unaryOpAux struct {
-	Op      token.Token
-	CommaOk bool
+	Op       token.Token
+	CommaOk  bool
+	Type     reflect.Type
+	Constant bool
+	Global   bool
+	Value    value
 }
 
 func (unaryOpAux) instructionAux() {}
@@ -327,6 +337,19 @@ func descriptionRegister(pfn *function, v ssa.Value) register {
 	return -1
 }
 
+// descriptionOperand reads the allocation without changing the register map.
+func descriptionOperand(pfn *function, v ssa.Value) (kind, value) {
+	encoded, ok := pfn.index[v]
+	if !ok {
+		return kindInvalid, nil
+	}
+	r := register(encoded & 0xffffff)
+	if int(r) >= len(pfn.stack) {
+		return kindInvalid, nil
+	}
+	return kind(encoded >> 30), pfn.stack[r]
+}
+
 func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.Value, elidedResults []register) typedInstruction {
 	d := typedInstruction{Result: -1}
 	for _, operand := range operands {
@@ -355,10 +378,24 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 	switch v := instr.(type) {
 	case *ssa.BinOp:
 		d.Op = opBinOp
-		d.Aux = binaryOpAux{Op: v.Op}
+		aux := binaryOpAux{Op: v.Op, Type: pfn.Interp.preToType(v.X.Type()), RightType: pfn.Interp.preToType(v.Y.Type())}
+		for j, operand := range []ssa.Value{v.X, v.Y} {
+			k, v := descriptionOperand(pfn, operand)
+			if k == kindConst {
+				aux.Constant[j] = true
+				aux.Values[j] = v
+			}
+		}
+		d.Aux = aux
 	case *ssa.UnOp:
 		d.Op = opUnOp
-		d.Aux = unaryOpAux{Op: v.Op, CommaOk: v.CommaOk}
+		aux := unaryOpAux{Op: v.Op, CommaOk: v.CommaOk, Type: pfn.Interp.preToType(v.X.Type())}
+		k, value := descriptionOperand(pfn, v.X)
+		aux.Constant, aux.Global = k == kindConst, k == kindGlobal
+		if aux.Constant || aux.Global {
+			aux.Value = value
+		}
+		d.Aux = aux
 	case *ssa.Phi:
 		d.Op = opPhi
 		aux := phiAux{}
