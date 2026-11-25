@@ -1,5 +1,3 @@
-//go:build instruction
-
 /*
  * Copyright (c) 2026 The GoPlus Authors (goplus.org). All rights reserved.
  * Licensed under the Apache License, Version 2.0.

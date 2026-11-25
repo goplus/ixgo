@@ -24,6 +24,15 @@ jobs:
     - name: Test ixgo
       run: go test -race -v -coverprofile="coverage.txt" -covermode=atomic .
 
+    - name: Test instruction backend
+      run: go test -race -v -tags instruction -coverprofile="coverage.instruction.txt" -covermode=atomic .
+
+    - name: Check generated instruction code
+      shell: bash
+      run: |
+        go run instruction_exec_gen.go
+        git diff --exit-code -- instruction_ops.go
+
     - name: Test xgobuild
       run: go test -race -v -coverprofile="coverage.xgobuild.txt" -covermode=atomic ./xgobuild
 
@@ -34,7 +43,7 @@ jobs:
       uses: codecov/codecov-action@v7
       with:
         slug: goplus/ixgo
-        files: coverage.txt,coverage.xgobuild.txt,coverage.transform.txt
+        files: coverage.txt,coverage.instruction.txt,coverage.xgobuild.txt,coverage.transform.txt
 
     - name: Install ixgo
       run: go install -v ./cmd/ixgo
