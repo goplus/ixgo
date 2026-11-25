@@ -2453,7 +2453,10 @@ func TestEmptyPhiDescription(t *testing.T) {
 }
 
 func TestPhiDirectAssignment(t *testing.T) {
-	for _, c := range phiDirectAssignmentCases[2:] {
+	for _, c := range phiDirectAssignmentCases {
+		if len(c.results) == 0 || len(c.edges) == 0 {
+			continue
+		}
 		t.Run(c.name, func(t *testing.T) {
 			preds := make([]int32, len(c.edges[0]))
 			for j := range preds {
