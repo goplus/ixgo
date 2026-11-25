@@ -337,6 +337,19 @@ func descriptionRegister(pfn *function, v ssa.Value) register {
 	return -1
 }
 
+// descriptionOperand reads the allocation without changing the register map.
+func descriptionOperand(pfn *function, v ssa.Value) (kind, value) {
+	encoded, ok := pfn.index[v]
+	if !ok {
+		return kindInvalid, nil
+	}
+	r := register(encoded & 0xffffff)
+	if int(r) >= len(pfn.stack) {
+		return kindInvalid, nil
+	}
+	return kind(encoded >> 30), pfn.stack[r]
+}
+
 func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.Value, elidedResults []register) typedInstruction {
 	d := typedInstruction{Result: -1}
 	for _, operand := range operands {
@@ -367,22 +380,20 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 		d.Op = opBinOp
 		aux := binaryOpAux{Op: v.Op, Type: pfn.Interp.preToType(v.X.Type()), RightType: pfn.Interp.preToType(v.Y.Type())}
 		for j, operand := range []ssa.Value{v.X, v.Y} {
-			if _, ok := operand.(*ssa.Const); ok {
+			k, v := descriptionOperand(pfn, operand)
+			if k == kindConst {
 				aux.Constant[j] = true
-				aux.Values[j] = pfn.stack[descriptionRegister(pfn, operand)]
+				aux.Values[j] = v
 			}
 		}
 		d.Aux = aux
 	case *ssa.UnOp:
 		d.Op = opUnOp
 		aux := unaryOpAux{Op: v.Op, CommaOk: v.CommaOk, Type: pfn.Interp.preToType(v.X.Type())}
-		if _, ok := v.X.(*ssa.Global); ok {
-			aux.Global = true
-			aux.Value = pfn.stack[descriptionRegister(pfn, v.X)]
-		}
-		if _, ok := v.X.(*ssa.Const); ok {
-			aux.Constant = true
-			aux.Value = pfn.stack[descriptionRegister(pfn, v.X)]
+		k, value := descriptionOperand(pfn, v.X)
+		aux.Constant, aux.Global = k == kindConst, k == kindGlobal
+		if aux.Constant || aux.Global {
+			aux.Value = value
 		}
 		d.Aux = aux
 	case *ssa.Phi:

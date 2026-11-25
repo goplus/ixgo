@@ -353,7 +353,7 @@ func (visit *visitor) function(fn *ssa.Function) {
 				descriptions[index] = describeInstruction(pfn, instr, instr.Operands(buf[:0]), dests)
 				if visit.intp.ctx.Mode&EnableInstructionExecution != 0 {
 					// Lower first to preserve register allocation and instruction elision.
-					if described, ok := makeInstruction(descriptions[index]); ok {
+					if described := makeInstruction(descriptions[index]); described != nil {
 						ifn = described
 					}
 				}
