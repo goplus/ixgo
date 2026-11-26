@@ -255,10 +255,10 @@ type panicAux struct{ Value reflect.Type }
 
 func (panicAux) instructionAux() {}
 
-// closureAux records the signature and capture order without retaining SSA.
-// Signature does not identify the function body; target resolution is pending.
+// closureAux records the runtime body, signature and capture order without SSA.
 // A binding of -1 means that no register was allocated for that input.
 type closureAux struct {
+	Body      *function
 	Signature reflect.Type
 	Bindings  []register
 }
@@ -288,7 +288,7 @@ const (
 	callInvoke
 )
 
-// callSiteAux classifies a call without resolving a function body. Target is
+// callSiteAux records common call metadata. Target is
 // the function-value register or invoke receiver register, or -1 if absent.
 // Arguments exclude the invoke receiver; static method arguments and Signature
 // both include the receiver as their first input.
@@ -307,16 +307,39 @@ type callSiteAux struct {
 
 func (callSiteAux) instructionAux() {}
 
-// opCall uses callAux; opGo and opDefer use callSiteAux directly.
-// callAux includes call-site data and result placement after tuple extraction.
-// A nil ExtractResults means the call still uses its ordinary result register.
-// A -1 entry denotes an unused result. Static target resolution is incremental.
+// callAux adds result placement to common call metadata. A nil ExtractResults
+// uses the ordinary result register; a -1 entry denotes an unused result.
+// Unresolved, dynamic, builtin and invoke calls retain this base auxiliary data.
 type callAux struct {
 	callSiteAux
-	// ExtractResults is a copy of the destinations used by the call closure.
-	// A nil slice means the call writes its ordinary result register.
 	ExtractResults []register
 }
+
+// directCallAux retains the adapter selected by lowering.
+type directCallAux struct {
+	callAux
+	Adapter DirectCallAdapter
+}
+
+func (directCallAux) instructionAux() {}
+
+// externalCallAux retains the callee register value allocated by lowering.
+// Go and Defer use it for metadata only.
+type externalCallAux struct {
+	callAux
+	External reflect.Value
+}
+
+func (externalCallAux) instructionAux() {}
+
+// bodyCallAux retains the interpreted body loaded by lowering.
+// Go and Defer use it for metadata only.
+type bodyCallAux struct {
+	callAux
+	Body *function
+}
+
+func (bodyCallAux) instructionAux() {}
 
 // typedInstruction records partial execution metadata alongside the closure
 // backend. Each entry corresponds to one generated closure; Phi auxiliary data
@@ -430,19 +453,19 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 		for i, binding := range v.Bindings {
 			bindings[i] = descriptionRegister(pfn, binding)
 		}
-		d.Aux = closureAux{Signature: signature, Bindings: bindings}
+		d.Aux = closureAux{Body: pfn.Interp.funcs[fn], Signature: signature, Bindings: bindings}
 	case *ssa.Call:
 		d.Op = opCall
 		if elidedResults != nil {
 			d.Result = -1
 		}
-		d.Aux = callAux{callSiteAux: describeCallSite(pfn, &v.Call), ExtractResults: elidedResults}
+		d.Aux = describeCall(pfn, &v.Call, elidedResults)
 	case *ssa.Go:
 		d.Op = opGo
-		d.Aux = describeCallSite(pfn, &v.Call)
+		d.Aux = describeCall(pfn, &v.Call, nil)
 	case *ssa.Defer:
 		d.Op = opDefer
-		d.Aux = describeCallSite(pfn, &v.Call)
+		d.Aux = describeCall(pfn, &v.Call, nil)
 	case *ssa.ChangeType:
 		d.Op = opChangeType
 		d.Aux = describeConversion(pfn, v.X, v.Type())
@@ -596,6 +619,29 @@ func describeCallSite(pfn *function, call *ssa.CallCommon) callSiteAux {
 		aux.Kind = callStatic
 	}
 	return aux
+}
+
+// describeCall reuses the target selected by lowering, including its adapter.
+func describeCall(pfn *function, call *ssa.CallCommon, dests []register) instructionAux {
+	base := callAux{callSiteAux: describeCallSite(pfn, call), ExtractResults: dests}
+	if base.Kind != callStatic {
+		return base
+	}
+	if pfn.directCall == call && pfn.directAdapter != nil {
+		return directCallAux{callAux: base, Adapter: pfn.directAdapter}
+	}
+	fn := call.Value.(*ssa.Function)
+	if fn.Blocks != nil {
+		if body := pfn.Interp.funcs[fn]; body != nil {
+			return bodyCallAux{callAux: base, Body: body}
+		}
+	} else if kind, value := descriptionOperand(pfn, fn); kind == kindFunction && value != nil {
+		external := reflect.ValueOf(value)
+		if external.Kind() == reflect.Func {
+			return externalCallAux{callAux: base, External: external}
+		}
+	}
+	return base
 }
 
 func describeField(pfn *function, source ssa.Value, index int) fieldAux {

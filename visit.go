@@ -353,7 +353,7 @@ func (visit *visitor) function(fn *ssa.Function) {
 				descriptions[index] = describeInstruction(pfn, instr, instr.Operands(buf[:0]), dests)
 				if visit.intp.ctx.Mode&EnableInstructionExecution != 0 {
 					// Lower first to preserve register allocation and instruction elision.
-					if described := makeInstruction(descriptions[index]); described != nil {
+					if described := makeInstruction(visit.intp, descriptions[index]); described != nil {
 						ifn = described
 					}
 				}
@@ -493,8 +493,10 @@ func (visit *visitor) function(fn *ssa.Function) {
 	pfn.initPool()
 	pfn.finishMetadata()
 	if instructionSupported && visit.intp.ctx.Mode&(EnableInstructionDescriptions|EnableInstructionExecution) != 0 {
-		// Code now owns destination slices; release temporary SSA-keyed lookup data.
+		// Code now owns call metadata; release temporary lowering state.
 		pfn.callDests = nil
+		pfn.directCall = nil
+		pfn.directAdapter = nil
 	}
 }
 

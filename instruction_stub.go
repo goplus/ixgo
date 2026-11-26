@@ -14,4 +14,4 @@ func describeInstruction(*function, ssa.Instruction, []*ssa.Value, []register) t
 	return typedInstruction{}
 }
 
-func makeInstruction(typedInstruction) func(*frame) { return nil }
+func makeInstruction(*Interp, typedInstruction) func(*frame) { return nil }
