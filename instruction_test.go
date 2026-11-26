@@ -2712,9 +2712,6 @@ func TestDescriptionStaticCallExecution(t *testing.T) {
 				calls, closures := 0, 0
 				for _, p := range i.funcs {
 					for pc, d := range p.Code {
-						if d.Op != opCall && d.Op != opMakeClosure {
-							continue
-						}
 						supported := false
 						switch aux := d.Aux.(type) {
 						case dynamicCallAux:

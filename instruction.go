@@ -312,7 +312,8 @@ func (callSiteAux) instructionAux() {}
 
 // callAux adds result placement to common call metadata. A nil ExtractResults
 // uses the ordinary result register; a -1 entry denotes an unused result.
-// Unresolved, dynamic, builtin and invoke calls retain this base auxiliary data.
+// Unresolved targets, builtin and invoke calls retain this base auxiliary data.
+// Dynamic calls with a target register use dynamicCallAux.
 type callAux struct {
 	callSiteAux
 	ExtractResults []register
@@ -629,7 +630,8 @@ func describeCallSite(pfn *function, call *ssa.CallCommon) callSiteAux {
 	return aux
 }
 
-// describeCall reuses the target selected by lowering, including its adapter.
+// describeCall reuses lowering-selected targets, including adapters; dynamic
+// function values use dynamicCallAux when their target register is available.
 func describeCall(pfn *function, call *ssa.CallCommon, dests []register, deferStack ssa.Value) instructionAux {
 	base := callAux{callSiteAux: describeCallSite(pfn, call), ExtractResults: dests}
 	if deferStack != nil {
