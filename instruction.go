@@ -639,6 +639,11 @@ func describeCall(pfn *function, call *ssa.CallCommon, dests []register, deferSt
 			return base
 		}
 	}
+	// Immediate closures have dedicated binding paths in lowering for Call,
+	// Go and Defer; keep them until those environments are described directly.
+	if _, immediate := call.Value.(*ssa.MakeClosure); immediate {
+		return base
+	}
 	if base.Kind == callDynamic && base.Target >= 0 {
 		return dynamicCallAux{callAux: base}
 	}
