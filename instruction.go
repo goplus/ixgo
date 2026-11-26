@@ -295,7 +295,8 @@ const (
 // Builtins have no Signature because they have no representable Go function
 // signature.
 type callSiteAux struct {
-	// DeferStack is the enclosing defer-stack register, or -1 for the current frame.
+	// DeferStack is the enclosing defer-stack register, or -1 for the current
+	// frame or an unavailable token. An unavailable token retains lowering.
 	DeferStack register
 	Kind       callKind
 	Signature  reflect.Type
