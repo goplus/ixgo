@@ -1,3 +1,5 @@
+//go:build instruction
+
 package ixgo
 
 // makeInstruction builds supported closures solely from execution metadata.
@@ -91,25 +93,4 @@ func makeInstruction(d typedInstruction) func(*frame) {
 		return makeUnaryInstruction(d)
 	}
 	return nil
-}
-
-// phiDirectAssignment checks that each source survives all earlier writes for
-// every predecessor. Self assignments preserve the register's old value.
-func phiDirectAssignment(results []register, edges [][]register) bool {
-	if len(results) == 0 || len(edges) == 0 {
-		return false
-	}
-	for pred := range edges[0] {
-		written := make(map[register]bool, len(results))
-		for i, result := range results {
-			source := edges[i][pred]
-			if written[source] {
-				return false
-			}
-			if source != result {
-				written[result] = true
-			}
-		}
-	}
-	return true
 }

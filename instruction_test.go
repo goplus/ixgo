@@ -1,3 +1,5 @@
+//go:build instruction
+
 package ixgo
 
 import (
@@ -2451,24 +2453,11 @@ func TestEmptyPhiDescription(t *testing.T) {
 }
 
 func TestPhiDirectAssignment(t *testing.T) {
-	for _, c := range []struct {
-		name    string
-		results []register
-		edges   [][]register
-		safe    bool
-	}{
-		{"single", []register{0}, [][]register{{0, 2}}, true},
-		{"independent", []register{0, 1}, [][]register{{2, 3}, {3, 2}}, true},
-		{"safe-chain", []register{0, 1}, [][]register{{1}, {2}}, true},
-		{"unsafe-chain", []register{0, 1}, [][]register{{2}, {0}}, false},
-		{"swap", []register{0, 1}, [][]register{{1}, {0}}, false},
-		{"self", []register{0, 1}, [][]register{{0}, {0}}, true},
-		{"mixed-predecessors", []register{0, 1}, [][]register{{2, 1}, {3, 0}}, false},
-	} {
+	for _, c := range phiDirectAssignmentCases {
+		if len(c.results) == 0 || len(c.edges) == 0 {
+			continue
+		}
 		t.Run(c.name, func(t *testing.T) {
-			if got := phiDirectAssignment(c.results, c.edges); got != c.safe {
-				t.Fatalf("safe=%t want %t", got, c.safe)
-			}
 			preds := make([]int32, len(c.edges[0]))
 			for j := range preds {
 				preds[j] = int32(j + 1)
@@ -2528,5 +2517,64 @@ func BenchmarkPhiAssignment(b *testing.B) {
 				}
 			})
 		}
+	}
+}
+
+func TestTypedInstructionDescription(t *testing.T) {
+	ctx := NewContext(DisableMemo | EnableInstructionDescriptions)
+	interp, err := ctx.LoadInterp("typed_instruction.go", `package main
+func branch(n int) int {
+	if n > 0 { return n + 1 }
+	return n - 1
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer interp.UnsafeRelease()
+	p := interp.funcs[interp.mainpkg.Func("branch")]
+	if p == nil {
+		t.Fatal("missing branch function")
+	}
+	if len(p.Code) != len(p.Instrs) || len(p.Code) != len(p.ssaInstrs) {
+		t.Fatalf("typed code lengths = %d/%d/%d", len(p.Code), len(p.Instrs), len(p.ssaInstrs))
+	}
+	if len(p.Code) == 0 {
+		t.Fatal("empty typed code")
+	}
+	var sawBranch bool
+	for pc, desc := range p.Code {
+		if desc.Op == opIf || desc.Op == opJump {
+			sawBranch = true
+			switch desc.Op {
+			case opIf:
+				if _, ok := desc.Aux.(ifAux); !ok {
+					t.Fatalf("missing If targets at pc %d", pc)
+				}
+			case opJump:
+				if _, ok := desc.Aux.(jumpAux); !ok {
+					t.Fatalf("missing Jump target at pc %d", pc)
+				}
+			}
+		}
+		if desc.Op == opBinOp {
+			aux, ok := desc.Aux.(binaryOpAux)
+			if !ok || aux.Op == token.ILLEGAL {
+				t.Fatalf("missing binary operator at pc %d", pc)
+			}
+		}
+		if desc.Op == opInvalid {
+			t.Fatalf("invalid opcode at pc %d", pc)
+		}
+		_ = p.PosForPC(pc) // Some synthetic instructions have no source position.
+	}
+	if !sawBranch {
+		t.Fatal("missing branch instruction")
+	}
+	if len(p.Blocks) == 0 || p.Blocks[0] != 0 {
+		t.Fatalf("block entries = %v", p.Blocks)
+	}
+	if got := interp.callFunction(&frame{}, p, []value{2}, nil); got != 3 {
+		t.Fatalf("branch result = %v, want 3", got)
 	}
 }

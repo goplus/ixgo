@@ -1,3 +1,5 @@
+//go:build instruction
+
 package ixgo
 
 import (
@@ -8,6 +10,8 @@ import (
 
 	"golang.org/x/tools/go/ssa"
 )
+
+const instructionSupported = true
 
 // instructionOpcode identifies an execution instruction independently of its
 // SSA representation. The closure backend remains the executor while this

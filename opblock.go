@@ -1490,7 +1490,7 @@ func elideCallExtracts(pfn *function, instr ssa.Value, nres int) []register {
 		}
 	}
 	pfn.elidedTuples = append(pfn.elidedTuples, pfn.regIndex(instr))
-	if pfn.Interp != nil && pfn.Interp.ctx.Mode&(EnableInstructionDescriptions|EnableInstructionExecution) != 0 {
+	if instructionSupported && pfn.Interp != nil && pfn.Interp.ctx.Mode&(EnableInstructionDescriptions|EnableInstructionExecution) != 0 {
 		if pfn.callDests == nil {
 			pfn.callDests = make(map[ssa.Value][]register)
 		}
@@ -1996,4 +1996,25 @@ func builtinInterfaceArgs(i *Interp, name string, args []ssa.Value) []bool {
 		result[n] = i.preToType(arg.Type()).Kind() == reflect.Interface
 	}
 	return result
+}
+
+// phiDirectAssignment reports whether the existing Phi order is safe to run
+// as sequential register copies for every predecessor.
+func phiDirectAssignment(results []register, edges [][]register) bool {
+	if len(results) == 0 || len(edges) == 0 {
+		return false
+	}
+	for pred := range edges[0] {
+		written := make(map[register]bool, len(results))
+		for i, result := range results {
+			source := edges[i][pred]
+			if written[source] {
+				return false
+			}
+			if source != result {
+				written[result] = true
+			}
+		}
+	}
+	return true
 }
