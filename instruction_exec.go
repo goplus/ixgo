@@ -2,11 +2,52 @@
 
 package ixgo
 
-import "reflect"
+import (
+	"reflect"
+	"sync/atomic"
+)
 
 // makeInstruction binds execution metadata to the supplied runtime context.
 // It returns nil when the description has no executor implementation.
 // Unsupported instructions retain their existing lowering.
+func instructionGoCall(interp *Interp, desc callDescription) func(*frame) {
+	return func(fr *frame) {
+		fn, args := desc.prepare(interp, fr)
+		root := rootFrame()
+		run := interp.prepareGoCall(root, fn, args, nil)
+		atomic.AddInt32(&interp.goroutines, 1)
+		go func() {
+			defer atomic.AddInt32(&interp.goroutines, -1)
+			if interp.ctx.RunContext != nil {
+				defer func() {
+					if e := recover(); e != nil {
+						interp.cherror <- PanicError{stack: debugStack(root), Value: e}
+					}
+				}()
+			}
+			run()
+		}()
+	}
+}
+
+func instructionDeferCall(interp *Interp, desc callDescription, id register) func(*frame) {
+	if id < 0 {
+		return func(fr *frame) {
+			fn, args := desc.prepare(interp, fr)
+			fr._defer = &_defer{fn: fn, args: args, tail: fr._defer}
+		}
+	}
+	return func(fr *frame) {
+		fn, args := desc.prepare(interp, fr)
+		d := &_defer{fn: fn, args: args}
+		head, ok := deferStackHead(fr.reg(id))
+		if !ok {
+			panic("range-over-func defer: missing deferstack token")
+		}
+		pushDeferAt(head, d)
+	}
+}
+
 func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 	switch d.Op {
 	case opMakeClosure:
@@ -22,6 +63,7 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 			}
 			fr.setReg(result, body.makeFunction(signature, env).Interface())
 		}
+
 	case opGo, opDefer:
 		var desc callDescription
 		var stack register
@@ -48,9 +90,9 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 			return nil
 		}
 		if d.Op == opGo {
-			return makeGoCall(interp, desc, nil)
+			return instructionGoCall(interp, desc)
 		}
-		return makeDeferCall(interp, desc, nil, stack)
+		return instructionDeferCall(interp, desc, stack)
 
 	case opCall:
 		switch aux := d.Aux.(type) {

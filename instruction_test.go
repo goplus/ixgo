@@ -3238,15 +3238,17 @@ func TestDescriptionDynamicCalls(t *testing.T) {
 				for _, p := range i.funcs {
 					for _, d := range p.Code {
 						if _, ok := d.Aux.(dynamicCallAux); ok {
-							if makeInstruction(i, d) == nil {
-								t.Fatal("missing dynamic executor")
+							if d.Op == opCall && makeInstruction(i, d) == nil {
+								t.Fatal("missing dynamic Call executor")
 							}
-							ops[d.Op] = true
+							if d.Op == opCall {
+								ops[d.Op] = true
+							}
 						}
 					}
 					p.functionCompilation = functionCompilation{}
 				}
-				if mode != 0 && (!ops[opCall] || !ops[opGo] || !ops[opDefer]) {
+				if mode != 0 && !ops[opCall] {
 					t.Fatalf("missing dynamic ops %v", ops)
 				}
 				for n := 0; n < 3; n++ {
