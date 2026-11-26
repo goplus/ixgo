@@ -3004,3 +3004,104 @@ func TestDescriptionCallFallbacks(t *testing.T) {
 		t.Fatal("unallocated external resolved")
 	}
 }
+
+func TestDescriptionGoDeferExecution(t *testing.T) {
+	const source = `package godefer
+ import "sync"
+ import "strings"
+ type counter struct { n int }
+ func (c *counter) Add(n int) { c.n += n }
+ func send(ch chan int, n int) { ch <- n }
+ func recovered() (r int) { defer func(){if recover()!=nil {r=7}}(); panic("test") }
+ func deferred() (r int) {
+ c:=&counter{}; n:=2
+ defer func(){r=c.n}()
+ defer c.Add(n)
+ n=9
+ defer c.Add(3)
+ defer strings.ToUpper("unused")
+ return
+ }
+ func Run() int {
+ ch:=make(chan int,1); n:=4
+ go send(ch,n); n=20
+ x:=<-ch
+ c:=&counter{}; defer c.Add(10)
+ var wg sync.WaitGroup; wg.Add(1); go wg.Done(); wg.Wait()
+ captured:=6; go func(){ch<-captured}(); y:=<-ch
+ return x+y+deferred()+recovered()
+ }`
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		for _, extra := range []Mode{0, EnableCachedReg, ExperimentalSupportGC | EnableGCExecutionPlan} {
+			t.Run(fmt.Sprintf("mode=%v/extra=%v", mode, extra), func(t *testing.T) {
+				ctx := NewContext(DisableMemo | mode | extra)
+				i, err := ctx.LoadInterp("go_defer.go", source)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer i.UnsafeRelease()
+				supported := 0
+				for _, p := range i.funcs {
+					for _, d := range p.Code {
+						if d.Op != opGo && d.Op != opDefer {
+							continue
+						}
+						switch d.Aux.(type) {
+						case bodyCallAux, externalCallAux:
+							if makeInstruction(i, d) == nil {
+								t.Fatal("missing static go/defer executor")
+							}
+							supported++
+						}
+					}
+					p.functionCompilation = functionCompilation{}
+				}
+				if mode != 0 && supported == 0 {
+					t.Fatal("no static go/defer descriptions")
+				}
+				for n := 0; n < 3; n++ {
+					if got, err := i.RunFunc("Run"); err != nil || got != 22 {
+						t.Fatalf("Run=%v,%v want 22", got, err)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestDescriptionDeferStackExecution(t *testing.T) {
+	interp := &Interp{}
+	for _, external := range []bool{false, true} {
+		t.Run(fmt.Sprintf("external=%v", external), func(t *testing.T) {
+			base := callAux{callSiteAux: callSiteAux{Kind: callStatic, DeferStack: 0, Arguments: []register{1}}}
+			body := &function{}
+			var aux instructionAux = bodyCallAux{callAux: base, Body: body}
+			ext := reflect.ValueOf(func(int) {})
+			if external {
+				aux = externalCallAux{callAux: base, External: ext}
+			}
+			run := makeInstruction(interp, typedInstruction{Op: opDefer, Aux: aux})
+			var head *_defer
+			fr := &frame{stack: []value{&head, 42}}
+			run(fr)
+			fr.stack[1] = 99
+			if fr._defer != nil || head == nil || len(head.args) != 1 || head.args[0] != 42 {
+				t.Fatal("incorrect defer stack or argument snapshot")
+			}
+			if external {
+				if got, ok := head.fn.(reflect.Value); !ok || got.Pointer() != ext.Pointer() {
+					t.Fatal("wrong external target")
+				}
+			} else if head.fn != body {
+				t.Fatal("wrong body target")
+			}
+		})
+	}
+	for _, op := range []instructionOpcode{opGo, opDefer} {
+		for _, aux := range []instructionAux{callAux{}, bodyCallAux{}, externalCallAux{}} {
+			if makeInstruction(interp, typedInstruction{Op: op, Aux: aux}) != nil {
+				t.Fatal("unresolved go/defer should retain lowering")
+			}
+		}
+	}
+}

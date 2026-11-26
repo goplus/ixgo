@@ -22,6 +22,30 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 			}
 			fr.setReg(result, body.makeFunction(signature, env).Interface())
 		}
+	case opGo, opDefer:
+		var desc callDescription
+		var stack register
+		switch aux := d.Aux.(type) {
+		case bodyCallAux:
+			if aux.Body == nil {
+				return nil
+			}
+			desc = callDescription{target: aux.Body, args: aux.Arguments}
+			stack = aux.DeferStack
+		case externalCallAux:
+			if !aux.External.IsValid() {
+				return nil
+			}
+			desc = callDescription{target: aux.External, args: aux.Arguments}
+			stack = aux.DeferStack
+		default:
+			return nil
+		}
+		if d.Op == opGo {
+			return makeGoCall(interp, desc, nil)
+		}
+		return makeDeferCall(interp, desc, nil, stack)
+
 	case opCall:
 		switch aux := d.Aux.(type) {
 		case directCallAux:

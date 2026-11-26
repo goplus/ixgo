@@ -1291,23 +1291,7 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 		iv, ia, ib := getCallIndex(pfn, &instr.Call)
 		desc := interp.describeCall(&instr.Call, iv, ia, ib)
 		interfaceArgs := builtinInterfaceArgs(interp, desc.builtinName(), instr.Call.Args)
-		return func(fr *frame) {
-			fn, args := desc.prepare(interp, fr)
-			root := rootFrame()
-			run := interp.prepareGoCall(root, fn, args, interfaceArgs)
-			atomic.AddInt32(&interp.goroutines, 1)
-			go func() {
-				defer atomic.AddInt32(&interp.goroutines, -1)
-				if interp.ctx.RunContext != nil {
-					defer func() {
-						if e := recover(); e != nil {
-							interp.cherror <- PanicError{stack: debugStack(root), Value: e}
-						}
-					}()
-				}
-				run()
-			}()
-		}
+		return makeGoCall(interp, desc, interfaceArgs)
 	case *ssa.Defer:
 		return makeDefer(interp, pfn, instr)
 	case *ssa.Send:
@@ -1863,20 +1847,32 @@ func deferStackOwner(fn *ssa.Function) *ssa.Function {
 	return fn
 }
 
+func makeGoCall(interp *Interp, desc callDescription, interfaceArgs []bool) func(*frame) {
+	return func(fr *frame) {
+		fn, args := desc.prepare(interp, fr)
+		root := rootFrame()
+		run := interp.prepareGoCall(root, fn, args, interfaceArgs)
+		atomic.AddInt32(&interp.goroutines, 1)
+		go func() {
+			defer atomic.AddInt32(&interp.goroutines, -1)
+			if interp.ctx.RunContext != nil {
+				defer func() {
+					if e := recover(); e != nil {
+						interp.cherror <- PanicError{stack: debugStack(root), Value: e}
+					}
+				}()
+			}
+			run()
+		}()
+	}
+}
+
 func makeDefer(interp *Interp, pfn *function, instr *ssa.Defer) func(fr *frame) {
 	iv, ia, ib := getCallIndex(pfn, &instr.Call)
 	desc := interp.describeCall(&instr.Call, iv, ia, ib)
 	interfaceArgs := builtinInterfaceArgs(interp, desc.builtinName(), instr.Call.Args)
 	if instr.DeferStack == nil {
-		return func(fr *frame) {
-			fn, args := desc.prepare(interp, fr)
-			fr._defer = &_defer{
-				fn:            fn,
-				args:          args,
-				interfaceArgs: interfaceArgs,
-				tail:          fr._defer,
-			}
-		}
+		return makeDeferCall(interp, desc, interfaceArgs, -1)
 	}
 	ownerFn := deferStackOwner(pfn.Fn)
 	if ownerFn == nil {
@@ -1885,7 +1881,16 @@ func makeDefer(interp *Interp, pfn *function, instr *ssa.Defer) func(fr *frame) 
 	if ofn := interp.funcs[ownerFn]; ofn != nil {
 		ofn.needInject = true
 	}
-	id := pfn.regIndex(instr.DeferStack)
+	return makeDeferCall(interp, desc, interfaceArgs, pfn.regIndex(instr.DeferStack))
+}
+
+func makeDeferCall(interp *Interp, desc callDescription, interfaceArgs []bool, id register) func(*frame) {
+	if id < 0 {
+		return func(fr *frame) {
+			fn, args := desc.prepare(interp, fr)
+			fr._defer = &_defer{fn: fn, args: args, interfaceArgs: interfaceArgs, tail: fr._defer}
+		}
+	}
 	return func(fr *frame) {
 		fn, args := desc.prepare(interp, fr)
 		d := &_defer{
