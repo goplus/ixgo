@@ -3238,9 +3238,6 @@ func TestDescriptionDynamicCalls(t *testing.T) {
 				for _, p := range i.funcs {
 					for _, d := range p.Code {
 						if _, ok := d.Aux.(dynamicCallAux); ok {
-							if d.Op == opCall && makeInstruction(i, d) == nil {
-								t.Fatal("missing dynamic Call executor")
-							}
 							ops[d.Op] = true
 							if makeInstruction(i, d) == nil {
 								t.Fatal("missing dynamic executor")
