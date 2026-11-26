@@ -162,6 +162,7 @@ func (fr *frame) jump(target int32) {
 type functionCompilation struct {
 	Fn              *ssa.Function
 	callDests       map[ssa.Value][]register
+	directCall      *ssa.CallCommon // Latest direct adapter selected by lowering.
 	index           map[ssa.Value]uint32
 	ssaInstrs       []ssa.Instruction
 	gcLiveOnce      sync.Once
@@ -203,6 +204,7 @@ func (p *function) UnsafeRelease() {
 	p.closureByResult = nil
 	p.elidedExtract = nil
 	p.callDests = nil
+	p.directCall = nil
 	p.elidedTuples = nil
 	p.Code = nil
 	p.Instrs = nil
@@ -1562,6 +1564,9 @@ func makeCallInstr(pfn *function, interp *Interp, instr ssa.Value, call *ssa.Cal
 	case *ssa.Function:
 		// "static func/method call"
 		if run := makeStaticDirectCallInstr(interp, fn, ir, ia); run != nil {
+			if instructionSupported && interp.ctx.Mode&(EnableInstructionDescriptions|EnableInstructionExecution) != 0 {
+				pfn.directCall = call
+			}
 			return run
 		}
 		if fn.Blocks == nil {

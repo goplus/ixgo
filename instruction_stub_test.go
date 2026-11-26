@@ -17,7 +17,7 @@ func TestInstructionStub(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, p := range i.funcs {
-			if p.Code != nil || p.callDests != nil {
+			if p.Code != nil || p.callDests != nil || p.directCall != nil {
 				t.Fatal("default build allocated instruction metadata")
 			}
 		}

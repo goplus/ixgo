@@ -493,8 +493,9 @@ func (visit *visitor) function(fn *ssa.Function) {
 	pfn.initPool()
 	pfn.finishMetadata()
 	if instructionSupported && visit.intp.ctx.Mode&(EnableInstructionDescriptions|EnableInstructionExecution) != 0 {
-		// Code now owns destination slices; release temporary SSA-keyed lookup data.
+		// Code now owns call metadata; release temporary lowering state.
 		pfn.callDests = nil
+		pfn.directCall = nil
 	}
 }
 

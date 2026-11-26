@@ -620,9 +620,7 @@ func describeCallSite(pfn *function, call *ssa.CallCommon) callSiteAux {
 	} else if fn, ok := call.Value.(*ssa.Function); ok {
 		aux.Kind = callStatic
 		aux.Function = describeFunction(pfn, fn)
-		if directCallTypesCompatible(pfn.Interp, fn.Signature) {
-			_, aux.Direct = resolveStaticDirectCall(pfn.Interp, fn)
-		}
+		aux.Direct = pfn.directCall == call
 	}
 	return aux
 }

@@ -2742,7 +2742,8 @@ func TestDescriptionPreservesDirectCall(t *testing.T) {
 		ctx := NewContext(DisableMemo | mode)
 		file, err := parser.ParseFile(ctx.FileSet, "direct.go", `package instructiondirect
  func Value() int {return 7}
- func Run() int {return Value()}`, 0)
+ func Plain() int {return 1}
+ func Run() int {return Value()+Plain()}`, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2755,16 +2756,38 @@ func TestDescriptionPreservesDirectCall(t *testing.T) {
 			t.Fatal(err)
 		}
 		before := calls
-		if got, err := i.RunFunc("Run"); err != nil || got != 42 || calls != before+1 {
+		if got, err := i.RunFunc("Run"); err != nil || got != 43 || calls != before+1 {
 			t.Fatalf("mode %v=%v,%v calls=%d", mode, got, err, calls-before)
 		}
 		for _, p := range i.funcs {
+			if p.directCall != nil {
+				t.Fatal("lowering call state retained")
+			}
 			for _, d := range p.Code {
 				if aux, ok := d.Aux.(callAux); ok && aux.Kind == callStatic && aux.Function.Body != nil {
-					if !aux.Direct || makeInstruction(d) != nil {
-						t.Fatal("direct adapter replaced")
+					wantDirect := aux.Function.Body.Fn.Name() == "Value"
+					if aux.Direct != wantDirect || wantDirect && makeInstruction(d) != nil {
+						t.Fatal("incorrect direct adapter selection")
 					}
 				}
+			}
+		}
+		// Description reads the lowering decision even when an adapter is registered.
+		p := i.funcs[pkg.Func("Run")]
+		for _, block := range p.Fn.Blocks {
+			for _, instr := range block.Instrs {
+				call, ok := instr.(*ssa.Call)
+				if !ok || call.Call.StaticCallee().Name() != "Value" {
+					continue
+				}
+				if describeCallSite(p, &call.Call).Direct {
+					t.Fatal("description resolved adapter without lowering decision")
+				}
+				p.directCall = &call.Call
+				if !describeCallSite(p, &call.Call).Direct {
+					t.Fatal("description lost lowering decision")
+				}
+				p.directCall = nil
 			}
 		}
 		i.UnsafeRelease()
