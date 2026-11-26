@@ -160,9 +160,11 @@ func (fr *frame) jump(target int32) {
 }
 
 type functionCompilation struct {
-	Fn              *ssa.Function
-	callDests       map[ssa.Value][]register
-	directCall      *ssa.CallCommon // Latest direct adapter selected by lowering.
+	Fn        *ssa.Function
+	callDests map[ssa.Value][]register
+	// Call site whose lowering selected a direct adapter;
+	// read only by the immediately following description.
+	directCall      *ssa.CallCommon
 	index           map[ssa.Value]uint32
 	ssaInstrs       []ssa.Instruction
 	gcLiveOnce      sync.Once
