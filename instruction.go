@@ -255,10 +255,17 @@ type panicAux struct{ Value reflect.Type }
 
 func (panicAux) instructionAux() {}
 
-// closureAux records the signature and capture order without retaining SSA.
-// Signature does not identify the function body; target resolution is pending.
+// instructionFunction identifies an interpreted body or an external Go function.
+// References are local to this interpreter; portable function IDs are future work.
+type instructionFunction struct {
+	Body     *function
+	External reflect.Value
+}
+
+// closureAux records the runtime body, signature and capture order without SSA.
 // A binding of -1 means that no register was allocated for that input.
 type closureAux struct {
+	Function  instructionFunction
 	Signature reflect.Type
 	Bindings  []register
 }
@@ -288,13 +295,14 @@ const (
 	callInvoke
 )
 
-// callSiteAux classifies a call without resolving a function body. Target is
+// callSiteAux records static function identity when available. Target is
 // the function-value register or invoke receiver register, or -1 if absent.
 // Arguments exclude the invoke receiver; static method arguments and Signature
 // both include the receiver as their first input.
 // Builtins have no Signature because they have no representable Go function
 // signature.
 type callSiteAux struct {
+	Function  instructionFunction
 	Kind      callKind
 	Signature reflect.Type
 	Target    register
@@ -430,7 +438,7 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 		for i, binding := range v.Bindings {
 			bindings[i] = descriptionRegister(pfn, binding)
 		}
-		d.Aux = closureAux{Signature: signature, Bindings: bindings}
+		d.Aux = closureAux{Function: describeFunction(pfn.Interp, fn), Signature: signature, Bindings: bindings}
 	case *ssa.Call:
 		d.Op = opCall
 		if elidedResults != nil {
@@ -576,6 +584,18 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 	return d
 }
 
+// describeFunction reuses targets resolved by lowering. It never creates a
+// new function or changes register allocation while describing an instruction.
+func describeFunction(i *Interp, fn *ssa.Function) instructionFunction {
+	if fn.Blocks != nil {
+		return instructionFunction{Body: i.funcs[fn]}
+	}
+	if external, ok := findExternFunc(i, fn); ok {
+		return instructionFunction{External: external}
+	}
+	return instructionFunction{}
+}
+
 func describeCallSite(pfn *function, call *ssa.CallCommon) callSiteAux {
 	aux := callSiteAux{Kind: callDynamic, Target: descriptionRegister(pfn, call.Value), Arguments: make([]register, len(call.Args))}
 	for i, arg := range call.Args {
@@ -592,8 +612,9 @@ func describeCallSite(pfn *function, call *ssa.CallCommon) callSiteAux {
 	aux.Signature = pfn.Interp.preToType(sig)
 	if call.IsInvoke() {
 		aux.Kind, aux.Name = callInvoke, call.Method.Id()
-	} else if _, ok := call.Value.(*ssa.Function); ok {
+	} else if fn, ok := call.Value.(*ssa.Function); ok {
 		aux.Kind = callStatic
+		aux.Function = describeFunction(pfn.Interp, fn)
 	}
 	return aux
 }

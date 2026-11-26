@@ -2578,3 +2578,157 @@ func branch(n int) int {
 		t.Fatalf("branch result = %v, want 3", got)
 	}
 }
+
+func TestInstructionFunctionReferences(t *testing.T) {
+	const source = `package main
+ import "strings"
+ func first(x int) int {return x+1}
+ func second(x int) int {return x+2}
+ func recursive(n int) int {if n==0{return 0};return 1+recursive(n-1)}
+ func closures(x int) (func(int) int,func(int) int) {return func(y int) int{return x+y},func(y int) int{return x-y}}
+ func run() int {a,b:=closures(7);if strings.ToUpper("ab")!="AB"{return -1};return first(1)+second(1)+recursive(3)+a(2)+b(2)}
+ `
+	for _, mode := range []Mode{EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
+			i, err := NewContext(DisableMemo|mode).LoadInterp("function_refs.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			bodies := make(map[string]*function)
+			var closures []closureAux
+			var external instructionFunction
+			for _, p := range i.funcs {
+				for pc, d := range p.Code {
+					switch aux := d.Aux.(type) {
+					case closureAux:
+						if aux.Function.Body == nil || aux.Function.External.IsValid() {
+							t.Fatal("missing closure body")
+						}
+						if aux.Function.Body != i.funcs[p.ssaInstrs[pc].(*ssa.MakeClosure).Fn.(*ssa.Function)] {
+							t.Fatal("wrong closure body")
+						}
+						closures = append(closures, aux)
+					case callAux:
+						call := p.ssaInstrs[pc].(*ssa.Call)
+						if aux.Kind == callStatic {
+							fn := call.Call.Value.(*ssa.Function)
+							if fn.Blocks != nil {
+								if aux.Function.Body != i.funcs[fn] || aux.Function.Body == nil {
+									t.Fatalf("wrong target %s", fn)
+								}
+								bodies[fn.Name()] = aux.Function.Body
+							} else if fn.Name() == "ToUpper" && aux.Function.External.IsValid() {
+								external = aux.Function
+							}
+						} else if aux.Function.Body != nil || aux.Function.External.IsValid() {
+							t.Fatal("non-static call resolved a body")
+						}
+					}
+				}
+			}
+			if bodies["first"] == nil || bodies["second"] == nil || bodies["first"] == bodies["second"] || bodies["recursive"] == nil {
+				t.Fatal("function identity lost")
+			}
+			if len(closures) != 2 || closures[0].Signature != closures[1].Signature || closures[0].Function.Body == closures[1].Function.Body {
+				t.Fatal("closure identity lost")
+			}
+			if !external.External.IsValid() || external.Body != nil {
+				t.Fatal("missing external target")
+			}
+			for _, p := range i.funcs {
+				p.functionCompilation = functionCompilation{}
+			}
+			for name, want := range map[string]int{"first": 5, "second": 6, "recursive": 4} {
+				got := bodies[name].callFunctionByReflect(reflect.TypeFor[func(int) int](), []reflect.Value{reflect.ValueOf(4)}, nil)
+				if len(got) != 1 || got[0].Interface() != want {
+					t.Fatalf("%s returned %v", name, got)
+				}
+			}
+			if got := external.External.Call([]reflect.Value{reflect.ValueOf("ab")})[0].String(); got != "AB" {
+				t.Fatal(got)
+			}
+			for j, aux := range closures {
+				capture := 7
+				fn := aux.Function.Body.makeFunction(aux.Signature, []value{&capture}).Interface().(func(int) int)
+				want := 9
+				if j == 1 {
+					want = 5
+				}
+				if got := fn(2); got != want {
+					t.Fatalf("closure %d=%d want %d", j, got, want)
+				}
+			}
+			if got, err := i.RunFunc("run"); err != nil || got != 22 {
+				t.Fatalf("run=%v,%v", got, err)
+			}
+		})
+	}
+}
+
+func TestDescriptionStaticCallExecution(t *testing.T) {
+	const source = `package main
+ type counter int
+ func (c counter) add(x int) int {return int(c)+x}
+ func none(p *int) {*p+=1}
+ func one(x int) int {return x+1}
+ func pair(x int) (int,int) {return x,x+1}
+ func triple(x int) (int,int,int) {return x,x+1,x+2}
+ func recovered() (v int) {defer func(){if recover()!=nil{v=7}}();panic("test")}
+ func deferred(x int) (v int) {defer func(){v++}();return x}
+ func factory(x int) func(int) int {return func(y int) int {x+=y;return x}}
+ func run() int {n:=0;none(&n);a,b:=pair(2);_,c,_:=triple(3);f:=factory(5);return n+one(1)+a+b+c+recovered()+deferred(3)+counter(2).add(3)+f(2)+f(1)}
+ `
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		for _, extra := range []Mode{0, EnableCachedReg, ExperimentalSupportGC | EnableGCExecutionPlan} {
+			t.Run(fmt.Sprintf("%v/%v", mode, extra), func(t *testing.T) {
+				i, err := NewContext(DisableMemo|mode|extra).LoadInterp("static_calls.go", source)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer i.UnsafeRelease()
+				calls, closures := 0, 0
+				for _, p := range i.funcs {
+					for pc, d := range p.Code {
+						supported := false
+						switch aux := d.Aux.(type) {
+						case callAux:
+							supported = aux.Kind == callStatic && aux.Function.Body != nil
+							if supported {
+								calls++
+							}
+						case closureAux:
+							supported = aux.Function.Body != nil
+							if supported {
+								closures++
+							}
+						}
+						if !supported {
+							continue
+						}
+						// Rebuild to verify that descriptions are sufficient for construction.
+						if makeInstruction(d) == nil {
+							t.Fatal("missing description executor")
+						}
+						name := runtime.FuncForPC(reflect.ValueOf(p.Instrs[pc]).Pointer()).Name()
+						// Call specializers are shared by both lowering paths.
+						specialized := false
+						if aux, ok := d.Aux.(callAux); ok && aux.Function.Body.Recover == nil {
+							specialized = makeCallSpecializerInstr(i, aux.Function.Body, aux.Arguments, aux.ExtractResults) != nil
+						}
+						if strings.Contains(name, "makeInstruction") != (mode&EnableInstructionExecution != 0) && !specialized {
+							t.Fatalf("unexpected executor %s", name)
+						}
+					}
+					p.functionCompilation = functionCompilation{}
+				}
+				if mode != 0 && (calls == 0 || closures == 0) {
+					t.Fatal("missing call/closure coverage")
+				}
+				if got, err := i.RunFunc("run"); err != nil || got != 43 {
+					t.Fatalf("run=%v,%v want 43", got, err)
+				}
+			})
+		}
+	}
+}

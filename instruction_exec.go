@@ -7,6 +7,47 @@ package ixgo
 // Unsupported instructions retain their existing lowering.
 func makeInstruction(d typedInstruction) func(*frame) {
 	switch d.Op {
+	case opMakeClosure:
+		aux := d.Aux.(closureAux)
+		if aux.Function.Body == nil {
+			return nil
+		}
+		body, signature, bindings, result := aux.Function.Body, aux.Signature, aux.Bindings, d.Result
+		return func(fr *frame) {
+			var env []value
+			for _, binding := range bindings {
+				env = append(env, fr.reg(binding))
+			}
+			fr.setReg(result, body.makeFunction(signature, env).Interface())
+		}
+	case opCall:
+		aux := d.Aux.(callAux)
+		body := aux.Function.Body
+		if aux.Kind != callStatic || body == nil {
+			return nil
+		}
+		interp, args, result, dests := body.Interp, aux.Arguments, d.Result, aux.ExtractResults
+		if body.Recover == nil {
+			if run := makeCallSpecializerInstr(interp, body, args, dests); run != nil {
+				return run
+			}
+			switch body.nres {
+			case 0:
+				return func(fr *frame) { interp.callFunctionByStackNoRecover0(fr, body, result, args) }
+			case 1:
+				return func(fr *frame) { interp.callFunctionByStackNoRecover1(fr, body, result, args) }
+			default:
+				return func(fr *frame) { interp.callFunctionByStackNoRecoverN(fr, body, result, args, dests) }
+			}
+		}
+		switch body.nres {
+		case 0:
+			return func(fr *frame) { interp.callFunctionByStack0(fr, body, result, args) }
+		case 1:
+			return func(fr *frame) { interp.callFunctionByStack1(fr, body, result, args) }
+		default:
+			return func(fr *frame) { interp.callFunctionByStackN(fr, body, result, args, dests) }
+		}
 	case opJump:
 		target := d.Aux.(jumpAux).Target
 		return func(fr *frame) { fr.jump(target) }
