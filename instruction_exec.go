@@ -26,6 +26,12 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 		var desc callDescription
 		var stack register
 		switch aux := d.Aux.(type) {
+		case dynamicCallAux:
+			if aux.Target < 0 {
+				return nil
+			}
+			desc = callDescription{receiver: aux.Target, args: aux.Arguments}
+			stack = aux.DeferStack
 		case bodyCallAux:
 			if aux.Body == nil {
 				return nil
@@ -48,6 +54,17 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 
 	case opCall:
 		switch aux := d.Aux.(type) {
+		case dynamicCallAux:
+			if aux.Target < 0 {
+				return nil
+			}
+			target, result, args, dests := aux.Target, d.Result, aux.Arguments, aux.ExtractResults
+			if supportFuncVal && interp.ctx.Mode&DisableDynamicFuncCallAnalysis == 0 {
+				return dynamicFunCall(interp, target, result, args, dests)
+			}
+			return func(fr *frame) {
+				interp.callExternalByStack(fr, reflect.ValueOf(fr.reg(target)), result, args, dests)
+			}
 		case directCallAux:
 			if aux.Adapter == nil {
 				return nil

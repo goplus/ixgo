@@ -334,6 +334,13 @@ type externalCallAux struct {
 
 func (externalCallAux) instructionAux() {}
 
+// dynamicCallAux reads a function value from the target register at execution.
+type dynamicCallAux struct {
+	callAux
+}
+
+func (dynamicCallAux) instructionAux() {}
+
 // bodyCallAux retains the interpreted body loaded by lowering.
 type bodyCallAux struct {
 	callAux
@@ -631,6 +638,9 @@ func describeCall(pfn *function, call *ssa.CallCommon, dests []register, deferSt
 			// Keep lowering when the enclosing defer-stack token is unavailable.
 			return base
 		}
+	}
+	if base.Kind == callDynamic && base.Target >= 0 {
+		return dynamicCallAux{callAux: base}
 	}
 	if base.Kind != callStatic {
 		return base

@@ -22,6 +22,8 @@ import (
 // instructionCallMetadata returns the common metadata for each call aux type.
 func instructionCallMetadata(aux instructionAux) callAux {
 	switch aux := aux.(type) {
+	case dynamicCallAux:
+		return aux.callAux
 	case directCallAux:
 		return aux.callAux
 	case externalCallAux:
@@ -2710,8 +2712,13 @@ func TestDescriptionStaticCallExecution(t *testing.T) {
 				calls, closures := 0, 0
 				for _, p := range i.funcs {
 					for pc, d := range p.Code {
+						if d.Op != opCall && d.Op != opMakeClosure {
+							continue
+						}
 						supported := false
 						switch aux := d.Aux.(type) {
+						case dynamicCallAux:
+							supported = aux.Target >= 0
 						case bodyCallAux:
 							supported = aux.Body != nil
 							if supported {
@@ -2731,8 +2738,8 @@ func TestDescriptionStaticCallExecution(t *testing.T) {
 							t.Fatal("missing description executor")
 						}
 						name := runtime.FuncForPC(reflect.ValueOf(p.Instrs[pc]).Pointer()).Name()
-						// Call specializers are shared by both lowering paths.
-						specialized := false
+						// Call specializers and dynamic-call helpers are shared by both paths.
+						_, specialized := d.Aux.(dynamicCallAux)
 						if aux, ok := d.Aux.(bodyCallAux); ok && aux.Body.Recover == nil {
 							specialized = makeCallSpecializerInstr(i, aux.Body, aux.Arguments, aux.ExtractResults) != nil
 						}
@@ -3204,4 +3211,56 @@ func TestDescriptionBoxedDeferStack(t *testing.T) {
 		}
 	}()
 	run(fr)
+}
+
+func TestDescriptionDynamicCalls(t *testing.T) {
+	const source = `package dynamic
+ import "strings"
+ var F func(int)(int,int)
+ func factory(n int)func(int)(int,int){return func(x int)(int,int){n+=x;return n,n+1}}
+ func call(f func(int)(int,int),n int)(int,int){return f(n)}
+ func recovered(f func())(r int){defer func(){if recover()!=nil{r=7}}();f();return}
+ func deferred()(r int){f:=func(n int){r=r*10+n};defer f(2);f=func(n int){r=99};return 1}
+ func Run()int{
+ F=factory(10);a,b:=call(F,2);c,_:=F(3)
+ ch:=make(chan int,1);send:=func(n int){ch<-n};go send(4);send=func(int){panic("wrong target")};x:=<-ch
+ ext:=strings.ToUpper
+ return a+b+c+x+len(ext("ab"))+deferred()+recovered(nil)
+ }`
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		for _, extra := range []Mode{0, EnableCachedReg, ExperimentalSupportGC | EnableGCExecutionPlan, DisableDynamicFuncCallAnalysis} {
+			t.Run(fmt.Sprintf("mode=%v/extra=%v", mode, extra), func(t *testing.T) {
+				i, err := NewContext(DisableMemo|mode|extra).LoadInterp("dynamic.go", source)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer i.UnsafeRelease()
+				ops := map[instructionOpcode]bool{}
+				for _, p := range i.funcs {
+					for _, d := range p.Code {
+						if _, ok := d.Aux.(dynamicCallAux); ok {
+							if makeInstruction(i, d) == nil {
+								t.Fatal("missing dynamic executor")
+							}
+							ops[d.Op] = true
+						}
+					}
+					p.functionCompilation = functionCompilation{}
+				}
+				if mode != 0 && (!ops[opCall] || !ops[opGo] || !ops[opDefer]) {
+					t.Fatalf("missing dynamic ops %v", ops)
+				}
+				for n := 0; n < 3; n++ {
+					if got, err := i.RunFunc("Run"); err != nil || got != 65 {
+						t.Fatalf("Run=%v,%v want 65", got, err)
+					}
+				}
+			})
+		}
+	}
+	for _, op := range []instructionOpcode{opCall, opGo, opDefer} {
+		if makeInstruction(nil, typedInstruction{Op: op, Aux: dynamicCallAux{callAux: callAux{callSiteAux: callSiteAux{Target: -1}}}}) != nil {
+			t.Fatal("unresolved dynamic target")
+		}
+	}
 }
