@@ -5,6 +5,7 @@ package ixgo
 import (
 	"fmt"
 	"go/constant"
+	"go/parser"
 	"go/token"
 	"go/types"
 	"reflect"
@@ -2730,5 +2731,69 @@ func TestDescriptionStaticCallExecution(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestDescriptionPreservesDirectCall(t *testing.T) {
+	const pkgPath = "example.com/instructiondirect"
+	calls := 0
+	RegisterDirectCalls(pkgPath, map[string]DirectCallAdapter{"Value": func(c DirectCallContext) { calls++; c.SetResult(42) }})
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		ctx := NewContext(DisableMemo | mode)
+		file, err := parser.ParseFile(ctx.FileSet, "direct.go", `package instructiondirect
+ func Value() int {return 7}
+ func Run() int {return Value()}`, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pkg, err := ctx.LoadAstFile(pkgPath, file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		i, err := NewInterp(ctx, pkg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		before := calls
+		if got, err := i.RunFunc("Run"); err != nil || got != 42 || calls != before+1 {
+			t.Fatalf("mode %v=%v,%v calls=%d", mode, got, err, calls-before)
+		}
+		for _, p := range i.funcs {
+			for _, d := range p.Code {
+				if aux, ok := d.Aux.(callAux); ok && aux.Kind == callStatic && aux.Function.Body != nil {
+					if !aux.Direct || makeInstruction(d) != nil {
+						t.Fatal("direct adapter replaced")
+					}
+				}
+			}
+		}
+		i.UnsafeRelease()
+	}
+}
+
+func TestDescriptionCallFallbacks(t *testing.T) {
+	if makeInstruction(typedInstruction{Op: opMakeClosure, Aux: closureAux{}}) != nil {
+		t.Fatal("unresolved closure executor")
+	}
+	for _, kind := range []callKind{callStatic, callDynamic, callBuiltin, callInvoke} {
+		if makeInstruction(typedInstruction{Op: opCall, Aux: callAux{callSiteAux: callSiteAux{Kind: kind}}}) != nil {
+			t.Fatal("unresolved call executor")
+		}
+	}
+	ctx := NewContext(DisableMemo | EnableInstructionExecution)
+	i, err := ctx.LoadInterp("call_recover_shapes.go", `package main
+ func zero(p *int){defer func(){*p+=1}()}
+ func many(x int)(int,int){defer func(){}();return x,x+1}
+ func run()int{x:=0;zero(&x);a,b:=many(2);return x+a+b}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	if got, err := i.RunFunc("run"); err != nil || got != 6 {
+		t.Fatalf("run=%v,%v", got, err)
+	}
+	fn := &ssa.Function{}
+	if got := describeFunction(i.funcs[i.mainpkg.Func("run")], fn); got.Body != nil || got.External.IsValid() {
+		t.Fatal("unallocated external resolved")
 	}
 }

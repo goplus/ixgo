@@ -23,7 +23,7 @@ func makeInstruction(d typedInstruction) func(*frame) {
 	case opCall:
 		aux := d.Aux.(callAux)
 		body := aux.Function.Body
-		if aux.Kind != callStatic || body == nil {
+		if aux.Direct || aux.Kind != callStatic || body == nil {
 			return nil
 		}
 		interp, args, result, dests := body.Interp, aux.Arguments, d.Result, aux.ExtractResults

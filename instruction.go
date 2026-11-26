@@ -303,6 +303,7 @@ const (
 // signature.
 type callSiteAux struct {
 	Function  instructionFunction
+	Direct    bool // Preserve a compatible direct-call adapter selected by lowering.
 	Kind      callKind
 	Signature reflect.Type
 	Target    register
@@ -318,7 +319,8 @@ func (callSiteAux) instructionAux() {}
 // opCall uses callAux; opGo and opDefer use callSiteAux directly.
 // callAux includes call-site data and result placement after tuple extraction.
 // A nil ExtractResults means the call still uses its ordinary result register.
-// A -1 entry denotes an unused result. Static target resolution is incremental.
+// A -1 entry denotes an unused result. Function identifies an interpreted Body,
+// an existing External value, or an unresolved target that retains lowering.
 type callAux struct {
 	callSiteAux
 	// ExtractResults is a copy of the destinations used by the call closure.
@@ -438,7 +440,7 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 		for i, binding := range v.Bindings {
 			bindings[i] = descriptionRegister(pfn, binding)
 		}
-		d.Aux = closureAux{Function: describeFunction(pfn.Interp, fn), Signature: signature, Bindings: bindings}
+		d.Aux = closureAux{Function: describeFunction(pfn, fn), Signature: signature, Bindings: bindings}
 	case *ssa.Call:
 		d.Op = opCall
 		if elidedResults != nil {
@@ -586,12 +588,15 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 
 // describeFunction reuses targets resolved by lowering. It never creates a
 // new function or changes register allocation while describing an instruction.
-func describeFunction(i *Interp, fn *ssa.Function) instructionFunction {
+func describeFunction(pfn *function, fn *ssa.Function) instructionFunction {
 	if fn.Blocks != nil {
-		return instructionFunction{Body: i.funcs[fn]}
+		return instructionFunction{Body: pfn.Interp.funcs[fn]}
 	}
-	if external, ok := findExternFunc(i, fn); ok {
-		return instructionFunction{External: external}
+	if k, value := descriptionOperand(pfn, fn); k == kindFunction && value != nil {
+		external := reflect.ValueOf(value)
+		if external.Kind() == reflect.Func {
+			return instructionFunction{External: external}
+		}
 	}
 	return instructionFunction{}
 }
@@ -614,7 +619,10 @@ func describeCallSite(pfn *function, call *ssa.CallCommon) callSiteAux {
 		aux.Kind, aux.Name = callInvoke, call.Method.Id()
 	} else if fn, ok := call.Value.(*ssa.Function); ok {
 		aux.Kind = callStatic
-		aux.Function = describeFunction(pfn.Interp, fn)
+		aux.Function = describeFunction(pfn, fn)
+		if directCallTypesCompatible(pfn.Interp, fn.Signature) {
+			_, aux.Direct = resolveStaticDirectCall(pfn.Interp, fn)
+		}
 	}
 	return aux
 }
