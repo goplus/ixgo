@@ -6,7 +6,7 @@ import "testing"
 
 func TestInstructionStub(t *testing.T) {
 	d := describeInstruction(nil, nil, nil, nil)
-	if makeInstruction(d) != nil {
+	if makeInstruction(nil, d) != nil {
 		t.Fatal("stub returned an executor")
 	}
 	for _, mode := range []Mode{EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {

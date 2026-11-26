@@ -1627,7 +1627,7 @@ func TestControlDescriptionExecution(t *testing.T) {
 							if d.Op != opJump && d.Op != opIf && d.Op != opPhi {
 								continue
 							}
-							executor := makeInstruction(d)
+							executor := makeInstruction(nil, d)
 							if executor == nil {
 								t.Fatalf("pc %d: control builder mismatch", pc)
 							}
@@ -1675,7 +1675,7 @@ func TestControlDescriptionBranchAndPhi(t *testing.T) {
 	type flag bool
 	for _, condition := range []value{true, false, flag(true), flag(false)} {
 		d := typedInstruction{Op: opIf, Args: []register{0}, Aux: ifAux{Targets: [2]int32{1, 2}}}
-		execute := makeInstruction(d)
+		execute := makeInstruction(nil, d)
 		p := &function{}
 		p.Blocks = []int{0, 4, 8}
 		fr := &frame{pfn: p, stack: []value{condition}}
@@ -1688,7 +1688,7 @@ func TestControlDescriptionBranchAndPhi(t *testing.T) {
 			t.Fatalf("condition %v: pc=%d want %d", condition, fr.ipc, want)
 		}
 	}
-	jump := makeInstruction(typedInstruction{Op: opJump, Aux: jumpAux{Target: 1}})
+	jump := makeInstruction(nil, typedInstruction{Op: opJump, Aux: jumpAux{Target: 1}})
 	if false {
 		t.Fatal("missing Jump executor")
 	}
@@ -1700,7 +1700,7 @@ func TestControlDescriptionBranchAndPhi(t *testing.T) {
 		t.Fatalf("Jump state: pc=%d block=%d pred=%d", jumpFrame.ipc, jumpFrame.block, jumpFrame.pred)
 	}
 	d := typedInstruction{Op: opPhi, Aux: phiAux{Preds: []int32{1}, Results: []register{0, 1}, Edges: [][]register{{1}, {0}}}}
-	execute := makeInstruction(d)
+	execute := makeInstruction(nil, d)
 	fr := &frame{pred: 1, stack: []value{1, 2}}
 	execute(fr)
 	if fr.reg(0) != 2 || fr.reg(1) != 1 {
@@ -1757,7 +1757,7 @@ func TestControlDescriptionIfSpecialization(t *testing.T) {
 		}
 		aux.Targets = [2]int32{1, 2}
 		d.Aux = aux
-		execute := makeInstruction(d)
+		execute := makeInstruction(nil, d)
 		p := &function{}
 		p.Blocks = []int{0, 4, 8}
 		fr := &frame{pfn: p}
@@ -1773,7 +1773,7 @@ func TestControlDescriptionIfSpecialization(t *testing.T) {
 	for _, basic := range []bool{false, true} {
 		for _, condition := range []bool{false, true} {
 			d := typedInstruction{Op: opIf, Args: []register{0}, Aux: ifAux{Targets: [2]int32{1, 2}, BasicBool: basic}}
-			execute := makeInstruction(d)
+			execute := makeInstruction(nil, d)
 			p := &function{}
 			p.Blocks = []int{0, 4, 8}
 			fr := &frame{pfn: p, stack: []value{condition}}
@@ -1883,7 +1883,7 @@ func TestValueDescriptionExecution(t *testing.T) {
 								t.Fatal("missing unary operand type")
 							}
 						}
-						supported := makeInstruction(d)
+						supported := makeInstruction(nil, d)
 						name := runtime.FuncForPC(reflect.ValueOf(p.Instrs[pc]).Pointer()).Name()
 						if got, want := (strings.Contains(name, "makeInstruction") || strings.Contains(name, "makeBinaryInstruction") || strings.Contains(name, "makeUnaryInstruction")), supported != nil && mode&EnableInstructionExecution != 0; got != want {
 							t.Fatalf("pc %d executor %s, want described=%t", pc, name, want)
@@ -1920,7 +1920,7 @@ func TestValueDescriptionConstants(t *testing.T) {
 		for _, constants := range [][2]bool{{false, false}, {true, false}, {false, true}, {true, true}} {
 			aux := binaryOpAux{Op: op, Type: reflect.TypeFor[int](), Constant: constants, Values: [2]value{7, 3}}
 			d := typedInstruction{Op: opBinOp, Result: 2, Args: []register{0, 1}, Aux: aux}
-			execute := makeInstruction(d)
+			execute := makeInstruction(nil, d)
 			if execute == nil {
 				t.Fatal("missing executor")
 			}
@@ -1950,7 +1950,7 @@ func TestValueDescriptionConstants(t *testing.T) {
 		typ         reflect.Type
 		input, want value
 	}{{token.SUB, reflect.TypeFor[int](), 7, -7}, {token.NOT, reflect.TypeFor[bool](), true, false}} {
-		execute := makeInstruction(typedInstruction{Op: opUnOp, Result: 0, Args: []register{-1}, Aux: unaryOpAux{Op: c.op, Type: c.typ, Constant: true, Value: c.input}})
+		execute := makeInstruction(nil, typedInstruction{Op: opUnOp, Result: 0, Args: []register{-1}, Aux: unaryOpAux{Op: c.op, Type: c.typ, Constant: true, Value: c.input}})
 		if execute == nil {
 			t.Fatal("missing unary executor")
 		}
@@ -1969,14 +1969,14 @@ func TestValueDescriptionIntOverflow(t *testing.T) {
 		op         token.Token
 		x, y, want int
 	}{{token.ADD, max, 1, min}, {token.SUB, min, 1, max}, {token.MUL, max, 2, -2}} {
-		execute := makeInstruction(typedInstruction{Op: opBinOp, Result: 2, Args: []register{0, 1}, Aux: binaryOpAux{Op: c.op, Type: reflect.TypeFor[int]()}})
+		execute := makeInstruction(nil, typedInstruction{Op: opBinOp, Result: 2, Args: []register{0, 1}, Aux: binaryOpAux{Op: c.op, Type: reflect.TypeFor[int]()}})
 		fr := &frame{stack: []value{c.x, c.y, nil}}
 		execute(fr)
 		if fr.reg(2) != c.want {
 			t.Fatalf("%v: %v want %v", c.op, fr.reg(2), c.want)
 		}
 	}
-	execute := makeInstruction(typedInstruction{Op: opUnOp, Result: 1, Args: []register{0}, Aux: unaryOpAux{Op: token.SUB, Type: reflect.TypeFor[int]()}})
+	execute := makeInstruction(nil, typedInstruction{Op: opUnOp, Result: 1, Args: []register{0}, Aux: unaryOpAux{Op: token.SUB, Type: reflect.TypeFor[int]()}})
 	fr := &frame{stack: []value{min, nil}}
 	execute(fr)
 	if fr.reg(1) != min {
@@ -2088,7 +2088,7 @@ func TestBinaryDescriptionMatrix(t *testing.T) {
 				for pc, d := range p.Code {
 					if d.Op == opBinOp {
 						count++
-						execute := makeInstruction(d)
+						execute := makeInstruction(nil, d)
 						if execute == nil {
 							t.Fatalf("unsupported BinOp at %d", pc)
 						}
@@ -2177,7 +2177,7 @@ func TestUnaryDescriptionExecution(t *testing.T) {
 				for _, p := range i.funcs {
 					for pc, d := range p.Code {
 						if d.Op == opUnOp {
-							execute := makeInstruction(d)
+							execute := makeInstruction(nil, d)
 							if execute == nil {
 								t.Fatal("unsupported unary")
 							}
@@ -2342,7 +2342,7 @@ func TestBinaryDescriptionConstantSpecializations(t *testing.T) {
 				aux.Constant = c
 				aux.Values = [2]value{x, y}
 				d.Aux = aux
-				execute := makeInstruction(d)
+				execute := makeInstruction(nil, d)
 				if execute == nil {
 					t.Fatal("missing binary executor")
 				}
@@ -2412,7 +2412,7 @@ func TestUnaryDescriptionConstantSpecializations(t *testing.T) {
 				aux.Constant = c
 				aux.Value = v.Interface()
 				d.Aux = aux
-				execute := makeInstruction(d)
+				execute := makeInstruction(nil, d)
 				if execute == nil {
 					t.Fatal("missing unary executor")
 				}
@@ -2437,7 +2437,7 @@ func TestUnaryDescriptionGlobalReceive(t *testing.T) {
 					ch <- 9
 				}
 				d := typedInstruction{Op: opUnOp, Result: 1, Args: []register{0}, Aux: unaryOpAux{Op: token.ARROW, Type: reflect.TypeFor[chan int](), Global: global, CommaOk: comma, Value: ch}}
-				execute := makeInstruction(d)
+				execute := makeInstruction(nil, d)
 				if execute == nil {
 					t.Fatal("missing receive")
 				}
@@ -2462,7 +2462,7 @@ func TestUnaryDescriptionGlobalReceive(t *testing.T) {
 
 func TestEmptyPhiDescription(t *testing.T) {
 	for _, aux := range []phiAux{{}, {Results: []register{0}}, {Edges: [][]register{{0}}}} {
-		execute := makeInstruction(typedInstruction{Op: opPhi, Aux: aux})
+		execute := makeInstruction(nil, typedInstruction{Op: opPhi, Aux: aux})
 		if execute == nil {
 			t.Fatal("empty Phi returned nil executor")
 		}
@@ -2484,7 +2484,7 @@ func TestPhiDirectAssignment(t *testing.T) {
 			for j := range preds {
 				preds[j] = int32(j + 1)
 			}
-			execute := makeInstruction(typedInstruction{Op: opPhi, Aux: phiAux{Results: c.results, Edges: c.edges, Preds: preds}})
+			execute := makeInstruction(nil, typedInstruction{Op: opPhi, Aux: phiAux{Results: c.results, Edges: c.edges, Preds: preds}})
 			unknown := &frame{pred: -1, stack: []value{10, 20, 30, 40}}
 			execute(unknown)
 			if !reflect.DeepEqual(unknown.stack, []value{10, 20, 30, 40}) || unknown.phiVals != nil {
@@ -2643,7 +2643,6 @@ func TestInstructionFunctionReferences(t *testing.T) {
 						if call.Call.StaticCallee().Name() == "ToUpper" {
 							external = aux.External
 						}
-
 					}
 				}
 			}
@@ -2727,7 +2726,7 @@ func TestDescriptionStaticCallExecution(t *testing.T) {
 							continue
 						}
 						// Rebuild to verify that descriptions are sufficient for construction.
-						if makeInstruction(d) == nil {
+						if makeInstruction(i, d) == nil {
 							t.Fatal("missing description executor")
 						}
 						name := runtime.FuncForPC(reflect.ValueOf(p.Instrs[pc]).Pointer()).Name()
@@ -2789,12 +2788,12 @@ func TestDescriptionPreservesDirectCall(t *testing.T) {
 					if _, direct := d.Aux.(directCallAux); direct != wantDirect {
 						t.Fatal("wrong call aux type")
 					}
-					if aux.Kind == callStatic && makeInstruction(d) == nil {
+					if aux.Kind == callStatic && makeInstruction(i, d) == nil {
 						t.Fatal("incorrect direct adapter selection")
 					}
 					if wantDirect {
 						fr := &frame{pfn: &function{Interp: i}, stack: make([]value, len(p.stack))}
-						makeInstruction(d)(fr)
+						makeInstruction(i, d)(fr)
 						if got := fr.reg(d.Result); got != 42 {
 							t.Fatalf("direct description result=%v", got)
 						}
@@ -2902,12 +2901,13 @@ func TestDescriptionDirectCallExecution(t *testing.T) {
 			}
 			result := register(len(args))
 			d := typedInstruction{Op: opCall, Result: result, Aux: directCallAux{callAux: callAux{callSiteAux: callSiteAux{Kind: callStatic, Arguments: args}}, Adapter: test.adapter}}
-			run := makeInstruction(d)
+			interp := &Interp{}
+			run := makeInstruction(interp, d)
 			if run == nil {
 				t.Fatal("missing direct-call executor")
 			}
 			// No interpreted body, external function, or compilation state is needed.
-			p := &function{Interp: &Interp{}}
+			p := &function{}
 			fr := &frame{pfn: p, stack: append(append([]value(nil), test.args...), nil), deferid: 7}
 			run(fr)
 			if got := fr.reg(result); !reflect.DeepEqual(got, test.want) {
@@ -2916,7 +2916,7 @@ func TestDescriptionDirectCallExecution(t *testing.T) {
 			if test.name == "zero" && *test.args[0].(*int) != 42 {
 				t.Fatal("void adapter was not called")
 			}
-			if got, ok := p.Interp.deferMap.Load(uint64(7)); !ok || got != fr {
+			if got, ok := interp.deferMap.Load(uint64(7)); !ok || got != fr {
 				t.Fatal("defer frame not tracked")
 			}
 		})
@@ -2928,7 +2928,7 @@ func TestDescriptionDirectCallExecution(t *testing.T) {
 				t.Fatalf("panic=%v", got)
 			}
 		}()
-		makeInstruction(d)(&frame{pfn: &function{Interp: &Interp{}}})
+		makeInstruction(&Interp{}, d)(&frame{pfn: &function{}})
 	})
 }
 
@@ -2951,11 +2951,12 @@ func TestDescriptionExternalCallExecution(t *testing.T) {
 					aux.ExtractResults = []register{1, 2}
 					result = -1
 				}
-				run := makeInstruction(typedInstruction{Op: opCall, Result: result, Aux: aux})
+				interp := &Interp{}
+				run := makeInstruction(interp, typedInstruction{Op: opCall, Result: result, Aux: aux})
 				if run == nil {
 					t.Fatal("missing external executor")
 				}
-				fr := &frame{pfn: &function{Interp: &Interp{}}, stack: []value{20, nil, nil}, deferid: 7}
+				fr := &frame{pfn: &function{}, stack: []value{20, nil, nil}, deferid: 7}
 				run(fr)
 				if extracted {
 					if fr.reg(1) != 20 || fr.reg(2) != 22 {
@@ -2964,25 +2965,25 @@ func TestDescriptionExternalCallExecution(t *testing.T) {
 				} else if !reflect.DeepEqual(fr.reg(1), tuple{20, 22}) {
 					t.Fatalf("tuple=%v", fr.reg(1))
 				}
-				if got, ok := fr.pfn.Interp.deferMap.Load(uint64(7)); !ok || got != fr {
+				if got, ok := interp.deferMap.Load(uint64(7)); !ok || got != fr {
 					t.Fatal("missing defer frame")
 				}
 			}
 		})
 	}
 	for _, aux := range []instructionAux{directCallAux{}, externalCallAux{}, bodyCallAux{}} {
-		if makeInstruction(typedInstruction{Op: opCall, Aux: aux}) != nil {
+		if makeInstruction(nil, typedInstruction{Op: opCall, Aux: aux}) != nil {
 			t.Fatal("unresolved target executor")
 		}
 	}
 }
 
 func TestDescriptionCallFallbacks(t *testing.T) {
-	if makeInstruction(typedInstruction{Op: opMakeClosure, Aux: closureAux{}}) != nil {
+	if makeInstruction(nil, typedInstruction{Op: opMakeClosure, Aux: closureAux{}}) != nil {
 		t.Fatal("unresolved closure executor")
 	}
 	for _, kind := range []callKind{callStatic, callDynamic, callBuiltin, callInvoke} {
-		if makeInstruction(typedInstruction{Op: opCall, Aux: callAux{callSiteAux: callSiteAux{Kind: kind}}}) != nil {
+		if makeInstruction(nil, typedInstruction{Op: opCall, Aux: callAux{callSiteAux: callSiteAux{Kind: kind}}}) != nil {
 			t.Fatal("unresolved call executor")
 		}
 	}

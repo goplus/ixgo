@@ -315,6 +315,7 @@ type callAux struct {
 	ExtractResults []register
 }
 
+// directCallAux retains the adapter selected by lowering.
 type directCallAux struct {
 	callAux
 	Adapter DirectCallAdapter
@@ -322,6 +323,8 @@ type directCallAux struct {
 
 func (directCallAux) instructionAux() {}
 
+// externalCallAux retains the callee register value allocated by lowering.
+// Go and Defer use it for metadata only.
 type externalCallAux struct {
 	callAux
 	External reflect.Value
@@ -329,6 +332,8 @@ type externalCallAux struct {
 
 func (externalCallAux) instructionAux() {}
 
+// bodyCallAux retains the interpreted body loaded by lowering.
+// Go and Defer use it for metadata only.
 type bodyCallAux struct {
 	callAux
 	Body *function
@@ -612,7 +617,6 @@ func describeCallSite(pfn *function, call *ssa.CallCommon) callSiteAux {
 		aux.Kind, aux.Name = callInvoke, call.Method.Id()
 	} else if _, ok := call.Value.(*ssa.Function); ok {
 		aux.Kind = callStatic
-
 	}
 	return aux
 }
