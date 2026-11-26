@@ -14,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"unsafe"
 
 	"golang.org/x/tools/go/ssa"
 )
@@ -2809,13 +2810,17 @@ func TestDescriptionPreservesDirectCall(t *testing.T) {
 				if !ok || call.Call.StaticCallee().Name() != "Value" {
 					continue
 				}
-				if _, direct := describeCall(p, &call.Call, nil).(directCallAux); direct {
+				if _, direct := describeCall(p, &call.Call, nil, nil).(directCallAux); direct {
 					t.Fatal("description resolved adapter without lowering decision")
 				}
 				p.directCall = &call.Call
 				p.directAdapter = func(DirectCallContext) {}
-				if _, direct := describeCall(p, &call.Call, nil).(directCallAux); !direct {
+				if _, direct := describeCall(p, &call.Call, nil, nil).(directCallAux); !direct {
 					t.Fatal("description lost lowering decision")
+				}
+				aux := describeCall(p, &call.Call, nil, call).(directCallAux)
+				if aux.DeferStack != descriptionRegister(p, call) || aux.DeferStack < 0 {
+					t.Fatal("direct adapter lost defer-stack register")
 				}
 				p.directCall = nil
 				p.directAdapter = nil
@@ -3000,7 +3005,7 @@ func TestDescriptionCallFallbacks(t *testing.T) {
 		t.Fatalf("run=%v,%v", got, err)
 	}
 	fn := &ssa.Function{Signature: types.NewSignatureType(nil, nil, nil, types.NewTuple(), types.NewTuple(), false)}
-	if _, ok := describeCall(i.funcs[i.mainpkg.Func("run")], &ssa.CallCommon{Value: fn}, nil).(externalCallAux); ok {
+	if _, ok := describeCall(i.funcs[i.mainpkg.Func("run")], &ssa.CallCommon{Value: fn}, nil, nil).(externalCallAux); ok {
 		t.Fatal("unallocated external resolved")
 	}
 }
@@ -3104,4 +3109,99 @@ func TestDescriptionDeferStackExecution(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestDescriptionRangeDefer(t *testing.T) {
+	const source = `package rangedefer
+ import "strings"
+ type adder struct{ p *int }
+ func (a adder) Add(n int){*a.p=(*a.p*10+n)%100000000}
+ type adding interface{Add(int)}
+ func seq(yield func(int)bool){for n:=1;n<=2;n++{if !yield(n){return}}}
+ func add(p *int,n int){*p=(*p*10+n)%100000000}
+ func Run()(r int){
+ var a adding=adder{&r}; f:=add
+ for n:=range seq {
+ defer add(&r,n)
+ defer adder{&r}.Add(n+2)
+ defer a.Add(n+4)
+ defer f(&r,n+6)
+ defer func(x int){r=(r*10+x)%100000000}(n+8)
+ defer strings.ToUpper("ab")
+ defer close(make(chan int))
+ }
+ if r!=0 {panic("defer ran in yield")}
+ return
+ }`
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		for _, extra := range []Mode{0, EnableCachedReg, ExperimentalSupportGC | EnableGCExecutionPlan} {
+			t.Run(fmt.Sprintf("mode=%v/extra=%v", mode, extra), func(t *testing.T) {
+				i, err := NewContext(DisableMemo|mode|extra).LoadInterp("range_defer.go", source)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer i.UnsafeRelease()
+				kinds := map[callKind]bool{}
+				external, body := false, false
+				for _, p := range i.funcs {
+					for pc, d := range p.Code {
+						instr, ok := p.ssaInstrs[pc].(*ssa.Defer)
+						if !ok || instr.DeferStack == nil {
+							continue
+						}
+						base := instructionCallMetadata(d.Aux)
+						if base.DeferStack < 0 || base.DeferStack != descriptionRegister(p, instr.DeferStack) {
+							t.Fatal("missing enclosing defer stack")
+						}
+						kinds[base.Kind] = true
+						switch d.Aux.(type) {
+						case externalCallAux:
+							external = true
+						case bodyCallAux:
+							body = true
+						}
+						// Missing token must retain lowering for every target kind.
+						encoded, exists := p.index[instr.DeferStack]
+						if !exists {
+							t.Fatal("unallocated token")
+						}
+						delete(p.index, instr.DeferStack)
+						missing := describeInstruction(p, instr, nil, nil)
+						p.index[instr.DeferStack] = encoded
+						if _, ok := missing.Aux.(callAux); !ok || makeInstruction(i, missing) != nil {
+							t.Fatal("missing token replaced lowering")
+						}
+					}
+				}
+				if mode != 0 && (!kinds[callBuiltin] || !kinds[callStatic] || !kinds[callDynamic] || !kinds[callInvoke] || !external || !body) {
+					t.Fatalf("missing target kinds %v external=%v body=%v", kinds, external, body)
+				}
+				for _, p := range i.funcs {
+					p.functionCompilation = functionCompilation{}
+				}
+				if got, err := i.RunFunc("Run"); err != nil || got != 64297531 {
+					t.Fatalf("Run=%v,%v", got, err)
+				}
+			})
+		}
+	}
+}
+
+func TestDescriptionBoxedDeferStack(t *testing.T) {
+	var head *_defer
+	ext := reflect.ValueOf(func(int) {})
+	aux := externalCallAux{callAux: callAux{callSiteAux: callSiteAux{Kind: callStatic, DeferStack: 0, Arguments: []register{1}}}, External: ext}
+	run := makeInstruction(&Interp{}, typedInstruction{Op: opDefer, Aux: aux})
+	fr := &frame{stack: []value{unsafe.Pointer(&head), 42}}
+	run(fr)
+	if head == nil || head.args[0] != 42 || fr._defer != nil {
+		t.Fatal("boxed token used wrong stack")
+	}
+	fr.stack[0] = nil
+	defer func() {
+		if got := recover(); got != "range-over-func defer: missing deferstack token" {
+			t.Fatalf("panic=%v", got)
+		}
+	}()
+	run(fr)
 }

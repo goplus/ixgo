@@ -459,23 +459,13 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 		if elidedResults != nil {
 			d.Result = -1
 		}
-		d.Aux = describeCall(pfn, &v.Call, elidedResults)
+		d.Aux = describeCall(pfn, &v.Call, elidedResults, nil)
 	case *ssa.Go:
 		d.Op = opGo
-		d.Aux = describeCall(pfn, &v.Call, nil)
+		d.Aux = describeCall(pfn, &v.Call, nil, nil)
 	case *ssa.Defer:
 		d.Op = opDefer
-		d.Aux = describeCall(pfn, &v.Call, nil)
-		if v.DeferStack != nil {
-			switch aux := d.Aux.(type) {
-			case bodyCallAux:
-				aux.DeferStack = descriptionRegister(pfn, v.DeferStack)
-				d.Aux = aux
-			case externalCallAux:
-				aux.DeferStack = descriptionRegister(pfn, v.DeferStack)
-				d.Aux = aux
-			}
-		}
+		d.Aux = describeCall(pfn, &v.Call, nil, v.DeferStack)
 	case *ssa.ChangeType:
 		d.Op = opChangeType
 		d.Aux = describeConversion(pfn, v.X, v.Type())
@@ -632,8 +622,15 @@ func describeCallSite(pfn *function, call *ssa.CallCommon) callSiteAux {
 }
 
 // describeCall reuses the target selected by lowering, including its adapter.
-func describeCall(pfn *function, call *ssa.CallCommon, dests []register) instructionAux {
+func describeCall(pfn *function, call *ssa.CallCommon, dests []register, deferStack ssa.Value) instructionAux {
 	base := callAux{callSiteAux: describeCallSite(pfn, call), ExtractResults: dests}
+	if deferStack != nil {
+		base.DeferStack = descriptionRegister(pfn, deferStack)
+		if base.DeferStack < 0 {
+			// Keep lowering when the enclosing defer-stack token is unavailable.
+			return base
+		}
+	}
 	if base.Kind != callStatic {
 		return base
 	}
