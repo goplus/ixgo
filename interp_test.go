@@ -5019,6 +5019,9 @@ func main() {
 }
 
 func TestGCLoopValueReclamation(t *testing.T) {
+	if ixgo.IsLLGo {
+		t.Skip("skip llgo: conservative GC may retain dead loop values")
+	}
 	const source = `package main
 import ("runtime"; "time")
 func allocate(finalized chan bool) []byte {
