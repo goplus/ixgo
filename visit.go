@@ -496,6 +496,7 @@ func (visit *visitor) function(fn *ssa.Function) {
 		// Code now owns call metadata; release temporary lowering state.
 		pfn.callDests = nil
 		pfn.directCall = nil
+		pfn.directAdapter = nil
 	}
 }
 

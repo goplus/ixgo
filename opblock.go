@@ -165,6 +165,7 @@ type functionCompilation struct {
 	// Call site whose lowering selected a direct adapter;
 	// read only by the immediately following description.
 	directCall      *ssa.CallCommon
+	directAdapter   DirectCallAdapter
 	index           map[ssa.Value]uint32
 	ssaInstrs       []ssa.Instruction
 	gcLiveOnce      sync.Once
@@ -207,6 +208,7 @@ func (p *function) UnsafeRelease() {
 	p.elidedExtract = nil
 	p.callDests = nil
 	p.directCall = nil
+	p.directAdapter = nil
 	p.elidedTuples = nil
 	p.Code = nil
 	p.Instrs = nil
@@ -1565,7 +1567,7 @@ func makeCallInstr(pfn *function, interp *Interp, instr ssa.Value, call *ssa.Cal
 		}
 	case *ssa.Function:
 		// "static func/method call"
-		if run := makeStaticDirectCallInstr(interp, fn, ir, ia); run != nil {
+		if run := makeStaticDirectCallInstr(pfn, interp, fn, ir, ia); run != nil {
 			if instructionSupported && interp.ctx.Mode&(EnableInstructionDescriptions|EnableInstructionExecution) != 0 {
 				pfn.directCall = call
 			}

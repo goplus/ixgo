@@ -18,6 +18,21 @@ import (
 	"golang.org/x/tools/go/ssa"
 )
 
+// instructionCallMetadata returns the common metadata for each call aux type.
+func instructionCallMetadata(aux instructionAux) callAux {
+	switch aux := aux.(type) {
+	case directCallAux:
+		return aux.callAux
+	case externalCallAux:
+		return aux.callAux
+	case bodyCallAux:
+		return aux.callAux
+	case callAux:
+		return aux
+	}
+	panic("missing call metadata")
+}
+
 func TestDescriptionPreservesFrameLayout(t *testing.T) {
 	for _, config := range []struct{ extra, descriptions Mode }{
 		{0, EnableInstructionDescriptions}, {0, EnableInstructionExecution}, {0, EnableInstructionDescriptions | EnableInstructionExecution},
@@ -267,6 +282,9 @@ func TestInstructionAuxVariants(t *testing.T) {
 		extractAux{},
 		nextAux{},
 		callAux{},
+		directCallAux{},
+		externalCallAux{},
+		bodyCallAux{},
 		callSiteAux{},
 		fieldAux{},
 		lookupAux{},
@@ -293,7 +311,7 @@ func TestInstructionAuxVariants(t *testing.T) {
 func TestDescriptionRegisterLookup(t *testing.T) {
 	p := &function{}
 	p.index = make(map[ssa.Value]uint32)
-	fn := &ssa.Function{}
+	fn := &ssa.Function{Signature: types.NewSignatureType(nil, nil, nil, types.NewTuple(), types.NewTuple(), false)}
 	p.index[fn] = 7 | uint32(kindFunction)<<30
 	if got := descriptionRegister(p, fn); got != 7 {
 		t.Fatalf("register = %d", got)
@@ -533,7 +551,7 @@ func closure(n int) int { f := func() int { return n }; return f() }
 			if !ok {
 				continue
 			}
-			aux, ok := d.Aux.(callAux)
+			aux := instructionCallMetadata(d.Aux)
 			if false {
 				t.Fatal("missing call metadata")
 			}
@@ -575,7 +593,7 @@ func closure(n int) int { f := func() int { return n }; return f() }
 				continue
 			}
 			calls++
-			aux := d.Aux.(callAux)
+			aux := instructionCallMetadata(d.Aux)
 			if len(aux.ExtractResults) != 2 {
 				t.Fatalf("%s: expected two result slots, got %v", name, aux.ExtractResults)
 			}
@@ -650,7 +668,7 @@ func use(n int) int { a,b:=pair(n); return single(a)+b }
 			continue
 		}
 		desc := p.Code[pc]
-		aux := desc.Aux.(callAux)
+		aux := instructionCallMetadata(desc.Aux)
 		switch call.Call.StaticCallee().Name() {
 		case "single":
 			ordinary++
@@ -1487,13 +1505,16 @@ func TestDescriptionCallSiteMetadata(t *testing.T) {
 					switch v := p.ssaInstrs[pc].(type) {
 					case *ssa.Call:
 						call = &v.Call
-						aux = d.Aux.(callAux).callSiteAux
+						base := instructionCallMetadata(d.Aux)
+						aux = base.callSiteAux
 					case *ssa.Go:
 						call = &v.Call
-						aux = d.Aux.(callSiteAux)
+						base := instructionCallMetadata(d.Aux)
+						aux = base.callSiteAux
 					case *ssa.Defer:
 						call = &v.Call
-						aux = d.Aux.(callSiteAux)
+						base := instructionCallMetadata(d.Aux)
+						aux = base.callSiteAux
 					default:
 						continue
 					}
@@ -2598,43 +2619,41 @@ func TestInstructionFunctionReferences(t *testing.T) {
 			defer i.UnsafeRelease()
 			bodies := make(map[string]*function)
 			var closures []closureAux
-			var external instructionFunction
+			var external reflect.Value
 			for _, p := range i.funcs {
 				for pc, d := range p.Code {
 					switch aux := d.Aux.(type) {
 					case closureAux:
-						if aux.Function.Body == nil || aux.Function.External.IsValid() {
+						if aux.Body == nil {
 							t.Fatal("missing closure body")
 						}
-						if aux.Function.Body != i.funcs[p.ssaInstrs[pc].(*ssa.MakeClosure).Fn.(*ssa.Function)] {
+						if aux.Body != i.funcs[p.ssaInstrs[pc].(*ssa.MakeClosure).Fn.(*ssa.Function)] {
 							t.Fatal("wrong closure body")
 						}
 						closures = append(closures, aux)
-					case callAux:
+					case bodyCallAux:
 						call := p.ssaInstrs[pc].(*ssa.Call)
-						if aux.Kind == callStatic {
-							fn := call.Call.Value.(*ssa.Function)
-							if fn.Blocks != nil {
-								if aux.Function.Body != i.funcs[fn] || aux.Function.Body == nil {
-									t.Fatalf("wrong target %s", fn)
-								}
-								bodies[fn.Name()] = aux.Function.Body
-							} else if fn.Name() == "ToUpper" && aux.Function.External.IsValid() {
-								external = aux.Function
-							}
-						} else if aux.Function.Body != nil || aux.Function.External.IsValid() {
-							t.Fatal("non-static call resolved a body")
+						fn := call.Call.Value.(*ssa.Function)
+						if aux.Body == nil || aux.Body != i.funcs[fn] {
+							t.Fatalf("wrong target %s", fn)
 						}
+						bodies[fn.Name()] = aux.Body
+					case externalCallAux:
+						call := p.ssaInstrs[pc].(*ssa.Call)
+						if call.Call.StaticCallee().Name() == "ToUpper" {
+							external = aux.External
+						}
+
 					}
 				}
 			}
 			if bodies["first"] == nil || bodies["second"] == nil || bodies["first"] == bodies["second"] || bodies["recursive"] == nil {
 				t.Fatal("function identity lost")
 			}
-			if len(closures) != 2 || closures[0].Signature != closures[1].Signature || closures[0].Function.Body == closures[1].Function.Body {
+			if len(closures) != 2 || closures[0].Signature != closures[1].Signature || closures[0].Body == closures[1].Body {
 				t.Fatal("closure identity lost")
 			}
-			if !external.External.IsValid() || external.Body != nil {
+			if !external.IsValid() {
 				t.Fatal("missing external target")
 			}
 			for _, p := range i.funcs {
@@ -2646,12 +2665,12 @@ func TestInstructionFunctionReferences(t *testing.T) {
 					t.Fatalf("%s returned %v", name, got)
 				}
 			}
-			if got := external.External.Call([]reflect.Value{reflect.ValueOf("ab")})[0].String(); got != "AB" {
+			if got := external.Call([]reflect.Value{reflect.ValueOf("ab")})[0].String(); got != "AB" {
 				t.Fatal(got)
 			}
 			for j, aux := range closures {
 				capture := 7
-				fn := aux.Function.Body.makeFunction(aux.Signature, []value{&capture}).Interface().(func(int) int)
+				fn := aux.Body.makeFunction(aux.Signature, []value{&capture}).Interface().(func(int) int)
 				want := 9
 				if j == 1 {
 					want = 5
@@ -2693,13 +2712,13 @@ func TestDescriptionStaticCallExecution(t *testing.T) {
 					for pc, d := range p.Code {
 						supported := false
 						switch aux := d.Aux.(type) {
-						case callAux:
-							supported = aux.Kind == callStatic && aux.Function.Body != nil
+						case bodyCallAux:
+							supported = aux.Body != nil
 							if supported {
 								calls++
 							}
 						case closureAux:
-							supported = aux.Function.Body != nil
+							supported = aux.Body != nil
 							if supported {
 								closures++
 							}
@@ -2714,8 +2733,8 @@ func TestDescriptionStaticCallExecution(t *testing.T) {
 						name := runtime.FuncForPC(reflect.ValueOf(p.Instrs[pc]).Pointer()).Name()
 						// Call specializers are shared by both lowering paths.
 						specialized := false
-						if aux, ok := d.Aux.(callAux); ok && aux.Function.Body.Recover == nil {
-							specialized = makeCallSpecializerInstr(i, aux.Function.Body, aux.Arguments, aux.ExtractResults) != nil
+						if aux, ok := d.Aux.(bodyCallAux); ok && aux.Body.Recover == nil {
+							specialized = makeCallSpecializerInstr(i, aux.Body, aux.Arguments, aux.ExtractResults) != nil
 						}
 						if strings.Contains(name, "makeInstruction") != (mode&EnableInstructionExecution != 0) && !specialized {
 							t.Fatalf("unexpected executor %s", name)
@@ -2760,14 +2779,25 @@ func TestDescriptionPreservesDirectCall(t *testing.T) {
 			t.Fatalf("mode %v=%v,%v calls=%d", mode, got, err, calls-before)
 		}
 		for _, p := range i.funcs {
-			if p.directCall != nil {
+			if p.directCall != nil || p.directAdapter != nil {
 				t.Fatal("lowering call state retained")
 			}
-			for _, d := range p.Code {
-				if aux, ok := d.Aux.(callAux); ok && aux.Kind == callStatic && aux.Function.Body != nil {
-					wantDirect := aux.Function.Body.Fn.Name() == "Value"
-					if aux.Direct != wantDirect || wantDirect && makeInstruction(d) != nil {
+			for pc, d := range p.Code {
+				if d.Op == opCall {
+					aux := instructionCallMetadata(d.Aux)
+					wantDirect := p.ssaInstrs[pc].(*ssa.Call).Call.StaticCallee().Name() == "Value"
+					if _, direct := d.Aux.(directCallAux); direct != wantDirect {
+						t.Fatal("wrong call aux type")
+					}
+					if aux.Kind == callStatic && makeInstruction(d) == nil {
 						t.Fatal("incorrect direct adapter selection")
+					}
+					if wantDirect {
+						fr := &frame{pfn: &function{Interp: i}, stack: make([]value, len(p.stack))}
+						makeInstruction(d)(fr)
+						if got := fr.reg(d.Result); got != 42 {
+							t.Fatalf("direct description result=%v", got)
+						}
 					}
 				}
 			}
@@ -2780,17 +2810,170 @@ func TestDescriptionPreservesDirectCall(t *testing.T) {
 				if !ok || call.Call.StaticCallee().Name() != "Value" {
 					continue
 				}
-				if describeCallSite(p, &call.Call).Direct {
+				if _, direct := describeCall(p, &call.Call, nil).(directCallAux); direct {
 					t.Fatal("description resolved adapter without lowering decision")
 				}
 				p.directCall = &call.Call
-				if !describeCallSite(p, &call.Call).Direct {
+				p.directAdapter = func(DirectCallContext) {}
+				if _, direct := describeCall(p, &call.Call, nil).(directCallAux); !direct {
 					t.Fatal("description lost lowering decision")
 				}
 				p.directCall = nil
+				p.directAdapter = nil
 			}
 		}
 		i.UnsafeRelease()
+	}
+}
+
+func TestDescriptionDirectCallResults(t *testing.T) {
+	const path = "example.com/instructiondirectresults"
+	RegisterDirectCalls(path, map[string]DirectCallAdapter{
+		"Store": func(c DirectCallContext) { *DirectCallArg[*int](c, 0) = 5 },
+		"Pair":  func(c DirectCallContext) { c.SetResult(tuple{20, 22}) },
+		"Sum": func(c DirectCallContext) {
+			x := DirectCallArg[int](c, 0)
+			for _, n := range DirectCallArg[[]int](c, 1) {
+				x += n
+			}
+			c.SetResult(x)
+		},
+	})
+	const source = `package directresults
+ func Store(p *int) { *p = -1 }
+ func Pair() (int,int) { return -1,-1 }
+ func Sum(x int, rest ...int) int { return -1 }
+ func Run() int { x:=0; Store(&x); a,b:=Pair(); return x+a+b+Sum(20,10,12) }`
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		for _, extra := range []Mode{0, EnableCachedReg, ExperimentalSupportGC | EnableGCExecutionPlan} {
+			t.Run(fmt.Sprintf("mode=%v/extra=%v", mode, extra), func(t *testing.T) {
+				ctx := NewContext(DisableMemo | mode | extra)
+				file, err := parser.ParseFile(ctx.FileSet, "direct_results.go", source, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				pkg, err := ctx.LoadAstFile(path, file)
+				if err != nil {
+					t.Fatal(err)
+				}
+				i, err := NewInterp(ctx, pkg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer i.UnsafeRelease()
+				for _, p := range i.funcs {
+					p.functionCompilation = functionCompilation{}
+				}
+				if got, err := i.RunFunc("Run"); err != nil || got != 89 {
+					t.Fatalf("result=%v,%v want 89", got, err)
+				}
+			})
+		}
+	}
+}
+
+func TestDescriptionDirectCallExecution(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		args    []value
+		adapter DirectCallAdapter
+		want    value
+	}{
+		{"zero", []value{new(int)}, func(c DirectCallContext) { *DirectCallArg[*int](c, 0) = 42 }, nil},
+		{"one", []value{20, 22}, func(c DirectCallContext) { c.SetResult(DirectCallArg[int](c, 0) + DirectCallArg[int](c, 1)) }, 42},
+		{"tuple", []value{20}, func(c DirectCallContext) { x := DirectCallArg[int](c, 0); c.SetResult(tuple{x, x + 2}) }, tuple{20, 22}},
+		{"receiver", []value{new(int), 42}, func(c DirectCallContext) {
+			p := DirectCallArg[*int](c, 0)
+			*p = DirectCallArg[int](c, 1)
+			c.SetResult(*p)
+		}, 42},
+		{"variadic", []value{20, []int{10, 12}}, func(c DirectCallContext) {
+			x := DirectCallArg[int](c, 0)
+			for _, n := range DirectCallArg[[]int](c, 1) {
+				x += n
+			}
+			c.SetResult(x)
+		}, 42},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			args := make([]register, len(test.args))
+			for n := range args {
+				args[n] = register(n)
+			}
+			result := register(len(args))
+			d := typedInstruction{Op: opCall, Result: result, Aux: directCallAux{callAux: callAux{callSiteAux: callSiteAux{Kind: callStatic, Arguments: args}}, Adapter: test.adapter}}
+			run := makeInstruction(d)
+			if run == nil {
+				t.Fatal("missing direct-call executor")
+			}
+			// No interpreted body, external function, or compilation state is needed.
+			p := &function{Interp: &Interp{}}
+			fr := &frame{pfn: p, stack: append(append([]value(nil), test.args...), nil), deferid: 7}
+			run(fr)
+			if got := fr.reg(result); !reflect.DeepEqual(got, test.want) {
+				t.Fatalf("result=%v want %v", got, test.want)
+			}
+			if test.name == "zero" && *test.args[0].(*int) != 42 {
+				t.Fatal("void adapter was not called")
+			}
+			if got, ok := p.Interp.deferMap.Load(uint64(7)); !ok || got != fr {
+				t.Fatal("defer frame not tracked")
+			}
+		})
+	}
+	t.Run("panic", func(t *testing.T) {
+		d := typedInstruction{Op: opCall, Aux: directCallAux{callAux: callAux{callSiteAux: callSiteAux{Kind: callStatic}}, Adapter: func(DirectCallContext) { panic("direct panic") }}}
+		defer func() {
+			if got := recover(); got != "direct panic" {
+				t.Fatalf("panic=%v", got)
+			}
+		}()
+		makeInstruction(d)(&frame{pfn: &function{Interp: &Interp{}}})
+	})
+}
+
+func TestDescriptionExternalCallExecution(t *testing.T) {
+	for _, withFrame := range []bool{false, true} {
+		t.Run(fmt.Sprintf("frame=%v", withFrame), func(t *testing.T) {
+			external := reflect.ValueOf(func(x int) (int, int) { return x, x + 2 })
+			if withFrame {
+				external = reflect.ValueOf(func(fr *frame, x int) (int, int) {
+					if fr.deferid != 7 {
+						t.Fatal("missing caller frame")
+					}
+					return x, x + 2
+				})
+			}
+			for _, extracted := range []bool{false, true} {
+				aux := externalCallAux{callAux: callAux{callSiteAux: callSiteAux{Kind: callStatic, Arguments: []register{0}}}, External: external}
+				result := register(1)
+				if extracted {
+					aux.ExtractResults = []register{1, 2}
+					result = -1
+				}
+				run := makeInstruction(typedInstruction{Op: opCall, Result: result, Aux: aux})
+				if run == nil {
+					t.Fatal("missing external executor")
+				}
+				fr := &frame{pfn: &function{Interp: &Interp{}}, stack: []value{20, nil, nil}, deferid: 7}
+				run(fr)
+				if extracted {
+					if fr.reg(1) != 20 || fr.reg(2) != 22 {
+						t.Fatal("incorrect extracted results")
+					}
+				} else if !reflect.DeepEqual(fr.reg(1), tuple{20, 22}) {
+					t.Fatalf("tuple=%v", fr.reg(1))
+				}
+				if got, ok := fr.pfn.Interp.deferMap.Load(uint64(7)); !ok || got != fr {
+					t.Fatal("missing defer frame")
+				}
+			}
+		})
+	}
+	for _, aux := range []instructionAux{directCallAux{}, externalCallAux{}, bodyCallAux{}} {
+		if makeInstruction(typedInstruction{Op: opCall, Aux: aux}) != nil {
+			t.Fatal("unresolved target executor")
+		}
 	}
 }
 
@@ -2815,8 +2998,8 @@ func TestDescriptionCallFallbacks(t *testing.T) {
 	if got, err := i.RunFunc("run"); err != nil || got != 6 {
 		t.Fatalf("run=%v,%v", got, err)
 	}
-	fn := &ssa.Function{}
-	if got := describeFunction(i.funcs[i.mainpkg.Func("run")], fn); got.Body != nil || got.External.IsValid() {
+	fn := &ssa.Function{Signature: types.NewSignatureType(nil, nil, nil, types.NewTuple(), types.NewTuple(), false)}
+	if _, ok := describeCall(i.funcs[i.mainpkg.Func("run")], &ssa.CallCommon{Value: fn}, nil).(externalCallAux); ok {
 		t.Fatal("unallocated external resolved")
 	}
 }
