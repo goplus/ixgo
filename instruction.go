@@ -312,7 +312,8 @@ func (callSiteAux) instructionAux() {}
 
 // callAux adds result placement to common call metadata. A nil ExtractResults
 // uses the ordinary result register; a -1 entry denotes an unused result.
-// Unresolved, dynamic, builtin and invoke calls retain this base auxiliary data.
+// Unresolved targets, builtin and invoke calls retain this base auxiliary data.
+// Dynamic calls with a target register use dynamicCallAux.
 type callAux struct {
 	callSiteAux
 	ExtractResults []register
@@ -333,6 +334,13 @@ type externalCallAux struct {
 }
 
 func (externalCallAux) instructionAux() {}
+
+// dynamicCallAux reads a function value from the target register at execution.
+type dynamicCallAux struct {
+	callAux
+}
+
+func (dynamicCallAux) instructionAux() {}
 
 // bodyCallAux retains the interpreted body loaded by lowering.
 type bodyCallAux struct {
@@ -622,7 +630,8 @@ func describeCallSite(pfn *function, call *ssa.CallCommon) callSiteAux {
 	return aux
 }
 
-// describeCall reuses the target selected by lowering, including its adapter.
+// describeCall reuses lowering-selected targets, including adapters; dynamic
+// function values use dynamicCallAux when their target register is available.
 func describeCall(pfn *function, call *ssa.CallCommon, dests []register, deferStack ssa.Value) instructionAux {
 	base := callAux{callSiteAux: describeCallSite(pfn, call), ExtractResults: dests}
 	if deferStack != nil {
@@ -631,6 +640,14 @@ func describeCall(pfn *function, call *ssa.CallCommon, dests []register, deferSt
 			// Keep lowering when the enclosing defer-stack token is unavailable.
 			return base
 		}
+	}
+	// Immediate closures have dedicated binding paths in lowering for Call,
+	// Go and Defer; keep them until those environments are described directly.
+	if _, immediate := call.Value.(*ssa.MakeClosure); immediate {
+		return base
+	}
+	if base.Kind == callDynamic && base.Target >= 0 {
+		return dynamicCallAux{callAux: base}
 	}
 	if base.Kind != callStatic {
 		return base
