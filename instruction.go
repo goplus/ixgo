@@ -295,10 +295,13 @@ const (
 // Builtins have no Signature because they have no representable Go function
 // signature.
 type callSiteAux struct {
-	Kind      callKind
-	Signature reflect.Type
-	Target    register
-	Arguments []register
+	// DeferStack is the enclosing defer-stack register, or -1 for the current
+	// frame or an unavailable token. An unavailable token retains lowering.
+	DeferStack register
+	Kind       callKind
+	Signature  reflect.Type
+	Target     register
+	Arguments  []register
 	// Name is the builtin name for callBuiltin or the method ID for callInvoke.
 	// Method IDs include package identity for unexported names; execution method
 	// sets currently dispatch on the plain method name. Empty for other kinds.
@@ -324,7 +327,6 @@ type directCallAux struct {
 func (directCallAux) instructionAux() {}
 
 // externalCallAux retains the callee register value allocated by lowering.
-// Go and Defer use it for metadata only.
 type externalCallAux struct {
 	callAux
 	External reflect.Value
@@ -333,7 +335,6 @@ type externalCallAux struct {
 func (externalCallAux) instructionAux() {}
 
 // bodyCallAux retains the interpreted body loaded by lowering.
-// Go and Defer use it for metadata only.
 type bodyCallAux struct {
 	callAux
 	Body *function
@@ -459,13 +460,13 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 		if elidedResults != nil {
 			d.Result = -1
 		}
-		d.Aux = describeCall(pfn, &v.Call, elidedResults)
+		d.Aux = describeCall(pfn, &v.Call, elidedResults, nil)
 	case *ssa.Go:
 		d.Op = opGo
-		d.Aux = describeCall(pfn, &v.Call, nil)
+		d.Aux = describeCall(pfn, &v.Call, nil, nil)
 	case *ssa.Defer:
 		d.Op = opDefer
-		d.Aux = describeCall(pfn, &v.Call, nil)
+		d.Aux = describeCall(pfn, &v.Call, nil, v.DeferStack)
 	case *ssa.ChangeType:
 		d.Op = opChangeType
 		d.Aux = describeConversion(pfn, v.X, v.Type())
@@ -600,7 +601,7 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 }
 
 func describeCallSite(pfn *function, call *ssa.CallCommon) callSiteAux {
-	aux := callSiteAux{Kind: callDynamic, Target: descriptionRegister(pfn, call.Value), Arguments: make([]register, len(call.Args))}
+	aux := callSiteAux{DeferStack: -1, Kind: callDynamic, Target: descriptionRegister(pfn, call.Value), Arguments: make([]register, len(call.Args))}
 	for i, arg := range call.Args {
 		aux.Arguments[i] = descriptionRegister(pfn, arg)
 	}
@@ -622,8 +623,15 @@ func describeCallSite(pfn *function, call *ssa.CallCommon) callSiteAux {
 }
 
 // describeCall reuses the target selected by lowering, including its adapter.
-func describeCall(pfn *function, call *ssa.CallCommon, dests []register) instructionAux {
+func describeCall(pfn *function, call *ssa.CallCommon, dests []register, deferStack ssa.Value) instructionAux {
 	base := callAux{callSiteAux: describeCallSite(pfn, call), ExtractResults: dests}
+	if deferStack != nil {
+		base.DeferStack = descriptionRegister(pfn, deferStack)
+		if base.DeferStack < 0 {
+			// Keep lowering when the enclosing defer-stack token is unavailable.
+			return base
+		}
+	}
 	if base.Kind != callStatic {
 		return base
 	}
