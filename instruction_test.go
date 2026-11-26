@@ -3,6 +3,7 @@
 package ixgo
 
 import (
+	"context"
 	"fmt"
 	"go/constant"
 	"go/parser"
@@ -14,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 	"unsafe"
 
 	"golang.org/x/tools/go/ssa"
@@ -3307,5 +3309,23 @@ func TestDescriptionPreservesImmediateClosures(t *testing.T) {
 	}
 	if got, err := i.RunFunc("Run"); err != nil || got != 5 {
 		t.Fatalf("Run=%v,%v", got, err)
+	}
+}
+
+func TestInstructionGoCallRunContext(t *testing.T) {
+	interp := &Interp{
+		ctx:     &Context{RunContext: context.Background()},
+		cherror: make(chan PanicError, 1),
+	}
+	done := make(chan struct{})
+	run := instructionGoCall(interp, callDescription{
+		target: reflect.ValueOf(func() { close(done) }),
+	})
+	root := &frame{pfn: &function{Interp: interp}, block: -1}
+	run(root)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for goroutine")
 	}
 }
