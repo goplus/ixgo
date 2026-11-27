@@ -4146,3 +4146,94 @@ func Run() int {
 		}
 	}
 }
+
+func TestInstructionInvokeLookupFallbacks(t *testing.T) {
+	for _, mapped := range []bool{false, true} {
+		for _, missing := range []bool{false, true} {
+			t.Run(fmt.Sprintf("mapped=%v/missing=%v", mapped, missing), func(t *testing.T) {
+				i, err := NewContext(DisableMemo).LoadInterp("lookup.go", "package lookup\n\nfunc Run() {}\n")
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer i.UnsafeRelease()
+				receiver := bytes.NewBufferString("abc")
+				if mapped {
+					i.msets[reflect.TypeOf(receiver)] = map[string]*function{}
+				}
+				name := "Len"
+				if missing {
+					name = "Missing"
+				}
+				aux := invokeCallAux{callAux: callAux{callSiteAux: callSiteAux{Target: 0}}, Method: name}
+				run := makeInstruction(i, typedInstruction{Op: opCall, Result: 1, Aux: aux})
+				fr := &frame{pfn: i.funcs[i.mainpkg.Func("Run")], stack: []value{receiver, nil}, ipc: 1}
+				for n := 0; n < 2; n++ {
+					func() {
+						defer func() {
+							r := recover()
+							if (r != nil) != missing {
+								t.Fatalf("panic=%v missing=%v", r, missing)
+							}
+							if missing && !strings.Contains(fmt.Sprint(r), "no code for method:") {
+								t.Fatalf("unexpected lookup error: %v", r)
+							}
+						}()
+						run(fr)
+						if fr.reg(1) != 3 {
+							t.Fatalf("result=%v", fr.reg(1))
+						}
+					}()
+				}
+			})
+		}
+	}
+}
+
+func TestDescriptionClosureMissingMetadata(t *testing.T) {
+	i, err := NewContext(DisableMemo|EnableInstructionDescriptions).LoadInterp("binding.go", `package binding
+
+func Run() int {
+	x := 1
+	return func() int { return x }()
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	found := false
+	for _, p := range i.funcs {
+		for _, block := range p.Fn.Blocks {
+			for _, instr := range block.Instrs {
+				call, ok := instr.(*ssa.Call)
+				if !ok {
+					continue
+				}
+				closure, ok := call.Call.Value.(*ssa.MakeClosure)
+				if !ok || len(closure.Bindings) == 0 {
+					continue
+				}
+				found = true
+				binding := closure.Bindings[0]
+				saved := p.index[binding]
+				delete(p.index, binding)
+				aux := describeCall(p, &call.Call, nil, nil)
+				p.index[binding] = saved
+				if _, ok := aux.(callAux); !ok {
+					t.Fatal("missing binding replaced lowering")
+				}
+				fn := closure.Fn.(*ssa.Function)
+				body := i.funcs[fn]
+				delete(i.funcs, fn)
+				aux = describeCall(p, &call.Call, nil, nil)
+				i.funcs[fn] = body
+				if _, ok := aux.(callAux); !ok {
+					t.Fatal("missing body replaced lowering")
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing captured closure")
+	}
+}
