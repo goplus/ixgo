@@ -160,12 +160,7 @@ func (fr *frame) jump(target int32) {
 }
 
 type functionCompilation struct {
-	Fn        *ssa.Function
-	callDests map[ssa.Value][]register
-	// Call site whose lowering selected a direct adapter;
-	// read only by the immediately following description.
-	directCall      *ssa.CallCommon
-	directAdapter   DirectCallAdapter
+	Fn              *ssa.Function
 	index           map[ssa.Value]uint32
 	ssaInstrs       []ssa.Instruction
 	gcLiveOnce      sync.Once
@@ -176,6 +171,8 @@ type functionCompilation struct {
 	needInject      bool
 	elidedTuples    []register
 	elidedExtract   map[*ssa.Extract]struct{}
+	// descriptionIndex is the bytecode register plan.
+	descriptionIndex map[ssa.Value]register
 }
 
 const (
@@ -206,9 +203,6 @@ func (p *function) UnsafeRelease() {
 	p.closureCaptures = nil
 	p.closureByResult = nil
 	p.elidedExtract = nil
-	p.callDests = nil
-	p.directCall = nil
-	p.directAdapter = nil
 	p.elidedTuples = nil
 	p.Code = nil
 	p.Instrs = nil
@@ -1496,12 +1490,6 @@ func elideCallExtracts(pfn *function, instr ssa.Value, nres int) []register {
 		}
 	}
 	pfn.elidedTuples = append(pfn.elidedTuples, pfn.regIndex(instr))
-	if instructionSupported && pfn.Interp != nil && pfn.Interp.ctx.Mode&(EnableInstructionDescriptions|EnableInstructionExecution) != 0 {
-		if pfn.callDests == nil {
-			pfn.callDests = make(map[ssa.Value][]register)
-		}
-		pfn.callDests[instr] = append([]register(nil), dests...)
-	}
 	return dests
 }
 
@@ -1568,9 +1556,6 @@ func makeCallInstr(pfn *function, interp *Interp, instr ssa.Value, call *ssa.Cal
 	case *ssa.Function:
 		// "static func/method call"
 		if run := makeStaticDirectCallInstr(pfn, interp, fn, ir, ia); run != nil {
-			if instructionSupported && interp.ctx.Mode&(EnableInstructionDescriptions|EnableInstructionExecution) != 0 {
-				pfn.directCall = call
-			}
 			return run
 		}
 		if fn.Blocks == nil {

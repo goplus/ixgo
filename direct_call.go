@@ -191,9 +191,6 @@ func makeStaticDirectCallInstr(pfn *function, interp *Interp, fn *ssa.Function, 
 	if !ok {
 		return nil
 	}
-	if instructionSupported && interp.ctx.Mode&(EnableInstructionDescriptions|EnableInstructionExecution) != 0 {
-		pfn.directAdapter = adapter
-	}
 	return func(fr *frame) {
 		interp.invokeDirectCall(fr, adapter, result, args)
 	}
