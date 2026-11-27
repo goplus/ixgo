@@ -254,7 +254,10 @@ func instructionDeferCall(interp *Interp, desc callDescription, id register) fun
 
 // makeBuiltinInstruction preserves the register-based builtin fast paths.
 func makeBuiltinInstruction(interp *Interp, d typedInstruction, aux builtinCallAux) func(*frame) {
-	fn := &builtinDescription{name: aux.Name}
+	var fn builtinFunction = &builtinDescription{name: aux.Name}
+	if aux.Target != nil {
+		fn = aux.Target
+	}
 	ir, ia := d.Result, aux.Arguments
 	switch fn.Name() {
 	case "append":
@@ -379,8 +382,7 @@ func makeBuiltinInstruction(interp *Interp, d typedInstruction, aux builtinCallA
 		}
 
 	case "panic":
-		// ssa.Panic handles most cases; this is only for "go
-		// panic" or "defer panic".
+		// Most source panic calls are represented by opPanic.
 		if interp.ctx.panicFunc != nil {
 			return func(fr *frame) {
 				arg0 := fr.reg(ia[0])
@@ -519,8 +521,8 @@ func makeBuiltinInstruction(interp *Interp, d typedInstruction, aux builtinCallA
 	case "max":
 		return func(fr *frame) {
 			v := reflect.ValueOf(fr.reg(ia[0]))
-			for _, i := range ia {
-				arg := reflect.ValueOf(fr.reg(i))
+			for i, r := range ia {
+				arg := reflect.ValueOf(fr.reg(r))
 				if i > 0 {
 					switch v.Kind() {
 					case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
@@ -547,8 +549,8 @@ func makeBuiltinInstruction(interp *Interp, d typedInstruction, aux builtinCallA
 	case "min":
 		return func(fr *frame) {
 			v := reflect.ValueOf(fr.reg(ia[0]))
-			for _, i := range ia {
-				arg := reflect.ValueOf(fr.reg(i))
+			for i, r := range ia {
+				arg := reflect.ValueOf(fr.reg(r))
 				if i > 0 {
 					switch v.Kind() {
 					case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:

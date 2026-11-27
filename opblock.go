@@ -166,6 +166,9 @@ type functionCompilation struct {
 	// read only by the immediately following description.
 	directCall      *ssa.CallCommon
 	directAdapter   DirectCallAdapter
+	builtinTarget   *ssa.Builtin
+	builtinConstant uintptr
+	builtinError    string
 	index           map[ssa.Value]uint32
 	ssaInstrs       []ssa.Instruction
 	gcLiveOnce      sync.Once
@@ -209,6 +212,9 @@ func (p *function) UnsafeRelease() {
 	p.callDests = nil
 	p.directCall = nil
 	p.directAdapter = nil
+	p.builtinTarget = nil
+	p.builtinConstant = 0
+	p.builtinError = ""
 	p.elidedTuples = nil
 	p.Code = nil
 	p.Instrs = nil

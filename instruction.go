@@ -340,9 +340,11 @@ type dynamicCallAux struct {
 	callAux
 }
 
-// builtinCallAux retains a builtin target and its interface argument layout.
+// builtinCallAux retains interface argument layout and the original target for
+// panic callback compatibility. Constant and Error apply only to unsafe layout builtins.
 type builtinCallAux struct {
 	callAux
+	Target        *ssa.Builtin
 	InterfaceArgs []bool
 	Constant      uintptr
 	Error         string
@@ -659,35 +661,9 @@ func describeCall(pfn *function, call *ssa.CallCommon, dests []register, deferSt
 	if base.Kind == callBuiltin {
 		name := call.Value.(*ssa.Builtin).Name()
 		aux := builtinCallAux{callAux: base, InterfaceArgs: builtinInterfaceArgs(pfn.Interp, name, call.Args)}
-		switch name {
-		case "Sizeof", "Alignof":
-			typ := call.Args[0].Type()
-			if len(call.Args) == 2 {
-				typ = typ.Underlying().(*types.Pointer).Elem()
-			}
-			if name == "Sizeof" {
-				aux.Constant = uintptr(pfn.Interp.ctx.sizes.Sizeof(typ))
-			} else {
-				aux.Constant = uintptr(pfn.Interp.ctx.sizes.Alignof(typ))
-			}
-		case "Offsetof":
-			var offset int64
-			if len(call.Args) > 1 {
-				typ := call.Args[0].Type().Underlying().(*types.Pointer).Elem()
-				for _, arg := range call.Args[1:] {
-					index, _ := constant.Int64Val(arg.(*ssa.Const).Value)
-					st := typ.Underlying().(*types.Struct)
-					offset += structOffsetsof(pfn.Interp.ctx.sizes, st)[int(index)]
-					typ = st.Field(int(index)).Type()
-				}
-			} else {
-				var err error
-				offset, err = builtinOffsetof(pfn.Interp.ctx, call.Pos(), call.Args)
-				if err != nil {
-					aux.Error = err.Error()
-				}
-			}
-			aux.Constant = uintptr(offset)
+		aux.Target = call.Value.(*ssa.Builtin)
+		if pfn.builtinTarget == aux.Target {
+			aux.Constant, aux.Error = pfn.builtinConstant, pfn.builtinError
 		}
 		return aux
 	}
