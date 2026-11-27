@@ -662,8 +662,37 @@ func describeCall(pfn *function, call *ssa.CallCommon, dests []register, deferSt
 		name := call.Value.(*ssa.Builtin).Name()
 		aux := builtinCallAux{callAux: base, InterfaceArgs: builtinInterfaceArgs(pfn.Interp, name, call.Args)}
 		aux.Target = call.Value.(*ssa.Builtin)
-		if pfn.builtinTarget == aux.Target {
-			aux.Constant, aux.Error = pfn.builtinConstant, pfn.builtinError
+		switch name {
+		case "Sizeof", "Alignof":
+			typ := call.Args[0].Type()
+			if len(call.Args) == 2 {
+				// unsaferewrite.Rewrite carries the operand type in a typed pointer.
+				typ = typ.Underlying().(*types.Pointer).Elem()
+			}
+			if name == "Sizeof" {
+				aux.Constant = uintptr(pfn.Interp.ctx.sizes.Sizeof(typ))
+			} else {
+				aux.Constant = uintptr(pfn.Interp.ctx.sizes.Alignof(typ))
+			}
+		case "Offsetof":
+			var offset int64
+			if len(call.Args) > 1 {
+				// unsaferewrite.Rewrite carries the struct type and field-index path.
+				typ := call.Args[0].Type().Underlying().(*types.Pointer).Elem()
+				for _, arg := range call.Args[1:] {
+					index, _ := constant.Int64Val(arg.(*ssa.Const).Value)
+					st := typ.Underlying().(*types.Struct)
+					offset += structOffsetsof(pfn.Interp.ctx.sizes, st)[int(index)]
+					typ = st.Field(int(index)).Type()
+				}
+			} else {
+				var err error
+				offset, err = builtinOffsetof(pfn.Interp.ctx, call.Pos(), call.Args)
+				if err != nil {
+					aux.Error = err.Error()
+				}
+			}
+			aux.Constant = uintptr(offset)
 		}
 		return aux
 	}

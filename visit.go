@@ -497,9 +497,6 @@ func (visit *visitor) function(fn *ssa.Function) {
 		pfn.callDests = nil
 		pfn.directCall = nil
 		pfn.directAdapter = nil
-		pfn.builtinTarget = nil
-		pfn.builtinConstant = 0
-		pfn.builtinError = ""
 	}
 }
 

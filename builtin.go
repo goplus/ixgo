@@ -332,13 +332,6 @@ func (inter *Interp) callBuiltinDiscardsResult(fr *frame, fn builtinFunction, ar
 // makeBuiltinByStack interprets a call to builtin fn with arguments args,
 // returning its result.
 func (interp *Interp) makeBuiltinByStack(pfn *function, fn *ssa.Builtin, ssaArgs []ssa.Value, ir register, ia []register, pos token.Pos) func(fr *frame) {
-	record := instructionSupported && interp.ctx.Mode&(EnableInstructionDescriptions|EnableInstructionExecution) != 0
-	if record {
-		pfn.builtinTarget = fn
-		pfn.builtinConstant = 0
-		pfn.builtinError = ""
-	}
-
 	switch fn.Name() {
 	case "append":
 		if len(ia) == 1 {
@@ -601,9 +594,6 @@ func (interp *Interp) makeBuiltinByStack(pfn *function, fn *ssa.Builtin, ssaArgs
 		} else {
 			result = uintptr(interp.ctx.sizes.Alignof(typ))
 		}
-		if record {
-			pfn.builtinConstant = result
-		}
 		return func(fr *frame) { fr.setReg(ir, result) }
 	case "Offsetof": // instance of generic function
 		var offset int64
@@ -622,17 +612,11 @@ func (interp *Interp) makeBuiltinByStack(pfn *function, fn *ssa.Builtin, ssaArgs
 		}
 		if err != nil {
 			msg := err.Error()
-			if record {
-				pfn.builtinError = msg
-			}
 			return func(fr *frame) {
 				panic(fr.plainError(fn, msg))
 			}
 		}
 		result := uintptr(offset)
-		if record {
-			pfn.builtinConstant = result
-		}
 		return func(fr *frame) {
 			fr.setReg(ir, result)
 		}
