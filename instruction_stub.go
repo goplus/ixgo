@@ -10,6 +10,10 @@ const instructionSupported = false
 // in the instruction-tagged build.
 type typedInstruction struct{}
 
+func describeCallResults(*function, ssa.Value) []register { return nil }
+func planDescriptionRegisters(*function, *ssa.Function)   {}
+func bindRuntimeRegisters(*function, *typedInstruction)   {}
+
 func describeInstruction(*function, ssa.Instruction, []*ssa.Value, []register) typedInstruction {
 	return typedInstruction{}
 }
