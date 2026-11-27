@@ -3335,6 +3335,7 @@ func TestInstructionGoCallRunContext(t *testing.T) {
 
 func TestDescriptionBuiltinExecution(t *testing.T) {
 	const source = `package builtins
+
 func Run() int {
 	a := []int{1}
 	a = append(a, 2)
@@ -3348,7 +3349,8 @@ func Run() int {
 	close(ch)
 	z := complex(float64(3), float64(4))
 	return a[1] + dst[0] + n + l + c + int(real(z)) + int(imag(z)) + len(m)
-}`
+}
+`
 	for _, mode := range []Mode{EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
 		t.Run(fmt.Sprintf("mode=%v", mode), func(t *testing.T) {
 			i, err := NewContext(DisableMemo|mode).LoadInterp("builtins.go", source)
@@ -3472,24 +3474,36 @@ func TestInstructionBuiltinFastPaths(t *testing.T) {
 
 func TestDescriptionBuiltinUnsafeAndTypes(t *testing.T) {
 	const source = `package builtins
+
 import "unsafe"
-func size[T any](x T) uintptr { return unsafe.Sizeof(x) }
+
+func size[T any](x T) uintptr  { return unsafe.Sizeof(x) }
 func align[T any](x T) uintptr { return unsafe.Alignof(x) }
 func Run() int {
- b:=[]byte("ab"); p:=unsafe.SliceData(b)
- s:=unsafe.String(p,2); sl:=unsafe.Slice(p,2)
- p2:=unsafe.StringData(s)
- q:=(*byte)(unsafe.Add(unsafe.Pointer(p),1))
- var z []byte; var zp *byte
- empty:=unsafe.Slice(zp,0); es:=unsafe.String(zp,0)
- _=unsafe.SliceData(z); _=unsafe.SliceData(make([]byte,0))
- a:=[]int{1,2}; clear(a); m:=map[int]int{1:2};clear(m)
- c:=complex(float32(3),float32(4)); d:=complex(float64(3),float64(4))
- n:=int(real(c)+imag(c))+int(real(d)+imag(d))
- n+=max(1,2,3)+min(1,2,3)+int(max(uint(1),uint(2)))+int(min(uint(1),uint(2)))
- n+=int(max(1.0,2.0))+int(min(1.0,2.0))+len(max("a","b"))+len(min("a","b"))
- return n+len(s)+len(sl)+int(*p2)+int(*q)+len(empty)+len(es)+a[0]+len(m)+int(size(int64(0)))+int(align(int64(0)))
-}`
+	b := []byte("ab")
+	p := unsafe.SliceData(b)
+	s := unsafe.String(p, 2)
+	sl := unsafe.Slice(p, 2)
+	p2 := unsafe.StringData(s)
+	q := (*byte)(unsafe.Add(unsafe.Pointer(p), 1))
+	var z []byte
+	var zp *byte
+	empty := unsafe.Slice(zp, 0)
+	es := unsafe.String(zp, 0)
+	_ = unsafe.SliceData(z)
+	_ = unsafe.SliceData(make([]byte, 0))
+	a := []int{1, 2}
+	clear(a)
+	m := map[int]int{1: 2}
+	clear(m)
+	c := complex(float32(3), float32(4))
+	d := complex(float64(3), float64(4))
+	n := int(real(c)+imag(c)) + int(real(d)+imag(d))
+	n += max(1, 2, 3) + min(1, 2, 3) + int(max(uint(1), uint(2))) + int(min(uint(1), uint(2)))
+	n += int(max(1.0, 2.0)) + int(min(1.0, 2.0)) + len(max("a", "b")) + len(min("a", "b"))
+	return n + len(s) + len(sl) + int(*p2) + int(*q) + len(empty) + len(es) + a[0] + len(m) + int(size(int64(0))) + int(align(int64(0)))
+}
+`
 	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution} {
 		i, err := NewContext(DisableMemo|mode).LoadInterp("builtin_unsafe.go", source)
 		if err != nil {
@@ -3596,10 +3610,27 @@ func TestInstructionBuiltinBranchCoverage(t *testing.T) {
 
 func TestDescriptionBuiltinOffsetAndRegisterZero(t *testing.T) {
 	const src = `package p
- import "unsafe"
- func offset[T any](x struct{ A byte; B T }) uintptr { return unsafe.Offsetof(x.B) }
- func f(a,b int) { if max(b,a)!=5 || min(b,a)!=1 { panic("register zero skipped") } }
- func Run()int{f(5,1);f(1,5);return int(offset(struct{A byte;B int64}{}))}`
+
+import "unsafe"
+
+func offset[T any](x struct {
+	A byte
+	B T
+}) uintptr { return unsafe.Offsetof(x.B) }
+func f(a, b int) {
+	if max(b, a) != 5 || min(b, a) != 1 {
+		panic("register zero skipped")
+	}
+}
+func Run() int {
+	f(5, 1)
+	f(1, 5)
+	return int(offset(struct {
+		A byte
+		B int64
+	}{}))
+}
+`
 	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution} {
 		i, err := NewContext(DisableMemo|mode).LoadInterp("offset.go", src)
 		if err != nil {
@@ -3629,8 +3660,11 @@ func TestDescriptionBuiltinOffsetAndRegisterZero(t *testing.T) {
 
 func TestInstructionBuiltinPanicCompatibility(t *testing.T) {
 	const src = `package p
- import "unsafe"
- func Run(n int){var p *byte; _=unsafe.Slice(p,n)}`
+
+import "unsafe"
+
+func Run(n int) { var p *byte; _ = unsafe.Slice(p, n) }
+`
 	for _, mode := range []Mode{0, EnableInstructionExecution} {
 		ctx := NewContext(DisableMemo | mode)
 		called := false
@@ -3662,44 +3696,86 @@ func TestInstructionBuiltinPanicCompatibility(t *testing.T) {
 
 func TestBuiltinMinMaxSemantics(t *testing.T) {
 	const source = `package minmax
+
 import "math"
+
 type signed int64
 type unsigned uint64
 type floating float64
 type text string
-func check[T interface{~int|~int8|~int16|~int32|~int64|~uint|~uint8|~uint16|~uint32|~uint64|~uintptr|~float32|~float64|~string}](a,b,c T) {
- if min(c,b,a)!=a || max(a,b,c)!=c || min(a)!=a || max(c)!=c || min(b,b)!=b || max(b,b)!=b {panic("ordered operands")}
+
+func check[T interface {
+	~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr | ~float32 | ~float64 | ~string
+}](a, b, c T) {
+	if min(c, b, a) != a || max(a, b, c) != c || min(a) != a || max(c) != c || min(b, b) != b || max(b, b) != b {
+		panic("ordered operands")
+	}
 }
-func regzero(a,b int){if min(b,a)!=1 || max(b,a)!=5 {panic("register zero")}}
-func floats(a,b float64){
- if !math.IsNaN(min(a,b)) || !math.IsNaN(max(a,b)) {panic("NaN propagation")}
+func regzero(a, b int) {
+	if min(b, a) != 1 || max(b, a) != 5 {
+		panic("register zero")
+	}
 }
-func floats32(a,b float32){
- if !math.IsNaN(float64(min(a,b))) || !math.IsNaN(float64(max(a,b))) {panic("float32 NaN")}
+func floats(a, b float64) {
+	if !math.IsNaN(min(a, b)) || !math.IsNaN(max(a, b)) {
+		panic("NaN propagation")
+	}
 }
-func zeros32(a,b float32){
- if !math.Signbit(float64(min(a,b))) || math.Signbit(float64(max(a,b))) {panic("float32 zero")}
+func floats32(a, b float32) {
+	if !math.IsNaN(float64(min(a, b))) || !math.IsNaN(float64(max(a, b))) {
+		panic("float32 NaN")
+	}
 }
-func named(a,b floating){
- if !math.IsNaN(float64(min(a,b))) || !math.IsNaN(float64(max(a,b))) {panic("named NaN")}
+func zeros32(a, b float32) {
+	if !math.Signbit(float64(min(a, b))) || math.Signbit(float64(max(a, b))) {
+		panic("float32 zero")
+	}
 }
-func zeros(a,b float64){
- if !math.Signbit(min(a,b)) || math.Signbit(max(a,b)) {panic("signed zero")}
+func named(a, b floating) {
+	if !math.IsNaN(float64(min(a, b))) || !math.IsNaN(float64(max(a, b))) {
+		panic("named NaN")
+	}
+}
+func zeros(a, b float64) {
+	if !math.Signbit(min(a, b)) || math.Signbit(max(a, b)) {
+		panic("signed zero")
+	}
 }
 func Run() int {
- check[int](-3,1,5);check[int8](-3,1,5);check[int16](-3,1,5);check[int32](-3,1,5);check[int64](-3,1,5)
- check[uint](0,1,5);check[uint8](0,1,5);check[uint16](0,1,5);check[uint32](0,1,5);check[uint64](0,1,5);check[uintptr](0,1,5)
- check[float32](-3,1,5);check[float64](-3,1,5);check[string]("a","b","c")
- check[signed](-3,1,5);check[unsigned](0,1,5);check[floating](-3,1,5);check[text]("a","b","c")
- regzero(5,1);regzero(1,5)
- floats(1,math.NaN());floats(math.NaN(),1)
- floats32(1,float32(math.NaN()));floats32(float32(math.NaN()),1)
- named(1,floating(math.NaN()));named(floating(math.NaN()),1)
- zeros32(0,float32(math.Copysign(0,-1)));zeros32(float32(math.Copysign(0,-1)),0)
- zeros(0,math.Copysign(0,-1));zeros(math.Copysign(0,-1),0)
- check[float64](math.Inf(-1),0,math.Inf(1))
- return 42
-}`
+	check[int](-3, 1, 5)
+	check[int8](-3, 1, 5)
+	check[int16](-3, 1, 5)
+	check[int32](-3, 1, 5)
+	check[int64](-3, 1, 5)
+	check[uint](0, 1, 5)
+	check[uint8](0, 1, 5)
+	check[uint16](0, 1, 5)
+	check[uint32](0, 1, 5)
+	check[uint64](0, 1, 5)
+	check[uintptr](0, 1, 5)
+	check[float32](-3, 1, 5)
+	check[float64](-3, 1, 5)
+	check[string]("a", "b", "c")
+	check[signed](-3, 1, 5)
+	check[unsigned](0, 1, 5)
+	check[floating](-3, 1, 5)
+	check[text]("a", "b", "c")
+	regzero(5, 1)
+	regzero(1, 5)
+	floats(1, math.NaN())
+	floats(math.NaN(), 1)
+	floats32(1, float32(math.NaN()))
+	floats32(float32(math.NaN()), 1)
+	named(1, floating(math.NaN()))
+	named(floating(math.NaN()), 1)
+	zeros32(0, float32(math.Copysign(0, -1)))
+	zeros32(float32(math.Copysign(0, -1)), 0)
+	zeros(0, math.Copysign(0, -1))
+	zeros(math.Copysign(0, -1), 0)
+	check[float64](math.Inf(-1), 0, math.Inf(1))
+	return 42
+}
+`
 	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
 		t.Run(fmt.Sprintf("mode=%v", mode), func(t *testing.T) {
 			i, err := NewContext(DisableMemo|mode).LoadInterp("minmax.go", source)
