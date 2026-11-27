@@ -25,6 +25,10 @@ import (
 // instructionCallMetadata returns the common metadata for each call aux type.
 func instructionCallMetadata(aux instructionAux) callAux {
 	switch aux := aux.(type) {
+	case closureCallAux:
+		return aux.callAux
+	case invokeCallAux:
+		return aux.callAux
 	case builtinCallAux:
 		return aux.callAux
 	case dynamicCallAux:
@@ -2745,7 +2749,7 @@ func TestDescriptionStaticCallExecution(t *testing.T) {
 						if aux, ok := d.Aux.(bodyCallAux); ok && aux.Body.Recover == nil {
 							specialized = makeCallSpecializerInstr(i, aux.Body, aux.Arguments, aux.ExtractResults) != nil
 						}
-						if strings.Contains(name, "makeInstruction") != (mode&EnableInstructionExecution != 0) && !specialized {
+						if (strings.Contains(name, "makeInstruction") || strings.Contains(name, "makeBodyCallInstruction")) != (mode&EnableInstructionExecution != 0) && !specialized {
 							t.Fatalf("unexpected executor %s", name)
 						}
 					}
@@ -3269,7 +3273,7 @@ func TestDescriptionDynamicCalls(t *testing.T) {
 	}
 }
 
-func TestDescriptionPreservesImmediateClosures(t *testing.T) {
+func TestDescriptionImmediateClosures(t *testing.T) {
 	const source = `package immediate
  func Run()(r int){
  x:=1
@@ -3300,8 +3304,8 @@ func TestDescriptionPreservesImmediateClosures(t *testing.T) {
 			if _, ok := call.Value.(*ssa.MakeClosure); !ok {
 				continue
 			}
-			if _, ok := d.Aux.(callAux); !ok || makeInstruction(i, d) != nil {
-				t.Fatal("immediate closure replaced dedicated lowering")
+			if _, ok := d.Aux.(closureCallAux); !ok || makeInstruction(i, d) == nil {
+				t.Fatal("missing dedicated immediate closure executor")
 			}
 			seen[d.Op] = true
 		}
@@ -3866,6 +3870,420 @@ func Run() {
 			defer i.UnsafeRelease()
 			if _, err := i.RunFunc("Run"); err != nil {
 				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestDescriptionInvokeExecution(t *testing.T) {
+	const source = `package invoke
+
+import "bytes"
+
+type pair interface{ Pair(int) (int, int) }
+type first int
+
+func (x first) Pair(n int) (int, int) { return int(x) + n, n }
+
+type second int
+
+func (x second) Pair(n int) (int, int) { return int(x) * n, n }
+func call(x pair) int                  { a, b := x.Pair(2); return a + b }
+
+type action interface{ Add(int) }
+type counter struct {
+	n  int
+	ch chan int
+}
+
+func (c *counter) Add(n int) {
+	c.n += n
+	if c.ch != nil {
+		c.ch <- c.n
+	}
+}
+func launch(a action)   { go a.Add(5) }
+func deferred(a action) { defer a.Add(3); a = &counter{} }
+func nilCall() (r int) {
+	defer func() {
+		if recover() != nil {
+			r = 7
+		}
+	}()
+	var x pair
+	x.Pair(1)
+	return
+}
+func Run() int {
+	n := call(first(3)) + call(second(4)) + call(first(1))
+	c := &counter{ch: make(chan int, 1)}
+	launch(c)
+	n += <-c.ch
+	c.ch = nil
+	deferred(c)
+	n += c.n
+	var b interface{ Len() int } = bytes.NewBufferString("abc")
+	n += b.Len() + nilCall()
+	return n
+}
+`
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		for _, extra := range []Mode{0, EnableCachedReg, ExperimentalSupportGC | EnableGCExecutionPlan} {
+			t.Run(fmt.Sprintf("mode=%v/extra=%v", mode, extra), func(t *testing.T) {
+				i, err := NewContext(DisableMemo|mode|extra).LoadInterp("invoke.go", source)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer i.UnsafeRelease()
+				ops := map[instructionOpcode]bool{}
+				for _, p := range i.funcs {
+					for _, d := range p.Code {
+						if _, ok := d.Aux.(invokeCallAux); ok {
+							if makeInstruction(i, d) == nil {
+								t.Fatal("missing invoke executor")
+							}
+							ops[d.Op] = true
+						}
+					}
+					p.functionCompilation = functionCompilation{}
+				}
+				if mode != 0 && (!ops[opCall] || !ops[opGo] || !ops[opDefer]) {
+					t.Fatalf("missing invoke ops %v", ops)
+				}
+				for n := 0; n < 3; n++ {
+					if got, err := i.RunFunc("Run"); err != nil || got != 45 {
+						t.Fatalf("Run=%v,%v", got, err)
+					}
+				}
+			})
+		}
+	}
+	for _, op := range []instructionOpcode{opCall, opGo, opDefer} {
+		for _, aux := range []invokeCallAux{{}, {callAux: callAux{callSiteAux: callSiteAux{Target: -1}}, Method: "M"}} {
+			if makeInstruction(nil, typedInstruction{Op: op, Aux: aux}) != nil {
+				t.Fatal("unresolved invoke replaced lowering")
+			}
+		}
+	}
+}
+
+func TestDescriptionInvokeMethodEdges(t *testing.T) {
+	const source = `package edges
+
+type reader interface{ Read() int }
+type inner struct{ n int }
+
+func (p *inner) Read() int {
+	if p == nil {
+		return 7
+	}
+	return p.n
+}
+
+type outer struct{ *inner }
+type private interface{ value() int }
+
+func (p *inner) value() int {
+	if p == nil {
+		return 11
+	}
+	return p.n
+}
+func read(r reader) int    { return r.Read() }
+func hidden(r private) int { return r.value() }
+func nilValue() (r int) {
+	defer func() {
+		if recover() != nil {
+			r = 13
+		}
+	}()
+	var p *valueReceiver
+	var x reader = p
+	return x.Read()
+}
+
+type valueReceiver int
+
+func (v valueReceiver) Read() int  { return int(v) }
+func deferred(x reader, out *int)  { defer func() { *out = x.Read() }() }
+func launch(x reader, ch chan int) { go func() { ch <- x.Read() }() }
+func Run() int {
+	var p *inner
+	x := outer{&inner{5}}
+	n := read(p) + hidden(p) + read(x) + hidden(x) + nilValue()
+	out := 0
+	deferred(p, &out)
+	ch := make(chan int, 1)
+	launch(x, ch)
+	return n + out + <-ch
+}
+`
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		for _, extra := range []Mode{0, EnableCachedReg, ExperimentalSupportGC | EnableGCExecutionPlan} {
+			t.Run(fmt.Sprintf("mode=%v/extra=%v", mode, extra), func(t *testing.T) {
+				i, err := NewContext(DisableMemo|mode|extra).LoadInterp("invoke_edges.go", source)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer i.UnsafeRelease()
+				privateFound := false
+				for _, p := range i.funcs {
+					for _, d := range p.Code {
+						if aux, ok := d.Aux.(invokeCallAux); ok && aux.Method == "value" {
+							privateFound = true
+							if aux.Name == aux.Method {
+								t.Fatal("private method ID lost package identity")
+							}
+						}
+					}
+					p.functionCompilation = functionCompilation{}
+				}
+				if mode != 0 && !privateFound {
+					t.Fatal("missing private invoke")
+				}
+				for n := 0; n < 3; n++ {
+					if got, err := i.RunFunc("Run"); err != nil || got != 53 {
+						t.Fatalf("Run=%v,%v want 53", got, err)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestDescriptionInvokeDirectAdapters(t *testing.T) {
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		t.Run(fmt.Sprintf("mode=%v", mode), func(t *testing.T) {
+			calls := 0
+			registerHostDirectCalls(map[string]DirectCallAdapter{
+				testCounterSelector: func(ctx DirectCallContext) {
+					calls++
+					ctx.SetResult(-1)
+				},
+			})
+			const source = `package adapters
+
+import host "github.com/goplus/ixgo/testdata/direct_call/host"
+
+type counter interface{ Value() int }
+
+func value(c counter) int { return c.Value() }
+func deferred(c counter)  { defer c.Value() }
+func launched(c counter)  { go c.Value() }
+func Run() int {
+	c := host.Counter(7)
+	f := host.FallbackCounter(9)
+	deferred(&c)
+	launched(&c)
+	return value(&c) + value(&f) + value(&c) + value(&f)
+}
+`
+			i, err := NewContext(DisableMemo|mode).LoadInterp("invoke_adapter.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			for _, p := range i.funcs {
+				p.functionCompilation = functionCompilation{}
+			}
+			for n := 0; n < 3; n++ {
+				if got, err := i.RunFunc("Run"); err != nil || got != 16 {
+					t.Fatalf("Run=%v,%v want 16", got, err)
+				}
+			}
+			if calls != 6 {
+				t.Fatalf("adapter calls=%d want 6", calls)
+			}
+		})
+	}
+}
+
+func TestDescriptionImmediateClosureResults(t *testing.T) {
+	const source = `package closures
+
+func Run() int {
+	x := 2
+	func(n int) { x += n }(3)
+	a, b := func(n int) (int, int) { return x + n, x }(4)
+	_, c := func() (int, int) { return x, x + 1 }()
+	r := func() (r int) {
+		defer func() {
+			if recover() != nil {
+				r = x
+			}
+		}()
+		panic("test")
+	}()
+	ch := make(chan int, 1)
+	go func(n int) { ch <- x + n }(2)
+	y := <-ch
+	defer func(n int) { x += n }(10)
+	return a + b + c + r + y
+}
+`
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		for _, extra := range []Mode{0, EnableCachedReg, ExperimentalSupportGC | EnableGCExecutionPlan} {
+			t.Run(fmt.Sprintf("mode=%v/extra=%v", mode, extra), func(t *testing.T) {
+				i, err := NewContext(DisableMemo|mode|extra).LoadInterp("closure_results.go", source)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer i.UnsafeRelease()
+				for _, p := range i.funcs {
+					p.functionCompilation = functionCompilation{}
+				}
+				for n := 0; n < 3; n++ {
+					if got, err := i.RunFunc("Run"); err != nil || got != 32 {
+						t.Fatalf("Run=%v,%v want 32", got, err)
+					}
+				}
+			})
+		}
+	}
+	for _, op := range []instructionOpcode{opCall, opGo, opDefer} {
+		if makeInstruction(nil, typedInstruction{Op: op, Aux: closureCallAux{}}) != nil {
+			t.Fatal("unresolved closure replaced lowering")
+		}
+	}
+}
+
+func TestInstructionInvokeLookupFallbacks(t *testing.T) {
+	for _, mapped := range []bool{false, true} {
+		for _, missing := range []bool{false, true} {
+			t.Run(fmt.Sprintf("mapped=%v/missing=%v", mapped, missing), func(t *testing.T) {
+				i, err := NewContext(DisableMemo).LoadInterp("lookup.go", "package lookup\n\nfunc Run() {}\n")
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer i.UnsafeRelease()
+				receiver := bytes.NewBufferString("abc")
+				if mapped {
+					i.msets[reflect.TypeOf(receiver)] = map[string]*function{}
+				}
+				name := "Len"
+				if missing {
+					name = "Missing"
+				}
+				aux := invokeCallAux{callAux: callAux{callSiteAux: callSiteAux{Target: 0}}, Method: name}
+				run := makeInstruction(i, typedInstruction{Op: opCall, Result: 1, Aux: aux})
+				fr := &frame{pfn: i.funcs[i.mainpkg.Func("Run")], stack: []value{receiver, nil}, ipc: 1}
+				for n := 0; n < 2; n++ {
+					func() {
+						defer func() {
+							r := recover()
+							if (r != nil) != missing {
+								t.Fatalf("panic=%v missing=%v", r, missing)
+							}
+							if missing && !strings.Contains(fmt.Sprint(r), "no code for method:") {
+								t.Fatalf("unexpected lookup error: %v", r)
+							}
+						}()
+						run(fr)
+						if fr.reg(1) != 3 {
+							t.Fatalf("result=%v", fr.reg(1))
+						}
+					}()
+				}
+			})
+		}
+	}
+}
+
+func TestDescriptionClosureMissingMetadata(t *testing.T) {
+	i, err := NewContext(DisableMemo|EnableInstructionDescriptions).LoadInterp("binding.go", `package binding
+
+func Run() int {
+	x := 1
+	return func() int { return x }()
+}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	found := false
+	for _, p := range i.funcs {
+		for _, block := range p.Fn.Blocks {
+			for _, instr := range block.Instrs {
+				call, ok := instr.(*ssa.Call)
+				if !ok {
+					continue
+				}
+				closure, ok := call.Call.Value.(*ssa.MakeClosure)
+				if !ok || len(closure.Bindings) == 0 {
+					continue
+				}
+				found = true
+				binding := closure.Bindings[0]
+				saved := p.index[binding]
+				delete(p.index, binding)
+				aux := describeCall(p, &call.Call, nil, nil)
+				p.index[binding] = saved
+				if _, ok := aux.(callAux); !ok {
+					t.Fatal("missing binding replaced lowering")
+				}
+				fn := closure.Fn.(*ssa.Function)
+				body := i.funcs[fn]
+				delete(i.funcs, fn)
+				aux = describeCall(p, &call.Call, nil, nil)
+				i.funcs[fn] = body
+				if _, ok := aux.(callAux); !ok {
+					t.Fatal("missing body replaced lowering")
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing captured closure")
+	}
+}
+
+func TestDescriptionClosureBindingLayouts(t *testing.T) {
+	const source = `package layouts
+
+func recursive(n int) int {
+	if n == 0 {
+		return 1
+	}
+	return n * func(k int) int { return recursive(k) }(n-1)
+}
+
+func Run() int {
+	a, b := 2, 3
+	call := func(x int) (int, int) { return a + x, b + x }
+	first, second := call(4)
+	ch := make(chan int, 1)
+	go func(x, y int) { ch <- x + y }(a, b)
+	defer func(x, y int) { a += x; b += y }(first, second)
+	return first + second + <-ch + recursive(4)
+}
+`
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		t.Run(fmt.Sprintf("mode=%v", mode), func(t *testing.T) {
+			i, err := NewContext(DisableMemo|mode).LoadInterp("closure_layouts.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			foundCaptures := false
+			for _, p := range i.funcs {
+				for _, d := range p.Code {
+					if aux, ok := d.Aux.(closureCallAux); ok {
+						if len(aux.Bindings) >= 2 {
+							foundCaptures = true
+						}
+						if makeInstruction(i, d) == nil {
+							t.Fatal("missing closure executor")
+						}
+					}
+				}
+				p.functionCompilation = functionCompilation{}
+			}
+			if mode != 0 && !foundCaptures {
+				t.Fatal("missing multi-capture closure")
+			}
+			if got, err := i.RunFunc("Run"); err != nil || got != 42 {
+				t.Fatalf("Run=%v,%v want 42", got, err)
 			}
 		})
 	}
