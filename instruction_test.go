@@ -6,9 +6,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"go/ast"
 	"go/constant"
-	"go/importer"
 	"go/parser"
 	"go/token"
 	"go/types"
@@ -3837,7 +3835,7 @@ func TestInstructionBuiltinMixedOutput(t *testing.T) {
 	}
 }
 
-func TestDescriptionBuiltinSingleArgumentOffset(t *testing.T) {
+func TestDescriptionBuiltinOffsetComparison(t *testing.T) {
 	const source = `package offset
 
 import "unsafe"
@@ -3848,78 +3846,27 @@ func offset[T any](x struct {
 }) uintptr {
 	return unsafe.Offsetof(x.B)
 }
-func Run() uintptr {
-	return offset(struct {
+
+func Run() {
+	var x struct {
 		A byte
 		B int64
-	}{})
+	}
+	if offset(x) != unsafe.Offsetof(x.B) {
+		panic("generic Offsetof differs from non-generic Offsetof")
+	}
 }
 `
-	i, err := NewContext(DisableMemo|EnableInstructionDescriptions).LoadInterp("offset_fallback.go", source)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer i.UnsafeRelease()
-	// Restore the original AST and type information for the legacy decoder.
-	fs := token.NewFileSet()
-	i.ctx.FileSet.Iterate(func(file *token.File) bool {
-		if strings.HasSuffix(file.Name(), "offset_fallback.go") {
-			if file.Base() > 1 {
-				fs.AddFile("padding", 1, file.Base()-2)
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		t.Run(fmt.Sprintf("mode=%v", mode), func(t *testing.T) {
+			i, err := NewContext(DisableMemo|mode).LoadInterp("offset_comparison.go", source)
+			if err != nil {
+				t.Fatal(err)
 			}
-			return false
-		}
-		return true
-	})
-	file, err := parser.ParseFile(fs, "offset_fallback.go", source, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	info := &types.Info{Types: make(map[ast.Expr]types.TypeAndValue), Selections: make(map[*ast.SelectorExpr]*types.Selection)}
-	config := types.Config{Importer: importer.Default()}
-	if _, err := config.Check("offset", fs, []*ast.File{file}, info); err != nil {
-		t.Fatal(err)
-	}
-	for _, sp := range i.ctx.pkgs {
-		if sp.Package.Name() == "offset" {
-			sp.Files = []*ast.File{file}
-			sp.Info = info
-		}
-	}
-	found := false
-	for _, p := range i.funcs {
-		for _, block := range p.Fn.Blocks {
-			for _, instr := range block.Instrs {
-				call, ok := instr.(*ssa.Call)
-				if !ok {
-					continue
-				}
-				fn, ok := call.Call.Value.(*ssa.Builtin)
-				if !ok || fn.Name() != "Offsetof" {
-					continue
-				}
-				found = true
-				// Model the pre-rewrite field operand at the original source position.
-				field := &ssa.FieldAddr{X: call.Call.Args[0], Field: 1}
-				common := call.Call
-				common.Args = []ssa.Value{field}
-				aux := describeCall(p, &common, nil, nil).(builtinCallAux)
-				var layout struct {
-					A byte
-					B int64
-				}
-				if aux.Error != "" || aux.Constant != unsafe.Offsetof(layout.B) {
-					t.Fatalf("offset=%d error=%q", aux.Constant, aux.Error)
-				}
-				common.Args = []ssa.Value{ssa.NewConst(constant.MakeInt64(1), types.Typ[types.Int])}
-				aux = describeCall(p, &common, nil, nil).(builtinCallAux)
-				if aux.Error != "unsafe.Offsetof not found field operand" {
-					t.Fatalf("error=%q", aux.Error)
-				}
+			defer i.UnsafeRelease()
+			if _, err := i.RunFunc("Run"); err != nil {
+				t.Fatal(err)
 			}
-		}
-	}
-	if !found {
-		t.Fatal("missing Offsetof call")
+		})
 	}
 }
