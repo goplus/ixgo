@@ -515,10 +515,11 @@ func makeBuiltinInstruction(interp *Interp, d typedInstruction, aux builtinCallA
 			fr.setReg(ir, unsafe.StringData(fr.string(ia[0])))
 		}
 	case "Sizeof", "Alignof", "Offsetof":
-		if aux.Error != "" {
-			return func(fr *frame) { panic(fr.plainError(fn, aux.Error)) }
+		if message := aux.Error; message != "" {
+			return func(fr *frame) { panic(fr.plainError(fn, message)) }
 		}
-		return func(fr *frame) { fr.setReg(ir, aux.Constant) }
+		result := aux.Constant
+		return func(fr *frame) { fr.setReg(ir, result) }
 	case "clear":
 		return func(fr *frame) {
 			arg0 := fr.reg(ia[0])
