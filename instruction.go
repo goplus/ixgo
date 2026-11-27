@@ -312,8 +312,8 @@ func (callSiteAux) instructionAux() {}
 
 // callAux adds result placement to common call metadata. A nil ExtractResults
 // uses the ordinary result register; a -1 entry denotes an unused result.
-// Unresolved targets and invoke calls retain this base auxiliary data.
-// Missing defer-stack registers and immediate closures also retain the base aux.
+// Unresolved targets retain this base auxiliary data.
+// Missing defer-stack or closure-binding registers also retain the base aux.
 // Dynamic calls with a target register use dynamicCallAux.
 type callAux struct {
 	callSiteAux
@@ -340,6 +340,23 @@ func (externalCallAux) instructionAux() {}
 type dynamicCallAux struct {
 	callAux
 }
+
+// closureCallAux directly identifies a closure body and its captured registers.
+type closureCallAux struct {
+	callAux
+	Body     *function
+	Bindings []register
+}
+
+func (closureCallAux) instructionAux() {}
+
+// invokeCallAux records the runtime method name separately from its method ID.
+type invokeCallAux struct {
+	callAux
+	Method string
+}
+
+func (invokeCallAux) instructionAux() {}
 
 // builtinCallAux retains interface argument layout and the original target for
 // panic callback compatibility. Constant and Error apply only to unsafe layout builtins.
@@ -654,10 +671,22 @@ func describeCall(pfn *function, call *ssa.CallCommon, dests []register, deferSt
 			return base
 		}
 	}
-	// Immediate closures have dedicated binding paths in lowering for Call,
-	// Go and Defer; keep them until those environments are described directly.
-	if _, immediate := call.Value.(*ssa.MakeClosure); immediate {
-		return base
+	if closure, ok := call.Value.(*ssa.MakeClosure); ok {
+		body := pfn.Interp.funcs[closure.Fn.(*ssa.Function)]
+		bindings := make([]register, len(closure.Bindings))
+		for n, value := range closure.Bindings {
+			bindings[n] = descriptionRegister(pfn, value)
+			if bindings[n] < 0 {
+				return base
+			}
+		}
+		if body == nil {
+			return base
+		}
+		return closureCallAux{callAux: base, Body: body, Bindings: bindings}
+	}
+	if base.Kind == callInvoke && base.Target >= 0 {
+		return invokeCallAux{callAux: base, Method: call.Method.Name()}
 	}
 	if base.Kind == callBuiltin {
 		name := call.Value.(*ssa.Builtin).Name()

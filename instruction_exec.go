@@ -8,6 +8,7 @@ import (
 	"math"
 	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"unsafe"
 )
@@ -30,11 +31,22 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 			}
 			fr.setReg(result, body.makeFunction(signature, env).Interface())
 		}
-
 	case opGo, opDefer:
 		var desc callDescription
 		var stack register
 		switch aux := d.Aux.(type) {
+		case closureCallAux:
+			if aux.Body == nil {
+				return nil
+			}
+			desc = callDescription{closure: aux.Body, bindings: aux.Bindings, args: aux.Arguments}
+			stack = aux.DeferStack
+		case invokeCallAux:
+			if aux.Target < 0 || aux.Method == "" {
+				return nil
+			}
+			desc = callDescription{receiver: aux.Target, method: aux.Method, args: aux.Arguments}
+			stack = aux.DeferStack
 		case dynamicCallAux:
 			if aux.Target < 0 {
 				return nil
@@ -60,12 +72,15 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 			return instructionGoCall(interp, desc)
 		}
 		return instructionDeferCall(interp, desc, stack)
-
 	case opCall:
 		switch aux := d.Aux.(type) {
+		case invokeCallAux:
+			if aux.Target < 0 || aux.Method == "" {
+				return nil
+			}
+			return makeInvokeInstruction(interp, d, aux)
 		case builtinCallAux:
 			return makeBuiltinInstruction(interp, d, aux)
-
 		case dynamicCallAux:
 			if aux.Target < 0 {
 				return nil
@@ -94,33 +109,11 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 				return func(fr *frame) { interp.callExternalWithFrameByStack(fr, ext, result, args, dests) }
 			}
 			return func(fr *frame) { interp.callExternalByStack(fr, ext, result, args, dests) }
+		case closureCallAux:
+			args := append(append([]register(nil), aux.Arguments...), aux.Bindings...)
+			return makeBodyCallInstruction(interp, aux.Body, d.Result, args, aux.ExtractResults)
 		case bodyCallAux:
-			body := aux.Body
-			if body == nil {
-				return nil
-			}
-			args, result, dests := aux.Arguments, d.Result, aux.ExtractResults
-			if body.Recover == nil {
-				if run := makeCallSpecializerInstr(interp, body, args, dests); run != nil {
-					return run
-				}
-				switch body.nres {
-				case 0:
-					return func(fr *frame) { interp.callFunctionByStackNoRecover0(fr, body, result, args) }
-				case 1:
-					return func(fr *frame) { interp.callFunctionByStackNoRecover1(fr, body, result, args) }
-				default:
-					return func(fr *frame) { interp.callFunctionByStackNoRecoverN(fr, body, result, args, dests) }
-				}
-			}
-			switch body.nres {
-			case 0:
-				return func(fr *frame) { interp.callFunctionByStack0(fr, body, result, args) }
-			case 1:
-				return func(fr *frame) { interp.callFunctionByStack1(fr, body, result, args) }
-			default:
-				return func(fr *frame) { interp.callFunctionByStackN(fr, body, result, args, dests) }
-			}
+			return makeBodyCallInstruction(interp, aux.Body, d.Result, aux.Arguments, aux.ExtractResults)
 		}
 		return nil
 	case opJump:
@@ -589,5 +582,87 @@ func makeBuiltinInstruction(interp *Interp, d typedInstruction, aux builtinCallA
 		}
 	default:
 		return nil
+	}
+}
+
+// makeInvokeInstruction caches a bytecode executor per receiver type.
+func makeInvokeInstruction(interp *Interp, d typedInstruction, aux invokeCallAux) func(*frame) {
+	mname := aux.Method
+	ir, iv, ia, dests := d.Result, aux.Target, aux.Arguments, aux.ExtractResults
+	ia = append([]register{iv}, ia...)
+	var methods sync.Map // map[reflect.Type]func(*frame)
+	return func(fr *frame) {
+		v := fr.reg(iv)
+		if v == nil {
+			panic(fr.runtimeError(fr.pfn.InstrForPC(int(fr.ipc)-1), "runtime error: invalid memory address or nil pointer dereference"))
+		}
+		rtype := reflect.TypeOf(v)
+		if method, ok := methods.Load(rtype); ok {
+			method.(func(*frame))(fr)
+			return
+		}
+
+		var method func(*frame)
+		// Find an interpreted method.
+		if mset, ok := interp.msets[rtype]; ok {
+			if fn, ok := mset[mname]; ok {
+				method = func(fr *frame) {
+					interp.callFunctionByStack(fr, fn, ir, ia, dests)
+				}
+			} else {
+				ext, found := findUserMethod(rtype, mname)
+				if !found {
+					panic(fr.plainError(fr.pfn.InstrForPC(int(fr.ipc)-1), fmt.Sprintf("no code for method: %v.%v", rtype, mname)))
+				}
+				method = func(fr *frame) {
+					interp.callExternalByStack(fr, ext, ir, ia, dests)
+				}
+			}
+		} else {
+			ext, found := findExternMethod(rtype, mname)
+			if !found {
+				panic(fr.plainError(fr.pfn.InstrForPC(int(fr.ipc)-1), fmt.Sprintf("no code for method: %v.%v", rtype, mname)))
+			}
+			if adapter, ok := resolveInvokeDirectCall(rtype, mname); ok {
+				method = func(fr *frame) {
+					interp.invokeDirectCall(fr, adapter, ir, ia)
+				}
+			} else {
+				method = func(fr *frame) {
+					interp.callExternalByStack(fr, ext, ir, ia, dests)
+				}
+			}
+		}
+		actual, _ := methods.LoadOrStore(rtype, method)
+		actual.(func(*frame))(fr)
+	}
+}
+
+// makeBodyCallInstruction constructs bytecode calls to known bodies.
+func makeBodyCallInstruction(interp *Interp, body *function, result register, args, dests []register) func(*frame) {
+
+	if body == nil {
+		return nil
+	}
+	if body.Recover == nil {
+		if run := makeCallSpecializerInstr(interp, body, args, dests); run != nil {
+			return run
+		}
+		switch body.nres {
+		case 0:
+			return func(fr *frame) { interp.callFunctionByStackNoRecover0(fr, body, result, args) }
+		case 1:
+			return func(fr *frame) { interp.callFunctionByStackNoRecover1(fr, body, result, args) }
+		default:
+			return func(fr *frame) { interp.callFunctionByStackNoRecoverN(fr, body, result, args, dests) }
+		}
+	}
+	switch body.nres {
+	case 0:
+		return func(fr *frame) { interp.callFunctionByStack0(fr, body, result, args) }
+	case 1:
+		return func(fr *frame) { interp.callFunctionByStack1(fr, body, result, args) }
+	default:
+		return func(fr *frame) { interp.callFunctionByStackN(fr, body, result, args, dests) }
 	}
 }
