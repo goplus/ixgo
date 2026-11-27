@@ -3,6 +3,7 @@
 package ixgo
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"go/constant"
@@ -24,6 +25,8 @@ import (
 // instructionCallMetadata returns the common metadata for each call aux type.
 func instructionCallMetadata(aux instructionAux) callAux {
 	switch aux := aux.(type) {
+	case builtinCallAux:
+		return aux.callAux
 	case dynamicCallAux:
 		return aux.callAux
 	case directCallAux:
@@ -3327,5 +3330,543 @@ func TestInstructionGoCallRunContext(t *testing.T) {
 	case <-done:
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for goroutine")
+	}
+}
+
+func TestDescriptionBuiltinExecution(t *testing.T) {
+	const source = `package builtins
+
+func Run() int {
+	a := []int{1}
+	a = append(a, 2)
+	dst := make([]int, 2)
+	n := copy(dst, a)
+	l := len(a)
+	c := cap(a)
+	m := map[int]int{1: 2}
+	delete(m, 1)
+	ch := make(chan int)
+	close(ch)
+	z := complex(float64(3), float64(4))
+	return a[1] + dst[0] + n + l + c + int(real(z)) + int(imag(z)) + len(m)
+}
+`
+	for _, mode := range []Mode{EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		t.Run(fmt.Sprintf("mode=%v", mode), func(t *testing.T) {
+			i, err := NewContext(DisableMemo|mode).LoadInterp("builtins.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			found := map[string]bool{}
+			for _, p := range i.funcs {
+				for _, d := range p.Code {
+					aux, ok := d.Aux.(builtinCallAux)
+					if !ok {
+						continue
+					}
+					found[aux.Name] = true
+					if mode&EnableInstructionExecution != 0 && makeInstruction(i, d) == nil {
+						t.Fatalf("missing builtin executor for %s", aux.Name)
+					}
+				}
+				p.functionCompilation = functionCompilation{}
+			}
+			for _, name := range []string{"append", "copy", "len", "cap", "delete", "close", "real", "imag"} {
+				if !found[name] {
+					t.Errorf("missing builtin %s", name)
+				}
+			}
+			if got, err := i.RunFunc("Run"); err != nil || got != 16 {
+				t.Fatalf("Run=%v,%v want 16", got, err)
+			}
+		})
+	}
+}
+
+func TestInstructionBuiltinOutputAndErrors(t *testing.T) {
+	ctx := NewContext(0)
+	var output bytes.Buffer
+	ctx.SetPrintOutput(&output)
+	interp := &Interp{ctx: ctx}
+	for _, name := range []string{"print", "println"} {
+		d := typedInstruction{Op: opCall, Result: -1, Aux: builtinCallAux{
+			callAux:       callAux{callSiteAux: callSiteAux{Name: name, Arguments: []register{0}}},
+			InterfaceArgs: []bool{true},
+		}}
+		run := makeInstruction(interp, d)
+		if run == nil {
+			t.Fatal("missing print executor")
+		}
+		run(&frame{stack: []value{42}})
+	}
+	if output.Len() == 0 || !strings.HasSuffix(output.String(), "\n") {
+		t.Fatalf("output=%q", output.String())
+	}
+	for _, name := range []string{"unknown"} {
+		if makeInstruction(interp, typedInstruction{Op: opCall, Aux: builtinCallAux{callAux: callAux{callSiteAux: callSiteAux{Name: name}}}}) != nil {
+			t.Fatalf("unsupported builtin %s replaced lowering", name)
+		}
+	}
+	t.Run("closed channel", func(t *testing.T) {
+		ch := make(chan int)
+		close(ch)
+		d := typedInstruction{Op: opCall, Result: -1, Aux: builtinCallAux{callAux: callAux{callSiteAux: callSiteAux{Name: "close", Arguments: []register{0}}}}}
+		defer func() {
+			if recover() == nil {
+				t.Fatal("missing close panic")
+			}
+		}()
+		makeInstruction(interp, d)(&frame{stack: []value{ch}})
+	})
+}
+
+func TestInstructionBuiltinFastPaths(t *testing.T) {
+	interp := &Interp{ctx: NewContext(0)}
+	for _, test := range []struct {
+		name string
+		args []value
+		want value
+	}{
+		{"append", []value{[]int{1}}, []int{1}},
+		{"append", []value{[]byte("a"), "bc"}, []byte("abc")},
+		{"copy", []value{make([]byte, 2), "ab"}, 2},
+		{"real", []value{complex64(3 + 4i)}, float32(3)},
+		{"imag", []value{complex64(3 + 4i)}, float32(4)},
+		{"complex", []value{float32(3), float32(4)}, complex64(3 + 4i)},
+		{"complex", []value{float64(3), float64(4)}, complex128(3 + 4i)},
+		{"max", []value{3, 2, 5}, 5},
+		{"min", []value{uint(3), uint(2), uint(5)}, uint(2)},
+		{"max", []value{float64(3), float64(2), float64(5)}, float64(5)},
+		{"min", []value{"b", "a", "c"}, "a"},
+		{"Sizeof", nil, uintptr(24)},
+		{"Alignof", nil, uintptr(24)},
+		{"Offsetof", nil, uintptr(24)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			args := make([]register, len(test.args))
+			for n := range args {
+				args[n] = register(n + 1)
+			}
+			aux := builtinCallAux{callAux: callAux{callSiteAux: callSiteAux{Name: test.name, Arguments: args}}, Constant: 24}
+			run := makeInstruction(interp, typedInstruction{Op: opCall, Result: 0, Aux: aux})
+			fr := &frame{stack: append([]value{nil}, test.args...)}
+			run(fr)
+			if !reflect.DeepEqual(fr.reg(0), test.want) {
+				t.Fatalf("result=%v want %v", fr.reg(0), test.want)
+			}
+		})
+	}
+	for _, value := range []value{[]int{1, 2}, map[int]int{1: 2}} {
+		aux := builtinCallAux{callAux: callAux{callSiteAux: callSiteAux{Name: "clear", Arguments: []register{0}}}}
+		makeInstruction(interp, typedInstruction{Op: opCall, Result: -1, Aux: aux})(&frame{stack: []any{value}})
+		if v := reflect.ValueOf(value); v.Kind() == reflect.Map && v.Len() != 0 || v.Kind() == reflect.Slice && v.Index(0).Int() != 0 {
+			t.Fatal("clear failed")
+		}
+	}
+	fr := &frame{stack: make([]value, 1)}
+	aux := builtinCallAux{callAux: callAux{callSiteAux: callSiteAux{Name: "ssa:deferstack"}}}
+	makeInstruction(interp, typedInstruction{Op: opCall, Result: 0, Aux: aux})(fr)
+	if fr.reg(0) != &fr._defer {
+		t.Fatal("incorrect deferstack owner")
+	}
+}
+
+func TestDescriptionBuiltinUnsafeAndTypes(t *testing.T) {
+	const source = `package builtins
+
+import "unsafe"
+
+func size[T any](x T) uintptr  { return unsafe.Sizeof(x) }
+func align[T any](x T) uintptr { return unsafe.Alignof(x) }
+func Run() int {
+	b := []byte("ab")
+	p := unsafe.SliceData(b)
+	s := unsafe.String(p, 2)
+	sl := unsafe.Slice(p, 2)
+	p2 := unsafe.StringData(s)
+	q := (*byte)(unsafe.Add(unsafe.Pointer(p), 1))
+	var z []byte
+	var zp *byte
+	empty := unsafe.Slice(zp, 0)
+	es := unsafe.String(zp, 0)
+	_ = unsafe.SliceData(z)
+	_ = unsafe.SliceData(make([]byte, 0))
+	a := []int{1, 2}
+	clear(a)
+	m := map[int]int{1: 2}
+	clear(m)
+	c := complex(float32(3), float32(4))
+	d := complex(float64(3), float64(4))
+	n := int(real(c)+imag(c)) + int(real(d)+imag(d))
+	n += max(1, 2, 3) + min(1, 2, 3) + int(max(uint(1), uint(2))) + int(min(uint(1), uint(2)))
+	n += int(max(1.0, 2.0)) + int(min(1.0, 2.0)) + len(max("a", "b")) + len(min("a", "b"))
+	return n + len(s) + len(sl) + int(*p2) + int(*q) + len(empty) + len(es) + a[0] + len(m) + int(size(int64(0))) + int(align(int64(0)))
+}
+`
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution} {
+		i, err := NewContext(DisableMemo|mode).LoadInterp("builtin_unsafe.go", source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, p := range i.funcs {
+			for _, d := range p.Code {
+				if aux, ok := d.Aux.(builtinCallAux); ok {
+					found = true
+					if makeInstruction(i, d) == nil {
+						t.Fatalf("missing builtin executor %s", aux.Name)
+					}
+				}
+			}
+			p.functionCompilation = functionCompilation{}
+		}
+		if mode != 0 && !found {
+			t.Fatal("no builtin descriptions")
+		}
+		got, err := i.RunFunc("Run")
+		want := 225 + int(unsafe.Sizeof(int64(0))) + int(unsafe.Alignof(int64(0)))
+		if err != nil || got != want {
+			i.UnsafeRelease()
+			t.Fatalf("mode=%v Run=%v,%v", mode, got, err)
+		}
+		i.UnsafeRelease()
+	}
+}
+
+func TestInstructionBuiltinBranchCoverage(t *testing.T) {
+	i, err := NewContext(DisableMemo).LoadInterp("builtin_frame.go", "package p; func Run(){}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	p := i.funcs[i.mainpkg.Func("Run")]
+	for _, tc := range []struct {
+		name string
+		args []value
+		bad  bool
+	}{
+		{"real", []value{3}, true}, {"imag", []value{3}, true}, {"complex", []value{3, 4}, true},
+		{"ssa:wrapnilchk", []value{new(int), "main.T", "M"}, false},
+		{"ssa:wrapnilchk", []value{(*int)(nil), "main.T", "M"}, true},
+		{"ssa:wrapnilchk", []value{(*int)(nil), 42, "M"}, true},
+		{"Slice", []value{(*int)(nil), 1}, true}, {"Slice", []value{new(int), -1}, true},
+		{"String", []value{(*byte)(nil), 1}, true}, {"String", []value{new(byte), -1}, true},
+		{"panic", []value{"bad"}, true},
+	} {
+		for _, hook := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/hook=%v", tc.name, hook), func(t *testing.T) {
+				called := false
+				i.ctx.SetPanic(nil)
+				if hook {
+					i.ctx.SetPanic(func(info *PanicInfo) { called = true })
+				}
+				args := make([]register, len(tc.args))
+				for n := range args {
+					args[n] = register(n + 1)
+				}
+				aux := builtinCallAux{callAux: callAux{callSiteAux: callSiteAux{Name: tc.name, Arguments: args}}}
+				fr := &frame{pfn: p, caller: rootFrame(), stack: append([]value{nil}, tc.args...), block: 0}
+				func() {
+					defer func() {
+						r := recover()
+						if (r != nil) != tc.bad {
+							t.Fatalf("panic=%v bad=%v", r, tc.bad)
+						}
+					}()
+					makeInstruction(i, typedInstruction{Op: opCall, Result: 0, Aux: aux})(fr)
+				}()
+				if hook && tc.bad && (tc.name == "panic" || tc.name == "Slice" || tc.name == "String" || tc.name == "ssa:wrapnilchk") && !called {
+					t.Fatal("panic callback was not called")
+				}
+			})
+		}
+	}
+	i.ctx.SetPanic(nil)
+	for _, name := range []string{"min", "max"} {
+		for _, vs := range [][]value{{3, 1, 5}, {uint(3), uint(1), uint(5)}, {float64(3), float64(1), float64(5)}, {"b", "a", "c"}} {
+			// Later arguments deliberately occupy register zero.
+			aux := builtinCallAux{callAux: callAux{callSiteAux: callSiteAux{Name: name, Arguments: []register{1, 0, 2}}}}
+			fr := &frame{stack: []value{vs[1], vs[0], vs[2], nil}}
+			makeInstruction(i, typedInstruction{Op: opCall, Result: 3, Aux: aux})(fr)
+			want := vs[1]
+			if name == "max" {
+				want = vs[2]
+			}
+			if fr.reg(3) != want {
+				t.Fatalf("%s=%v want %v", name, fr.reg(3), want)
+			}
+		}
+	}
+	aux := builtinCallAux{callAux: callAux{callSiteAux: callSiteAux{Name: "Offsetof"}}, Error: "test layout error"}
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Fatal("missing layout error")
+			}
+		}()
+		makeInstruction(i, typedInstruction{Op: opCall, Result: 0, Aux: aux})(&frame{pfn: p, stack: []value{nil}})
+	}()
+}
+
+func TestDescriptionBuiltinOffsetAndRegisterZero(t *testing.T) {
+	const src = `package p
+
+import "unsafe"
+
+func offset[T any](x struct {
+	A byte
+	B T
+}) uintptr { return unsafe.Offsetof(x.B) }
+func f(a, b int) {
+	if max(b, a) != 5 || min(b, a) != 1 {
+		panic("register zero skipped")
+	}
+}
+func Run() int {
+	f(5, 1)
+	f(1, 5)
+	return int(offset(struct {
+		A byte
+		B int64
+	}{}))
+}
+`
+	var layout struct {
+		A byte
+		B int64
+	}
+	want := unsafe.Offsetof(layout.B)
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution} {
+		i, err := NewContext(DisableMemo|mode).LoadInterp("offset.go", src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, p := range i.funcs {
+			for _, d := range p.Code {
+				if aux, ok := d.Aux.(builtinCallAux); ok && aux.Name == "Offsetof" {
+					found = true
+					if aux.Constant != want || aux.Target == nil || makeInstruction(i, d) == nil {
+						t.Fatal("offset description not resolved")
+					}
+				}
+			}
+			p.functionCompilation = functionCompilation{}
+		}
+		if mode != 0 && !found {
+			t.Fatal("missing generic Offsetof")
+		}
+		if got, err := i.RunFunc("Run"); err != nil || got != int(want) {
+			t.Fatalf("Run=%v,%v", got, err)
+		}
+		i.UnsafeRelease()
+	}
+}
+
+func TestInstructionBuiltinPanicCompatibility(t *testing.T) {
+	const src = `package p
+
+import "unsafe"
+
+func Run(n int) { var p *byte; _ = unsafe.Slice(p, n) }
+`
+	for _, mode := range []Mode{0, EnableInstructionExecution} {
+		ctx := NewContext(DisableMemo | mode)
+		called := false
+		ctx.SetPanic(func(info *PanicInfo) {
+			if _, ok := info.funcInstr.(*ssa.Function); ok {
+				return
+			}
+			called = true
+			if info.String() != "builtin Slice" {
+				t.Errorf("builtin identity=%s", info.String())
+			}
+			if _, ok := info.funcInstr.(*ssa.Builtin); !ok {
+				t.Errorf("callback target=%T", info.funcInstr)
+			}
+		})
+		i, err := ctx.LoadInterp("panic_builtin.go", src)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := i.RunFunc("Run", 1); err == nil {
+			t.Fatal("missing unsafe Slice error")
+		}
+		if !called {
+			t.Fatal("missing panic callback")
+		}
+		i.UnsafeRelease()
+	}
+}
+
+func TestBuiltinMinMaxSemantics(t *testing.T) {
+	const source = `package minmax
+
+import "math"
+
+type signed int64
+type unsigned uint64
+type floating float64
+type text string
+
+func check[T interface {
+	~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr | ~float32 | ~float64 | ~string
+}](a, b, c T) {
+	if min(c, b, a) != a || max(a, b, c) != c || min(a) != a || max(c) != c || min(b, b) != b || max(b, b) != b {
+		panic("ordered operands")
+	}
+}
+func regzero(a, b int) {
+	if min(b, a) != 1 || max(b, a) != 5 {
+		panic("register zero")
+	}
+}
+func floats(a, b float64) {
+	if !math.IsNaN(min(a, b)) || !math.IsNaN(max(a, b)) {
+		panic("NaN propagation")
+	}
+}
+func floats32(a, b float32) {
+	if !math.IsNaN(float64(min(a, b))) || !math.IsNaN(float64(max(a, b))) {
+		panic("float32 NaN")
+	}
+}
+func zeros32(a, b float32) {
+	if !math.Signbit(float64(min(a, b))) || math.Signbit(float64(max(a, b))) {
+		panic("float32 zero")
+	}
+}
+func named(a, b floating) {
+	if !math.IsNaN(float64(min(a, b))) || !math.IsNaN(float64(max(a, b))) {
+		panic("named NaN")
+	}
+}
+func zeros(a, b float64) {
+	if !math.Signbit(min(a, b)) || math.Signbit(max(a, b)) {
+		panic("signed zero")
+	}
+}
+func Run() int {
+	check[int](-3, 1, 5)
+	check[int8](-3, 1, 5)
+	check[int16](-3, 1, 5)
+	check[int32](-3, 1, 5)
+	check[int64](-3, 1, 5)
+	check[uint](0, 1, 5)
+	check[uint8](0, 1, 5)
+	check[uint16](0, 1, 5)
+	check[uint32](0, 1, 5)
+	check[uint64](0, 1, 5)
+	check[uintptr](0, 1, 5)
+	check[float32](-3, 1, 5)
+	check[float64](-3, 1, 5)
+	check[string]("a", "b", "c")
+	check[signed](-3, 1, 5)
+	check[unsigned](0, 1, 5)
+	check[floating](-3, 1, 5)
+	check[text]("a", "b", "c")
+	regzero(5, 1)
+	regzero(1, 5)
+	floats(1, math.NaN())
+	floats(math.NaN(), 1)
+	floats32(1, float32(math.NaN()))
+	floats32(float32(math.NaN()), 1)
+	named(1, floating(math.NaN()))
+	named(floating(math.NaN()), 1)
+	zeros32(0, float32(math.Copysign(0, -1)))
+	zeros32(float32(math.Copysign(0, -1)), 0)
+	zeros(0, math.Copysign(0, -1))
+	zeros(math.Copysign(0, -1), 0)
+	check[float64](math.Inf(-1), 0, math.Inf(1))
+	return 42
+}
+`
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		t.Run(fmt.Sprintf("mode=%v", mode), func(t *testing.T) {
+			i, err := NewContext(DisableMemo|mode).LoadInterp("minmax.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			found := map[string]bool{}
+			for _, p := range i.funcs {
+				for _, d := range p.Code {
+					if aux, ok := d.Aux.(builtinCallAux); ok && (aux.Name == "min" || aux.Name == "max") {
+						found[aux.Name] = true
+						if makeInstruction(i, d) == nil {
+							t.Fatal("missing min/max executor")
+						}
+					}
+				}
+				p.functionCompilation = functionCompilation{}
+			}
+			if mode != 0 && (!found["min"] || !found["max"]) {
+				t.Fatal("missing min/max descriptions")
+			}
+			if got, err := i.RunFunc("Run"); err != nil || got != 42 {
+				t.Fatalf("Run=%v,%v", got, err)
+			}
+		})
+	}
+}
+
+func TestInstructionBuiltinMixedOutput(t *testing.T) {
+	ctx := NewContext(0)
+	var output bytes.Buffer
+	ctx.SetPrintOutput(&output)
+	interp := &Interp{ctx: ctx}
+	for _, name := range []string{"print", "println"} {
+		output.Reset()
+		aux := builtinCallAux{callAux: callAux{callSiteAux: callSiteAux{
+			Name: name, Arguments: []register{0, 1, 2},
+		}}, InterfaceArgs: []bool{false, true, false}}
+		makeInstruction(interp, typedInstruction{Op: opCall, Result: -1, Aux: aux})(
+			&frame{stack: []value{"value", 42, true}})
+		var iface bytes.Buffer
+		writeinterface(&iface, 42)
+		want := "value" + iface.String() + "true"
+		if name == "println" {
+			want = "value " + iface.String() + " true\n"
+		}
+		if got := output.String(); got != want {
+			t.Fatalf("%s output=%q want %q", name, got, want)
+		}
+	}
+}
+
+func TestDescriptionBuiltinOffsetComparison(t *testing.T) {
+	const source = `package offset
+
+import "unsafe"
+
+func offset[T any](x struct {
+	A byte
+	B T
+}) uintptr {
+	return unsafe.Offsetof(x.B)
+}
+
+func Run() {
+	var x struct {
+		A byte
+		B int64
+	}
+	if offset(x) != unsafe.Offsetof(x.B) {
+		panic("generic Offsetof differs from non-generic Offsetof")
+	}
+}
+`
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		t.Run(fmt.Sprintf("mode=%v", mode), func(t *testing.T) {
+			i, err := NewContext(DisableMemo|mode).LoadInterp("offset_comparison.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			if _, err := i.RunFunc("Run"); err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }

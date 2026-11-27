@@ -23,6 +23,7 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"math"
 	"reflect"
 	"strings"
 	"unsafe"
@@ -627,20 +628,21 @@ func (interp *Interp) makeBuiltinByStack(pfn *function, fn *ssa.Builtin, ssaArgs
 	case "max":
 		return func(fr *frame) {
 			v := reflect.ValueOf(fr.reg(ia[0]))
-			for _, i := range ia {
-				arg := reflect.ValueOf(fr.reg(i))
+			for i, r := range ia {
+				arg := reflect.ValueOf(fr.reg(r))
 				if i > 0 {
 					switch v.Kind() {
 					case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 						if v.Int() < arg.Int() {
 							v = arg
 						}
-					case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+					case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 						if v.Uint() < arg.Uint() {
 							v = arg
 						}
 					case reflect.Float32, reflect.Float64:
-						if v.Float() < arg.Float() {
+						x, y := v.Float(), arg.Float()
+						if x < y || math.IsNaN(y) || x == 0 && y == 0 && !math.Signbit(y) {
 							v = arg
 						}
 					case reflect.String:
@@ -655,20 +657,21 @@ func (interp *Interp) makeBuiltinByStack(pfn *function, fn *ssa.Builtin, ssaArgs
 	case "min":
 		return func(fr *frame) {
 			v := reflect.ValueOf(fr.reg(ia[0]))
-			for _, i := range ia {
-				arg := reflect.ValueOf(fr.reg(i))
+			for i, r := range ia {
+				arg := reflect.ValueOf(fr.reg(r))
 				if i > 0 {
 					switch v.Kind() {
 					case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 						if v.Int() > arg.Int() {
 							v = arg
 						}
-					case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+					case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 						if v.Uint() > arg.Uint() {
 							v = arg
 						}
 					case reflect.Float32, reflect.Float64:
-						if v.Float() > arg.Float() {
+						x, y := v.Float(), arg.Float()
+						if x > y || math.IsNaN(y) || x == 0 && y == 0 && math.Signbit(y) {
 							v = arg
 						}
 					case reflect.String:

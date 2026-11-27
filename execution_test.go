@@ -2136,3 +2136,119 @@ func TestPhiDirectAssignmentDependencies(t *testing.T) {
 		}
 	}
 }
+
+func TestStackMinMaxCalls(t *testing.T) {
+	const source = `package stackminmax
+
+import "math"
+
+type ordered interface {
+	~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr | ~float32 | ~float64 | ~string
+}
+type namedInt int64
+type namedFloat float64
+type namedString string
+
+func bounds[T ordered](a, b, c T) (T, T)                         { return min(c, b, a), max(a, b, c) }
+func invoke[T ordered](f func(T, T, T) (T, T), a, b, c T) (T, T) { return f(a, b, c) }
+func check[T ordered](a, b, c T) {
+	lo, hi := bounds(a, b, c)
+	if lo != a || hi != c {
+		panic("direct bounds")
+	}
+	lo, hi = invoke(bounds[T], a, b, c)
+	if lo != a || hi != c {
+		panic("dynamic bounds")
+	}
+	if min(b) != b || max(b) != b || min(b, b) != b || max(b, b) != b {
+		panic("single/repeated operands")
+	}
+}
+func zero(a, b int) (int, int)                                  { return min(b, a), max(b, a) }
+func callZero(f func(int, int) (int, int), a, b int) (int, int) { return f(a, b) }
+func floating(a, b float64) (float64, float64)                  { return min(a, b), max(a, b) }
+func callFloat(f func(float64, float64) (float64, float64), a, b float64) (float64, float64) {
+	return f(a, b)
+}
+func Run() int {
+	check[int](-3, 1, 5)
+	check[int8](-3, 1, 5)
+	check[int16](-3, 1, 5)
+	check[int32](-3, 1, 5)
+	check[int64](-3, 1, 5)
+	check[uint](0, 1, 5)
+	check[uint8](0, 1, 5)
+	check[uint16](0, 1, 5)
+	check[uint32](0, 1, 5)
+	check[uint64](0, 1, 5)
+	check[uintptr](0, 1, 5)
+	check[float32](-3, 1, 5)
+	check[float64](-3, 1, 5)
+	check[string]("a", "b", "c")
+	check[namedInt](-3, 1, 5)
+	check[namedFloat](-3, 1, 5)
+	check[namedString]("a", "b", "c")
+	for _, a := range []int{1, 5} {
+		b := 6 - a
+		lo, hi := zero(a, b)
+		if lo != 1 || hi != 5 {
+			panic("direct register zero")
+		}
+		lo, hi = callZero(zero, a, b)
+		if lo != 1 || hi != 5 {
+			panic("dynamic register zero")
+		}
+	}
+	for _, a := range []float64{1, math.NaN()} {
+		b := math.NaN()
+		if math.IsNaN(a) {
+			b = 1
+		}
+		lo, hi := floating(a, b)
+		if !math.IsNaN(lo) || !math.IsNaN(hi) {
+			panic("direct NaN")
+		}
+		lo, hi = callFloat(floating, a, b)
+		if !math.IsNaN(lo) || !math.IsNaN(hi) {
+			panic("dynamic NaN")
+		}
+	}
+	for _, a := range []float64{0, math.Copysign(0, -1)} {
+		b := math.Copysign(0, -1)
+		if math.Signbit(a) {
+			b = 0
+		}
+		lo, hi := floating(a, b)
+		if !math.Signbit(lo) || math.Signbit(hi) {
+			panic("direct signed zero")
+		}
+		lo, hi = callFloat(floating, a, b)
+		if !math.Signbit(lo) || math.Signbit(hi) {
+			panic("dynamic signed zero")
+		}
+	}
+	check[float64](math.Inf(-1), 0, math.Inf(1))
+	return 42
+}
+`
+	for _, mode := range []Mode{0, EnableCachedReg, ExperimentalSupportGC | EnableGCExecutionPlan, DisableDynamicFuncCallAnalysis, DisableDynamicFuncCallAnalysis | EnableCachedReg} {
+		t.Run(fmt.Sprintf("mode=%v", mode), func(t *testing.T) {
+			i, err := NewContext(DisableMemo|mode).LoadInterp("stack_minmax.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			for _, p := range i.funcs {
+				if len(p.Code) != 0 {
+					t.Fatal("stack test generated instruction descriptions")
+				}
+				p.functionCompilation = functionCompilation{}
+			}
+			for n := 0; n < 3; n++ {
+				if got, err := i.RunFunc("Run"); err != nil || got != 42 {
+					t.Fatalf("Run=%v,%v want 42", got, err)
+				}
+			}
+		})
+	}
+}

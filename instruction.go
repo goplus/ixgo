@@ -312,7 +312,8 @@ func (callSiteAux) instructionAux() {}
 
 // callAux adds result placement to common call metadata. A nil ExtractResults
 // uses the ordinary result register; a -1 entry denotes an unused result.
-// Unresolved targets, builtin and invoke calls retain this base auxiliary data.
+// Unresolved targets and invoke calls retain this base auxiliary data.
+// Missing defer-stack registers and immediate closures also retain the base aux.
 // Dynamic calls with a target register use dynamicCallAux.
 type callAux struct {
 	callSiteAux
@@ -339,6 +340,18 @@ func (externalCallAux) instructionAux() {}
 type dynamicCallAux struct {
 	callAux
 }
+
+// builtinCallAux retains interface argument layout and the original target for
+// panic callback compatibility. Constant and Error apply only to unsafe layout builtins.
+type builtinCallAux struct {
+	callAux
+	Target        *ssa.Builtin
+	InterfaceArgs []bool
+	Constant      uintptr
+	Error         string
+}
+
+func (builtinCallAux) instructionAux() {}
 
 func (dynamicCallAux) instructionAux() {}
 
@@ -630,8 +643,8 @@ func describeCallSite(pfn *function, call *ssa.CallCommon) callSiteAux {
 	return aux
 }
 
-// describeCall reuses lowering-selected targets, including adapters; dynamic
-// function values use dynamicCallAux when their target register is available.
+// describeCall records runtime targets and dynamic function-value registers.
+// Builtin argument layout and unsafe constants are computed independently here.
 func describeCall(pfn *function, call *ssa.CallCommon, dests []register, deferStack ssa.Value) instructionAux {
 	base := callAux{callSiteAux: describeCallSite(pfn, call), ExtractResults: dests}
 	if deferStack != nil {
@@ -645,6 +658,44 @@ func describeCall(pfn *function, call *ssa.CallCommon, dests []register, deferSt
 	// Go and Defer; keep them until those environments are described directly.
 	if _, immediate := call.Value.(*ssa.MakeClosure); immediate {
 		return base
+	}
+	if base.Kind == callBuiltin {
+		name := call.Value.(*ssa.Builtin).Name()
+		aux := builtinCallAux{callAux: base, InterfaceArgs: builtinInterfaceArgs(pfn.Interp, name, call.Args)}
+		aux.Target = call.Value.(*ssa.Builtin)
+		switch name {
+		case "Sizeof", "Alignof":
+			typ := call.Args[0].Type()
+			if len(call.Args) == 2 {
+				// unsaferewrite.Rewrite carries the operand type in a typed pointer.
+				typ = typ.Underlying().(*types.Pointer).Elem()
+			}
+			if name == "Sizeof" {
+				aux.Constant = uintptr(pfn.Interp.ctx.sizes.Sizeof(typ))
+			} else {
+				aux.Constant = uintptr(pfn.Interp.ctx.sizes.Alignof(typ))
+			}
+		case "Offsetof":
+			var offset int64
+			if len(call.Args) > 1 {
+				// unsaferewrite.Rewrite carries the struct type and field-index path.
+				typ := call.Args[0].Type().Underlying().(*types.Pointer).Elem()
+				for _, arg := range call.Args[1:] {
+					index, _ := constant.Int64Val(arg.(*ssa.Const).Value)
+					st := typ.Underlying().(*types.Struct)
+					offset += structOffsetsof(pfn.Interp.ctx.sizes, st)[int(index)]
+					typ = st.Field(int(index)).Type()
+				}
+			} else {
+				var err error
+				offset, err = builtinOffsetof(pfn.Interp.ctx, call.Pos(), call.Args)
+				if err != nil {
+					aux.Error = err.Error()
+				}
+			}
+			aux.Constant = uintptr(offset)
+		}
+		return aux
 	}
 	if base.Kind == callDynamic && base.Target >= 0 {
 		return dynamicCallAux{callAux: base}
