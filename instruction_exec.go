@@ -254,10 +254,14 @@ func instructionDeferCall(interp *Interp, desc callDescription, id register) fun
 }
 
 // makeBuiltinInstruction preserves the register-based builtin fast paths.
+// Layout builtins use independently computed constants/errors; unknown names
+// return nil to retain lowering.
 func makeBuiltinInstruction(interp *Interp, d typedInstruction, aux builtinCallAux) func(*frame) {
-	var fn builtinFunction = &builtinDescription{name: aux.Name}
+	var fn builtinFunction
 	if aux.Target != nil {
 		fn = aux.Target
+	} else {
+		fn = &builtinDescription{name: aux.Name}
 	}
 	ir, ia := d.Result, aux.Arguments
 	switch fn.Name() {
@@ -383,7 +387,8 @@ func makeBuiltinInstruction(interp *Interp, d typedInstruction, aux builtinCallA
 		}
 
 	case "panic":
-		// Most source panic calls are represented by opPanic.
+		// Compiled panic calls use opPanic; only hand-built Call descriptions
+		// reach this branch.
 		if interp.ctx.panicFunc != nil {
 			return func(fr *frame) {
 				arg0 := fr.reg(ia[0])

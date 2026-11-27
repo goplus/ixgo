@@ -3525,7 +3525,8 @@ func Run() int {
 			t.Fatal("no builtin descriptions")
 		}
 		got, err := i.RunFunc("Run")
-		if err != nil || got != 241 {
+		want := 225 + int(unsafe.Sizeof(int64(0))) + int(unsafe.Alignof(int64(0)))
+		if err != nil || got != want {
 			i.UnsafeRelease()
 			t.Fatalf("mode=%v Run=%v,%v", mode, got, err)
 		}
@@ -3631,6 +3632,11 @@ func Run() int {
 	}{}))
 }
 `
+	var layout struct {
+		A byte
+		B int64
+	}
+	want := unsafe.Offsetof(layout.B)
 	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution} {
 		i, err := NewContext(DisableMemo|mode).LoadInterp("offset.go", src)
 		if err != nil {
@@ -3641,7 +3647,7 @@ func Run() int {
 			for _, d := range p.Code {
 				if aux, ok := d.Aux.(builtinCallAux); ok && aux.Name == "Offsetof" {
 					found = true
-					if aux.Constant != 8 || aux.Target == nil || makeInstruction(i, d) == nil {
+					if aux.Constant != want || aux.Target == nil || makeInstruction(i, d) == nil {
 						t.Fatal("offset description not resolved")
 					}
 				}
@@ -3651,7 +3657,7 @@ func Run() int {
 		if mode != 0 && !found {
 			t.Fatal("missing generic Offsetof")
 		}
-		if got, err := i.RunFunc("Run"); err != nil || got != 8 {
+		if got, err := i.RunFunc("Run"); err != nil || got != int(want) {
 			t.Fatalf("Run=%v,%v", got, err)
 		}
 		i.UnsafeRelease()
