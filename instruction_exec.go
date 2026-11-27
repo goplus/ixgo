@@ -5,6 +5,7 @@ package ixgo
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -529,12 +530,13 @@ func makeBuiltinInstruction(interp *Interp, d typedInstruction, aux builtinCallA
 						if v.Int() < arg.Int() {
 							v = arg
 						}
-					case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+					case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 						if v.Uint() < arg.Uint() {
 							v = arg
 						}
 					case reflect.Float32, reflect.Float64:
-						if v.Float() < arg.Float() {
+						x, y := v.Float(), arg.Float()
+						if x < y || math.IsNaN(y) || x == 0 && y == 0 && !math.Signbit(y) {
 							v = arg
 						}
 					case reflect.String:
@@ -557,12 +559,13 @@ func makeBuiltinInstruction(interp *Interp, d typedInstruction, aux builtinCallA
 						if v.Int() > arg.Int() {
 							v = arg
 						}
-					case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+					case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 						if v.Uint() > arg.Uint() {
 							v = arg
 						}
 					case reflect.Float32, reflect.Float64:
-						if v.Float() > arg.Float() {
+						x, y := v.Float(), arg.Float()
+						if x > y || math.IsNaN(y) || x == 0 && y == 0 && math.Signbit(y) {
 							v = arg
 						}
 					case reflect.String:

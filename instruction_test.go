@@ -3659,3 +3659,72 @@ func TestInstructionBuiltinPanicCompatibility(t *testing.T) {
 		i.UnsafeRelease()
 	}
 }
+
+func TestBuiltinMinMaxSemantics(t *testing.T) {
+	const source = `package minmax
+import "math"
+type signed int64
+type unsigned uint64
+type floating float64
+type text string
+func check[T interface{~int|~int8|~int16|~int32|~int64|~uint|~uint8|~uint16|~uint32|~uint64|~uintptr|~float32|~float64|~string}](a,b,c T) {
+ if min(c,b,a)!=a || max(a,b,c)!=c || min(a)!=a || max(c)!=c || min(b,b)!=b || max(b,b)!=b {panic("ordered operands")}
+}
+func regzero(a,b int){if min(b,a)!=1 || max(b,a)!=5 {panic("register zero")}}
+func floats(a,b float64){
+ if !math.IsNaN(min(a,b)) || !math.IsNaN(max(a,b)) {panic("NaN propagation")}
+}
+func floats32(a,b float32){
+ if !math.IsNaN(float64(min(a,b))) || !math.IsNaN(float64(max(a,b))) {panic("float32 NaN")}
+}
+func zeros32(a,b float32){
+ if !math.Signbit(float64(min(a,b))) || math.Signbit(float64(max(a,b))) {panic("float32 zero")}
+}
+func named(a,b floating){
+ if !math.IsNaN(float64(min(a,b))) || !math.IsNaN(float64(max(a,b))) {panic("named NaN")}
+}
+func zeros(a,b float64){
+ if !math.Signbit(min(a,b)) || math.Signbit(max(a,b)) {panic("signed zero")}
+}
+func Run() int {
+ check[int](-3,1,5);check[int8](-3,1,5);check[int16](-3,1,5);check[int32](-3,1,5);check[int64](-3,1,5)
+ check[uint](0,1,5);check[uint8](0,1,5);check[uint16](0,1,5);check[uint32](0,1,5);check[uint64](0,1,5);check[uintptr](0,1,5)
+ check[float32](-3,1,5);check[float64](-3,1,5);check[string]("a","b","c")
+ check[signed](-3,1,5);check[unsigned](0,1,5);check[floating](-3,1,5);check[text]("a","b","c")
+ regzero(5,1);regzero(1,5)
+ floats(1,math.NaN());floats(math.NaN(),1)
+ floats32(1,float32(math.NaN()));floats32(float32(math.NaN()),1)
+ named(1,floating(math.NaN()));named(floating(math.NaN()),1)
+ zeros32(0,float32(math.Copysign(0,-1)));zeros32(float32(math.Copysign(0,-1)),0)
+ zeros(0,math.Copysign(0,-1));zeros(math.Copysign(0,-1),0)
+ check[float64](math.Inf(-1),0,math.Inf(1))
+ return 42
+}`
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		t.Run(fmt.Sprintf("mode=%v", mode), func(t *testing.T) {
+			i, err := NewContext(DisableMemo|mode).LoadInterp("minmax.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			found := map[string]bool{}
+			for _, p := range i.funcs {
+				for _, d := range p.Code {
+					if aux, ok := d.Aux.(builtinCallAux); ok && (aux.Name == "min" || aux.Name == "max") {
+						found[aux.Name] = true
+						if makeInstruction(i, d) == nil {
+							t.Fatal("missing min/max executor")
+						}
+					}
+				}
+				p.functionCompilation = functionCompilation{}
+			}
+			if mode != 0 && (!found["min"] || !found["max"]) {
+				t.Fatal("missing min/max descriptions")
+			}
+			if got, err := i.RunFunc("Run"); err != nil || got != 42 {
+				t.Fatalf("Run=%v,%v", got, err)
+			}
+		})
+	}
+}
