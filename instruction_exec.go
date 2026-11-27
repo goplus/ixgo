@@ -11,6 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"unsafe"
+
+	"github.com/visualfc/xtype"
 )
 
 // makeInstruction binds execution metadata to the supplied runtime context.
@@ -24,6 +26,9 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 			return nil
 		}
 		body, signature, bindings, result := aux.Body, aux.Signature, aux.Bindings, d.Result
+		if d.RuntimeBound {
+			result = d.RuntimeResult
+		}
 		return func(fr *frame) {
 			var env []value
 			for _, binding := range bindings {
@@ -39,32 +44,54 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 			if aux.Body == nil {
 				return nil
 			}
-			desc = callDescription{closure: aux.Body, bindings: aux.Bindings, args: aux.Arguments}
+			args, bindings := aux.Arguments, aux.Bindings
 			stack = aux.DeferStack
+			if d.RuntimeBound {
+				args = aux.runtime.Arguments
+				bindings = args[len(aux.Arguments):]
+				stack = aux.runtime.DeferStack
+			}
+			desc = callDescription{closure: aux.Body, bindings: bindings, args: args[:len(args)-len(bindings)]}
 		case invokeCallAux:
-			if aux.Target < 0 || aux.Method == "" {
+			target, args := aux.Target, aux.Arguments
+			stack = aux.DeferStack
+			if d.RuntimeBound {
+				target, args, stack = aux.runtime.Target, aux.runtime.Arguments, aux.runtime.DeferStack
+			}
+			if target < 0 || aux.Method == "" {
 				return nil
 			}
-			desc = callDescription{receiver: aux.Target, method: aux.Method, args: aux.Arguments}
-			stack = aux.DeferStack
+			desc = callDescription{receiver: target, method: aux.Method, args: args}
 		case dynamicCallAux:
-			if aux.Target < 0 {
+			target, args := aux.Target, aux.Arguments
+			stack = aux.DeferStack
+			if d.RuntimeBound {
+				target, args, stack = aux.runtime.Target, aux.runtime.Arguments, aux.runtime.DeferStack
+			}
+			if target < 0 {
 				return nil
 			}
-			desc = callDescription{receiver: aux.Target, args: aux.Arguments}
-			stack = aux.DeferStack
+			desc = callDescription{receiver: target, args: args}
 		case bodyCallAux:
+			args := aux.Arguments
+			stack = aux.DeferStack
+			if d.RuntimeBound {
+				args, stack = aux.runtime.Arguments, aux.runtime.DeferStack
+			}
 			if aux.Body == nil {
 				return nil
 			}
-			desc = callDescription{target: aux.Body, args: aux.Arguments}
-			stack = aux.DeferStack
+			desc = callDescription{target: aux.Body, args: args}
 		case externalCallAux:
+			args := aux.Arguments
+			stack = aux.DeferStack
+			if d.RuntimeBound {
+				args, stack = aux.runtime.Arguments, aux.runtime.DeferStack
+			}
 			if !aux.External.IsValid() {
 				return nil
 			}
-			desc = callDescription{target: aux.External, args: aux.Arguments}
-			stack = aux.DeferStack
+			desc = callDescription{target: aux.External, args: args}
 		default:
 			return nil
 		}
@@ -82,10 +109,13 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 		case builtinCallAux:
 			return makeBuiltinInstruction(interp, d, aux)
 		case dynamicCallAux:
-			if aux.Target < 0 {
+			target, result, args, dests := aux.Target, d.Result, aux.Arguments, aux.ExtractResults
+			if d.RuntimeBound {
+				target, result, args, dests = aux.runtime.Target, d.RuntimeResult, aux.runtime.Arguments, aux.runtime.ExtractResults
+			}
+			if target < 0 {
 				return nil
 			}
-			target, result, args, dests := aux.Target, d.Result, aux.Arguments, aux.ExtractResults
 			if supportFuncVal && interp.ctx.Mode&DisableDynamicFuncCallAnalysis == 0 {
 				return dynamicFunCall(interp, target, result, args, dests)
 			}
@@ -96,12 +126,19 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 			if aux.Adapter == nil {
 				return nil
 			}
-			adapter, args, result := aux.Adapter, aux.Arguments, d.Result
+			args, result := aux.Arguments, d.Result
+			if d.RuntimeBound {
+				args, result = aux.runtime.Arguments, d.RuntimeResult
+			}
+			adapter := aux.Adapter
 			return func(fr *frame) {
 				interp.invokeDirectCall(fr, adapter, result, args)
 			}
 		case externalCallAux:
 			ext, args, result, dests := aux.External, aux.Arguments, d.Result, aux.ExtractResults
+			if d.RuntimeBound {
+				args, result, dests = aux.runtime.Arguments, d.RuntimeResult, aux.runtime.ExtractResults
+			}
 			if !ext.IsValid() || ext.Kind() != reflect.Func {
 				return nil
 			}
@@ -110,10 +147,17 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 			}
 			return func(fr *frame) { interp.callExternalByStack(fr, ext, result, args, dests) }
 		case closureCallAux:
-			args := append(append([]register(nil), aux.Arguments...), aux.Bindings...)
-			return makeBodyCallInstruction(interp, aux.Body, d.Result, args, aux.ExtractResults)
+			result, args, dests := d.Result, append(append([]register(nil), aux.Arguments...), aux.Bindings...), aux.ExtractResults
+			if d.RuntimeBound {
+				result, args, dests = d.RuntimeResult, aux.runtime.Arguments, aux.runtime.ExtractResults
+			}
+			return makeBodyCallInstruction(interp, aux.Body, result, args, dests)
 		case bodyCallAux:
-			return makeBodyCallInstruction(interp, aux.Body, d.Result, aux.Arguments, aux.ExtractResults)
+			result, args, dests := d.Result, aux.Arguments, aux.ExtractResults
+			if d.RuntimeBound {
+				result, args, dests = d.RuntimeResult, aux.runtime.Arguments, aux.runtime.ExtractResults
+			}
+			return makeBodyCallInstruction(interp, aux.Body, result, args, dests)
 		}
 		return nil
 	case opJump:
@@ -128,6 +172,9 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 			return func(fr *frame) { fr.jump(aux.Targets[1]) }
 		}
 		condition := d.Args[0]
+		if d.RuntimeBound && len(d.RuntimeArgs) > 0 {
+			condition = d.RuntimeArgs[0]
+		}
 		if aux.BasicBool {
 			return func(fr *frame) {
 				if fr.reg(condition).(bool) {
@@ -144,9 +191,362 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 				fr.jump(aux.Targets[1])
 			}
 		}
+	case opField, opFieldAddr:
+		aux := d.Aux.(fieldAux)
+		source := aux.RuntimeSource
+		if !d.RuntimeBound && len(d.Args) > 0 {
+			source = d.Args[0]
+		}
+		result := d.Result
+		if d.RuntimeBound {
+			result = d.RuntimeResult
+		}
+		return func(fr *frame) {
+			var v value
+			var err error
+			if d.Op == opFieldAddr {
+				v, err = fieldAddrAt(fr.reg(source), aux.Offset, aux.Field)
+			} else {
+				v, err = fieldX(fr.reg(source), aux.Index)
+			}
+			if err != nil {
+				panic(fr.runtimeError(fr.pfn.InstrForPC(int(fr.ipc)-1), err.Error()))
+			}
+			fr.setReg(result, v)
+		}
+	case opIndex, opIndexAddr:
+		aux := d.Aux.(indexAux)
+		source, index := aux.RuntimeSource, aux.RuntimeIndex
+		if !d.RuntimeBound && len(d.Args) >= 2 {
+			source, index = d.Args[0], d.Args[1]
+		}
+		result := d.Result
+		if d.RuntimeBound {
+			result = d.RuntimeResult
+		}
+		return func(fr *frame) {
+			v := reflect.ValueOf(fr.reg(source))
+			if v.Kind() == reflect.Ptr {
+				v = v.Elem()
+			}
+			idx := asBound(fr.reg(index))
+			if !idx.ok || idx.n >= v.Len() {
+				panicIndexBound(fr, fr.pfn.InstrForPC(int(fr.ipc)-1), idx, v.Len())
+			}
+			if d.Op == opIndexAddr {
+				fr.setReg(result, v.Index(idx.n).Addr().Interface())
+			} else {
+				fr.setReg(result, v.Index(idx.n).Interface())
+			}
+		}
+	case opLookup:
+		aux := d.Aux.(lookupAux)
+		source, key := aux.RuntimeSource, aux.RuntimeKey
+		if !d.RuntimeBound && len(d.Args) >= 2 {
+			source, key = d.Args[0], d.Args[1]
+		}
+		result := d.Result
+		if d.RuntimeBound {
+			result = d.RuntimeResult
+		}
+		return func(fr *frame) {
+			container, k := fr.reg(source), fr.reg(key)
+			rv := reflect.ValueOf(container)
+			if rv.Kind() == reflect.String {
+				fr.setReg(result, rv.String()[asInt(k)])
+				return
+			}
+			mv := rv.MapIndex(mapKeyValue(rv, k))
+			ok := mv.IsValid()
+			var value value
+			if ok {
+				value = mv.Interface()
+			} else {
+				value = reflect.Zero(rv.Type().Elem()).Interface()
+			}
+			if aux.CommaOk {
+				fr.setReg(result, tuple{value, ok})
+			} else {
+				fr.setReg(result, value)
+			}
+		}
+	case opSlice:
+		aux := d.Aux.(sliceAux)
+		x, low, high, max := aux.RuntimeSource, aux.RuntimeLow, aux.RuntimeHigh, aux.RuntimeMax
+		if x < 0 && len(d.Args) > 0 {
+			x = d.Args[0]
+		}
+		// Static slice bounds still require the stack lowering path until
+		// their constant values have an explicit bytecode representation.
+		if x < 0 || (aux.Low && low < 0) || (aux.High && high < 0) || (aux.Max && max < 0) {
+			return nil
+		}
+		result := d.Result
+		if d.RuntimeResult >= 0 {
+			result = d.RuntimeResult
+		}
+		return func(fr *frame) {
+			v := slice(fr, fr.pfn.InstrForPC(int(fr.ipc)-1), sliceOperands{low: aux.Low, high: aux.High, max: aux.Max}, aux.MakeSliceCheck, x, high, low, max)
+			if aux.Target.Kind() == reflect.Slice && aux.Target != reflect.SliceOf(aux.Target.Elem()) {
+				v = v.Convert(aux.Target)
+			}
+			fr.setReg(result, v.Interface())
+		}
+	case opChangeType:
+		aux := d.Aux.(conversionAux)
+		source := aux.RuntimeSource
+		if source < 0 && len(d.Args) > 0 {
+			source = d.Args[0]
+		}
+		if source < 0 || aux.Source == nil || aux.Target == nil {
+			return nil
+		}
+		// ChangeType preserves representation; unsafe and interface changes use fallback.
+		if aux.Source.Kind() == reflect.Interface || aux.Target.Kind() == reflect.Interface || aux.Source.Kind() == reflect.UnsafePointer || aux.Target.Kind() == reflect.UnsafePointer {
+			return nil
+		}
+		result := d.Result
+		if d.RuntimeResult >= 0 {
+			result = d.RuntimeResult
+		}
+		return func(fr *frame) {
+			v := fr.reg(source)
+			if v == nil {
+				fr.setReg(result, nil)
+				return
+			}
+			rv := reflect.ValueOf(v)
+			if rv.Type().ConvertibleTo(aux.Target) {
+				fr.setReg(result, rv.Convert(aux.Target).Interface())
+			} else {
+				fr.setReg(result, v)
+			}
+		}
+	case opConvert:
+		aux := d.Aux.(conversionAux)
+		if aux.Source != nil && aux.Target != nil && (aux.Source.Kind() == reflect.UnsafePointer || aux.Target.Kind() == reflect.UnsafePointer) {
+			source := aux.RuntimeSource
+			if source < 0 && len(d.Args) > 0 {
+				source = d.Args[0]
+			}
+			if source < 0 {
+				return nil
+			}
+			result := d.Result
+			if d.RuntimeResult >= 0 {
+				result = d.RuntimeResult
+			}
+			sourceKind, targetKind := aux.Source.Kind(), aux.Target.Kind()
+			return func(fr *frame) {
+				v := fr.reg(source)
+				switch {
+				case targetKind == reflect.UnsafePointer && sourceKind == reflect.Uintptr:
+					fr.setReg(result, xtype.ConvertPtr(xtype.TypeOfType(aux.Target), unsafe.Pointer(uintptr(fr.uintptr(source)))))
+				case targetKind == reflect.UnsafePointer && sourceKind == reflect.Ptr:
+					fr.setReg(result, xtype.ConvertPtr(xtype.TypeOfType(aux.Target), v))
+				case targetKind == reflect.Uintptr && sourceKind == reflect.UnsafePointer:
+					fr.setReg(result, xtype.MakeUintptr(xtype.TypeOfType(aux.Target), uintptr(fr.pointer(source))))
+				case targetKind == reflect.Ptr && sourceKind == reflect.UnsafePointer:
+					fr.setReg(result, xtype.Make(xtype.TypeOfType(aux.Target), v))
+				default:
+					return
+				}
+			}
+		}
+		source := aux.RuntimeSource
+		if source < 0 && len(d.Args) > 0 {
+			source = d.Args[0]
+		}
+		if source < 0 || aux.Source == nil || aux.Target == nil {
+			return nil
+		}
+		if aux.Source.Kind() == reflect.UnsafePointer || aux.Target.Kind() == reflect.UnsafePointer {
+			return nil
+		}
+		result := d.Result
+		if d.RuntimeResult >= 0 {
+			result = d.RuntimeResult
+		}
+		return func(fr *frame) {
+			v := fr.reg(source)
+			if v == nil {
+				fr.setReg(result, nil)
+				return
+			}
+			rv := reflect.ValueOf(v)
+			if !rv.Type().ConvertibleTo(aux.Target) {
+				return
+			}
+			fr.setReg(result, rv.Convert(aux.Target).Interface())
+		}
+	case opSliceToArrayPointer:
+		aux := d.Aux.(conversionAux)
+		source := aux.RuntimeSource
+		if source < 0 && len(d.Args) > 0 {
+			source = d.Args[0]
+		}
+		if source < 0 || aux.Target == nil || aux.Target.Kind() != reflect.Pointer || aux.Target.Elem().Kind() != reflect.Array {
+			return nil
+		}
+		result := d.Result
+		if d.RuntimeResult >= 0 {
+			result = d.RuntimeResult
+		}
+		return func(fr *frame) {
+			v := fr.reg(source)
+			if v == nil {
+				fr.setReg(result, reflect.Zero(aux.Target).Interface())
+				return
+			}
+			rv := reflect.ValueOf(v)
+			if rv.Kind() != reflect.Slice || rv.Type().Elem() != aux.Target.Elem().Elem() {
+				return
+			}
+			if rv.IsNil() {
+				return
+			}
+			if rv.Len() < aux.Target.Elem().Len() {
+				return
+			}
+			arrayType := aux.Target.Elem()
+			ptr := reflect.NewAt(arrayType, unsafe.Pointer(rv.Pointer()))
+			fr.setReg(result, ptr.Interface())
+		}
+	case opChangeInterface, opMakeInterface:
+		aux := d.Aux.(conversionAux)
+		source := aux.RuntimeSource
+		if source < 0 && len(d.Args) > 0 {
+			source = d.Args[0]
+		}
+		if source < 0 {
+			return nil
+		}
+		result := d.Result
+		if d.RuntimeResult >= 0 {
+			result = d.RuntimeResult
+		}
+		return func(fr *frame) {
+			v := fr.reg(source)
+			if v == nil {
+				fr.setReg(result, nil)
+				return
+			}
+			rv := reflect.ValueOf(v)
+			if aux.Target.Kind() == reflect.Interface {
+				if rv.Type().Implements(aux.Target) {
+					fr.setReg(result, v)
+					return
+				}
+				return
+			}
+			if rv.Type().AssignableTo(aux.Target) {
+				fr.setReg(result, v)
+			}
+		}
+	case opTypeAssert:
+		aux := d.Aux.(typeAssertAux)
+		source := aux.RuntimeSource
+		if source < 0 && len(d.Args) > 0 {
+			source = d.Args[0]
+		}
+		if source < 0 || aux.Target == nil {
+			return nil
+		}
+		result := d.Result
+		if d.RuntimeResult >= 0 {
+			result = d.RuntimeResult
+		}
+		return func(fr *frame) {
+			v := fr.reg(source)
+			if v == nil {
+				if aux.CommaOk {
+					fr.setReg(result, tuple{nil, false})
+					return
+				}
+				panic(fr.runtimeError(fr.pfn.InstrForPC(int(fr.ipc)-1), "interface conversion: nil is not "+aux.Target.String()))
+			}
+			rv := reflect.ValueOf(v)
+			if rv.Type().AssignableTo(aux.Target) {
+				if aux.CommaOk {
+					fr.setReg(result, tuple{v, true})
+				} else {
+					fr.setReg(result, v)
+				}
+				return
+			}
+			if aux.CommaOk {
+				fr.setReg(result, tuple{reflect.Zero(aux.Target).Interface(), false})
+				return
+			}
+			panic(fr.runtimeError(fr.pfn.InstrForPC(int(fr.ipc)-1), "interface conversion: "+rv.Type().String()+" is not "+aux.Target.String()))
+		}
+	case opReturn:
+		aux := d.Aux.(returnAux)
+		args := d.Args
+		if d.RuntimeBound && aux.RuntimeResults != nil {
+			args = aux.RuntimeResults
+		}
+		return func(fr *frame) {
+			for i, r := range args {
+				if i >= aux.Results {
+					break
+				}
+				fr.stack[i] = fr.reg(r)
+			}
+			fr.ipc = -1
+		}
+	case opPanic:
+		aux := d.Aux.(panicAux)
+		r := aux.RuntimeValue
+		if !d.RuntimeBound && len(d.Args) > 0 {
+			r = d.Args[0]
+		}
+		return func(fr *frame) {
+			var err error = PanicError{stack: debugStack(fr), Value: fr.reg(r)}
+			if interp.ctx.panicFunc != nil {
+				err = interp.ctx.handlePanic(fr, fr.pfn.InstrForPC(int(fr.ipc)-1), err)
+			}
+			panic(err)
+		}
+	case opSend:
+		aux := d.Aux.(sendAux)
+		ic, iv := aux.RuntimeChan, aux.RuntimeValue
+		if !d.RuntimeBound && len(d.Args) >= 2 {
+			ic, iv = d.Args[0], d.Args[1]
+		}
+		return func(fr *frame) {
+			c, x := fr.reg(ic), fr.reg(iv)
+			ch := reflect.ValueOf(c)
+			if interp.gcEnabled {
+				fr.gcFrames()
+			}
+			if x == nil {
+				ch.Send(reflect.New(ch.Type().Elem()).Elem())
+			} else {
+				ch.Send(reflect.ValueOf(x))
+			}
+		}
+	case opStore:
+		aux := d.Aux.(storeAux)
+		ia, iv := aux.RuntimeAddress, aux.RuntimeValue
+		if !d.RuntimeBound && len(d.Args) >= 2 {
+			ia, iv = d.Args[0], d.Args[1]
+		}
+		return func(fr *frame) {
+			x := reflect.ValueOf(fr.reg(ia))
+			v := reflect.ValueOf(fr.reg(iv))
+			if v.IsValid() {
+				SetValue(x.Elem(), v)
+			} else {
+				SetValue(x.Elem(), reflect.Zero(x.Elem().Type()))
+			}
+		}
 	case opPhi:
 		aux := d.Aux.(phiAux)
 		ir, ie, preds := aux.Results, aux.Edges, aux.Preds
+		if d.RuntimeBound && aux.RuntimeResults != nil {
+			ir, ie = aux.RuntimeResults, aux.RuntimeEdges
+		}
 		if len(ir) == 0 || len(ie) == 0 {
 			return func(*frame) {}
 		}
@@ -257,6 +657,9 @@ func makeBuiltinInstruction(interp *Interp, d typedInstruction, aux builtinCallA
 		fn = &builtinDescription{name: aux.Name}
 	}
 	ir, ia := d.Result, aux.Arguments
+	if aux.Runtime.Bound {
+		ir, ia = aux.Runtime.Result, aux.Runtime.Arguments
+	}
 	switch fn.Name() {
 	case "append":
 		if len(ia) == 1 {
@@ -589,6 +992,9 @@ func makeBuiltinInstruction(interp *Interp, d typedInstruction, aux builtinCallA
 func makeInvokeInstruction(interp *Interp, d typedInstruction, aux invokeCallAux) func(*frame) {
 	mname := aux.Method
 	ir, iv, ia, dests := d.Result, aux.Target, aux.Arguments, aux.ExtractResults
+	if d.RuntimeBound {
+		ir, iv, ia, dests = d.RuntimeResult, aux.runtime.Target, aux.runtime.Arguments, aux.runtime.ExtractResults
+	}
 	ia = append([]register{iv}, ia...)
 	var methods sync.Map // map[reflect.Type]func(*frame)
 	return func(fr *frame) {
