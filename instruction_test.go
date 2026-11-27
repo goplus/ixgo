@@ -4237,3 +4237,54 @@ func Run() int {
 		t.Fatal("missing captured closure")
 	}
 }
+
+func TestDescriptionClosureBindingLayouts(t *testing.T) {
+	const source = `package layouts
+
+func recursive(n int) int {
+	if n == 0 {
+		return 1
+	}
+	return n * func(k int) int { return recursive(k) }(n-1)
+}
+
+func Run() int {
+	a, b := 2, 3
+	call := func(x int) (int, int) { return a + x, b + x }
+	first, second := call(4)
+	ch := make(chan int, 1)
+	go func(x, y int) { ch <- x + y }(a, b)
+	defer func(x, y int) { a += x; b += y }(first, second)
+	return first + second + <-ch + recursive(4)
+}
+`
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionDescriptions | EnableInstructionExecution} {
+		t.Run(fmt.Sprintf("mode=%v", mode), func(t *testing.T) {
+			i, err := NewContext(DisableMemo|mode).LoadInterp("closure_layouts.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			foundCaptures := false
+			for _, p := range i.funcs {
+				for _, d := range p.Code {
+					if aux, ok := d.Aux.(closureCallAux); ok {
+						if len(aux.Bindings) >= 2 {
+							foundCaptures = true
+						}
+						if makeInstruction(i, d) == nil {
+							t.Fatal("missing closure executor")
+						}
+					}
+				}
+				p.functionCompilation = functionCompilation{}
+			}
+			if mode != 0 && !foundCaptures {
+				t.Fatal("missing multi-capture closure")
+			}
+			if got, err := i.RunFunc("Run"); err != nil || got != 42 {
+				t.Fatalf("Run=%v,%v want 42", got, err)
+			}
+		})
+	}
+}
