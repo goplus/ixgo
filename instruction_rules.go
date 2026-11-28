@@ -45,3 +45,24 @@ func recordPackageInitStore(pfn *function, store *ssa.Store) {
 		pfn.Interp.chkinit[store.Addr.String()] = true
 	}
 }
+
+// skipDirectCallClosure omits a function value only when every use invokes the
+// known closure body. Other uses, including DebugRef, keep it observable.
+func skipDirectCallClosure(closure *ssa.MakeClosure) bool {
+	refs := closure.Referrers()
+	if refs == nil || len(*refs) == 0 {
+		return false
+	}
+	for _, ref := range *refs {
+		call, ok := ref.(*ssa.Call)
+		if !ok || call.Call.Value != closure {
+			return false
+		}
+		for _, arg := range call.Call.Args {
+			if arg == closure {
+				return false
+			}
+		}
+	}
+	return true
+}

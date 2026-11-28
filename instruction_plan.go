@@ -75,6 +75,9 @@ func planInstructionLayout(pfn *function) {
 }
 
 func compileInstruction(pfn *function, instr ssa.Instruction) (typedInstruction, func(*frame)) {
+	if closure, ok := instr.(*ssa.MakeClosure); ok && skipDirectCallClosure(closure) {
+		return typedInstruction{}, nil
+	}
 	if extract, ok := instr.(*ssa.Extract); ok {
 		if _, elided := pfn.elidedExtract[extract]; elided {
 			return typedInstruction{}, nil

@@ -879,6 +879,9 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 			fr.setReg(ir, v.Interface())
 		}
 	case *ssa.MakeClosure:
+		if skipDirectCallClosure(instr) {
+			return nil
+		}
 		fn := instr.Fn.(*ssa.Function)
 		typ := interp.preToType(fn.Type())
 		ir := pfn.regIndex(instr)

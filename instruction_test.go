@@ -1403,6 +1403,7 @@ func TestDescriptionClosureMetadata(t *testing.T) {
 func noCapture(n int) int { f:=func(x int) int { return x+1 }; return f(n) }
 func captures(a,b int) int { f:=func(x int) int { return x+a+b }; return f(3) }
 func nested(a int) func(int) int { return func(x int) int { return x+a } }
+func twoCaptures(a,b int) func(int) int { return func(x int) int { return x+a+b } }
 func top() func(int) int { return func(x int) int { return x+1 } }
 type Counter struct { Base int }
 func (c Counter) Add(n int) int { return c.Base+n }
@@ -5486,5 +5487,181 @@ func TestInstructionScalarChangeTypeSSA(t *testing.T) {
 			}
 		}
 		i.UnsafeRelease()
+	}
+}
+
+func TestDirectClosureMaterialization(t *testing.T) {
+	const source = `package main
+import "runtime"
+func Direct(n int) int { x:=n; f:=func(v int)int{x+=v;return x}; f(2);runtime.GC();return f(3) }
+func Escape(n int) func()int {return func()int{return n}}
+func UseEscape()int {f:=Escape(7);return f()}
+var saved func()int
+func Stored(n int)int {f:=func()int{return n};saved=f;return f()+saved()}
+func Passed(n int)int {f:=func()int{return n};return apply(f)}
+func apply(f func()int)int{return f()}
+func Deferred(n int)(r int) {f:=func(){r=n};defer f();return}
+func Goroutine(n int)int {ch:=make(chan int,1);f:=func(){ch<-n};go f();return <-ch}
+`
+	for _, mode := range []Mode{EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionExecution | ExperimentalSupportGC | EnableGCExecutionPlan} {
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
+			i, err := NewContext(DisableMemo|mode).LoadInterp("direct_closure.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			for _, tc := range []struct {
+				name string
+				args []any
+				want int
+			}{{"Direct", []any{10}, 15}, {"UseEscape", nil, 7}, {"Stored", []any{8}, 16}, {"Passed", []any{9}, 9}, {"Deferred", []any{11}, 11}, {"Goroutine", []any{12}, 12}} {
+				got, err := i.RunFunc(tc.name, tc.args...)
+				if err != nil || got != tc.want {
+					t.Fatalf("%s=%v,%v", tc.name, got, err)
+				}
+			}
+			direct, retained := 0, 0
+			for _, p := range i.funcs {
+				for _, b := range p.Fn.Blocks {
+					for _, instr := range b.Instrs {
+						if c, ok := instr.(*ssa.MakeClosure); ok && p.Fn.Name() == "Direct" {
+							if !skipDirectCallClosure(c) {
+								t.Fatal("direct closure not eligible")
+							}
+							direct++
+						}
+					}
+				}
+				for _, instr := range p.ssaInstrs {
+					if _, ok := instr.(*ssa.MakeClosure); ok {
+						if p.Fn.Name() == "Direct" {
+							t.Fatal("direct closure materialized")
+						}
+						retained++
+					}
+				}
+			}
+			if direct == 0 || retained == 0 {
+				t.Fatalf("direct=%d retained=%d", direct, retained)
+			}
+		})
+	}
+}
+
+func BenchmarkDirectClosureMaterialization(b *testing.B) {
+	for _, mode := range []Mode{0, EnableInstructionExecution} {
+		b.Run(fmt.Sprint(mode), func(b *testing.B) {
+			ctx := NewContext(DisableMemo | mode)
+			ctx.SetLeastCallForEnablePool(0)
+			i, err := ctx.LoadInterp("closure_perf.go", executionDescriptionSource)
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.Cleanup(i.UnsafeRelease)
+			for n := 0; n < 10; n++ {
+				if v, e := i.RunFunc("closure"); e != nil || v != 42 {
+					b.Fatalf("%v,%v", v, e)
+				}
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				if v, e := i.RunFunc("closure"); e != nil || v != 42 {
+					b.Fatalf("%v,%v", v, e)
+				}
+			}
+		})
+	}
+}
+
+func TestDirectClosureDebugObservability(t *testing.T) {
+	for _, mode := range []Mode{EnableInstructionDescriptions, EnableInstructionExecution} {
+		ctx := NewContext(DisableMemo | mode)
+		seen := false
+		ctx.SetDebug(func(info *DebugInfo) {
+			if _, v, ok := info.AsVar(); ok && reflect.TypeOf(v) != nil && reflect.TypeOf(v).Kind() == reflect.Func {
+				seen = true
+			}
+		})
+		i, err := ctx.LoadInterp("closure_debug.go", `package main
+func Run(n int)int { f:=func()int{return n};return f() }`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := i.RunFunc("Run", 7)
+		if err != nil || got != 7 {
+			t.Fatalf("%v,%v", got, err)
+		}
+		// DebugRef makes the function value observable to debug callbacks.
+		retained := false
+		for _, p := range i.funcs {
+			for _, instr := range p.ssaInstrs {
+				if _, ok := instr.(*ssa.MakeClosure); ok {
+					retained = true
+				}
+			}
+		}
+		if !retained {
+			t.Fatal("debug-visible closure was elided")
+		}
+		if !seen {
+			t.Fatal("debug callback did not observe function value")
+		}
+		i.UnsafeRelease()
+	}
+}
+
+func TestDirectClosureLoopBindings(t *testing.T) {
+	const source = `package main
+import "runtime"
+type number int
+func(n number)Value()int{return int(n)}
+func Run()int {
+ x:=0; f:=func()int{runtime.GC();return x};sum:=0
+ for j:=0;j<3;j++ {x=j;sum+=f()}
+ for j:=0;j<3;j++ {g:=func()int{return j};sum+=g();n:=number(j);m:=n.Value;sum+=m()}
+ return sum
+}
+func Phi()int {
+ var old func()int
+ sum:=0
+ for j:=0;j<3;j++ {n:=j;f:=func()int{return n};if old!=nil {sum+=old()};old=f}
+ return sum+old()
+}
+func Both()int {n:=new(int);*n=7;f:=func(g any)int{return *n};return f(f)}
+`
+	for _, backend := range []Mode{EnableInstructionDescriptions, EnableInstructionExecution} {
+		for _, gc := range []Mode{0, ExperimentalSupportGC, ExperimentalSupportGC | EnableGCExecutionPlan} {
+			mode := backend | gc
+			t.Run(fmt.Sprint(mode), func(t *testing.T) {
+				i, err := NewContext(DisableMemo|mode).LoadInterp("loop_closure.go", source)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer i.UnsafeRelease()
+				for _, tc := range []struct {
+					name string
+					want int
+				}{{"Run", 9}, {"Phi", 3}, {"Both", 7}} {
+					got, err := i.RunFunc(tc.name)
+					if err != nil || got != tc.want {
+						t.Fatalf("%s=%v,%v", tc.name, got, err)
+					}
+				}
+				for _, p := range i.funcs {
+					if p.Fn.Name() == "Both" || p.Fn.Name() == "Phi" {
+						found := false
+						for _, instr := range p.ssaInstrs {
+							if _, ok := instr.(*ssa.MakeClosure); ok {
+								found = true
+							}
+						}
+						if !found {
+							t.Fatalf("%s lost observable closure", p.Fn)
+						}
+					}
+				}
+			})
+		}
 	}
 }
