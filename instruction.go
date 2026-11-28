@@ -857,6 +857,11 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 		d.Op = opRunDefers
 	case *ssa.DebugRef:
 		d.Op = opDebugRef
+		var variable *types.Var
+		if v, ok := v.Object().(*types.Var); ok {
+			variable = v
+		}
+		d.Aux = instructionDebugRefAux{Ref: v, Variable: variable}
 	}
 	return d
 }

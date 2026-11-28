@@ -78,7 +78,7 @@ func gcPhi(n int) int { a,b:=new(int),new(int); *a=7; *b=9; p:=a; if n>0 { p=b }
 				if old == nil {
 					t.Fatalf("description added function %s", fn)
 				}
-				if len(p.stack) != len(old.stack) || len(p.index) != len(old.index) || p.hasGCRegs != old.hasGCRegs {
+				if config.descriptions&EnableInstructionExecution == 0 && (len(p.stack) != len(old.stack) || len(p.index) != len(old.index) || p.hasGCRegs != old.hasGCRegs) {
 					t.Fatalf("%s layout changed: stack %d/%d, index %d/%d, GC %t/%t", fn, len(p.stack), len(old.stack), len(p.index), len(old.index), p.hasGCRegs, old.hasGCRegs)
 				}
 				registers := func(f *function) map[uint32]string {
@@ -88,11 +88,11 @@ func gcPhi(n int) int { a,b:=new(int),new(int); *a=7; *b=9; p:=a; if n>0 { p=b }
 					}
 					return result
 				}
-				if !reflect.DeepEqual(registers(p), registers(old)) {
+				if config.descriptions&EnableInstructionExecution == 0 && !reflect.DeepEqual(registers(p), registers(old)) {
 					t.Fatalf("%s register mapping changed: got %v want %v", fn, registers(p), registers(old))
 				}
-				if len(p.Code) != len(p.Instrs) || len(p.Instrs) != len(old.Instrs) ||
-					!reflect.DeepEqual(p.Blocks, old.Blocks) {
+				if len(p.Code) != len(p.Instrs) || (config.descriptions&EnableInstructionExecution == 0 && (len(p.Instrs) != len(old.Instrs) ||
+					!reflect.DeepEqual(p.Blocks, old.Blocks))) {
 					t.Fatalf("%s execution PC alignment changed: Code=%d, closures=%d/%d, blocks=%v/%v", fn, len(p.Code), len(p.Instrs), len(old.Instrs), p.Blocks, old.Blocks)
 				}
 				for pc := range p.Instrs {
@@ -104,18 +104,18 @@ func gcPhi(n int) int { a,b:=new(int),new(int); *a=7; *b=9; p:=a; if n>0 { p=b }
 						t.Fatalf("%s source position misaligned at PC %d", fn, pc)
 					}
 					// Generated builtin declarations may have a different source order.
-					if pos := p.PositionForPC(pc); pos.Filename == "description_layout.go" && pos != old.PositionForPC(pc) {
+					if pos := p.PositionForPC(pc); config.descriptions&EnableInstructionExecution == 0 && pos.Filename == "description_layout.go" && pos != old.PositionForPC(pc) {
 						t.Fatalf("%s source position changed at PC %d: %v/%v", fn, pc, pos, old.PositionForPC(pc))
 					}
 				}
-				if len(p.gcRegs) != len(old.gcRegs) {
+				if config.descriptions&EnableInstructionExecution == 0 && len(p.gcRegs) != len(old.gcRegs) {
 					t.Fatalf("%s GC PC count changed", fn)
 				}
 				if len(p.gcRegs) > 0 {
 					gcFunctions++
 				}
 				for pc := range p.gcRegs {
-					if !reflect.DeepEqual(p.gcRegsForPC(pc), old.gcRegsForPC(pc)) {
+					if config.descriptions&EnableInstructionExecution == 0 && !reflect.DeepEqual(p.gcRegsForPC(pc), old.gcRegsForPC(pc)) {
 						t.Fatalf("%s GC registers changed at PC %d", fn, pc)
 					}
 				}
@@ -4480,5 +4480,172 @@ func TestInstructionRuntimeRegisterSelection(t *testing.T) {
 	p.UnsafeRelease()
 	if p.descriptionIndex != nil {
 		t.Fatal("UnsafeRelease retained description registers")
+	}
+}
+
+func TestInstructionExclusiveBackend(t *testing.T) {
+	const source = `package main
+func pair(n int) (int, int) { return n, n+1 }
+func Run() (result int) {
+ defer func() { result++ }()
+ m := make(map[int]int)
+ s := make([]int, 2, 4)
+ for i := range s { a,b := pair(i); s[i] = a+b; m[i] = s[i] }
+ ch := make(chan int, 1)
+ ch <- m[1]
+ select { case n := <-ch: result = n; default: result = -10 }
+ for _, n := range m { result += n }
+ for _, r := range "a" { result += int(r)-97 }
+ return
+}`
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution} {
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
+			i, err := NewContext(DisableMemo|mode).LoadInterp("exclusive.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			got, err := i.RunFunc("Run")
+			if err != nil || got != 8 {
+				t.Fatalf("Run=%v,%v; want 8", got, err)
+			}
+			for _, p := range i.funcs {
+				if mode&EnableInstructionExecution != 0 {
+					for pc, d := range p.Code {
+						if makeInstruction(i, d) == nil {
+							t.Fatalf("missing executor at %s:%d", p.Fn, pc)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestInstructionExclusiveTestdata(t *testing.T) {
+	for _, name := range []string{"boundmeth.go", "complit.go", "coverage.go", "defer.go", "fieldprom.go", "ifaceconv.go", "ifaceprom.go", "initorder.go", "methprom.go", "mrvchain.go", "range.go", "recover.go", "reflect.go", "static.go", "recover2.go", "issue23536.go", "issue5963.go"} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Run("testdata/"+name, nil, DisableMemo|EnableInstructionExecution); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestInstructionRejectsStackLowering(t *testing.T) {
+	defer func() {
+		if got := recover(); got != "stack lowering called with instruction execution enabled" {
+			t.Fatalf("panic=%v", got)
+		}
+	}()
+	makeInstr(&Interp{ctx: NewContext(EnableInstructionExecution)}, nil, nil)
+}
+
+func TestInstructionExclusiveGCAndDebug(t *testing.T) {
+	const source = `package main
+import "runtime"
+func Run(n int) int {
+ p,q := new(int),new(int)
+ *p,*q = 7,9
+ if n > 0 { p=q }
+ runtime.GC()
+ return *p
+}`
+	for _, extra := range []Mode{0, EnableCachedReg, ExperimentalSupportGC, ExperimentalSupportGC | EnableGCExecutionPlan} {
+		t.Run(fmt.Sprint(extra), func(t *testing.T) {
+			ctx := NewContext(EnableInstructionExecution | extra)
+			callbacks := 0
+			ctx.SetDebug(func(info *DebugInfo) { callbacks++ })
+			i, err := ctx.LoadInterp("exclusive_debug.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			for _, n := range []int{0, 1, 0, 1} {
+				got, err := i.RunFunc("Run", n)
+				want := 7
+				if n > 0 {
+					want = 9
+				}
+				if err != nil || got != want {
+					t.Fatalf("Run(%d)=%v,%v; want %d", n, got, err, want)
+				}
+			}
+			if callbacks == 0 {
+				t.Fatal("debug callback was not invoked")
+			}
+		})
+	}
+}
+
+func TestInstructionExclusiveBlankFields(t *testing.T) {
+	const source = `package main
+import "reflect"
+var calls int
+func value() int { calls++; return 9 }
+func Run() int {
+ v := struct { _ int; X int }{value(),3}
+ if reflect.ValueOf(v).Field(0).Int()!=0 { panic("blank field was written") }
+ return calls+v.X
+}`
+	for _, mode := range []Mode{0, EnableInstructionExecution} {
+		i, err := NewContext(mode).LoadInterp("blank.go", source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := i.RunFunc("Run")
+		i.UnsafeRelease()
+		if err != nil || got != 4 {
+			t.Fatalf("mode %v: %v,%v", mode, got, err)
+		}
+	}
+}
+
+func TestInstructionExclusiveLinknameInit(t *testing.T) {
+	const source = `package main
+import (_ "unsafe"; _ "pkg")
+//go:linkname a pkg.v
+var a int=200
+func main() {}`
+	for _, mode := range []Mode{0, EnableInstructionExecution} {
+		ctx := NewContext(mode)
+		ctx.AddImportFile("pkg", "pkg.go", "package pkg; var v int=100")
+		_, err := ctx.RunFile("main.go", source, nil)
+		if err == nil || err.Error() != `duplicated definition of symbol pkg.v, from main and pkg` {
+			t.Fatalf("mode %v: %v", mode, err)
+		}
+	}
+}
+
+func TestInstructionExclusiveDirectGoDefer(t *testing.T) {
+	const path = "example.com/instructiondirectgodefer"
+	RegisterDirectCalls(path, map[string]DirectCallAdapter{"Send": func(c DirectCallContext) { DirectCallArg[chan int](c, 0) <- 99 }})
+	const source = `package p
+func Send(ch chan int) { ch<-7 }
+func Run() int {
+ ch:=make(chan int,2)
+ func(){defer Send(ch)}()
+ go Send(ch)
+ return <-ch + <-ch
+}`
+	for _, mode := range []Mode{0, EnableInstructionExecution} {
+		ctx := NewContext(mode)
+		file, err := parser.ParseFile(ctx.FileSet, "direct_go_defer.go", source, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pkg, err := ctx.LoadAstFile(path, file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		i, err := NewInterp(ctx, pkg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := i.RunFunc("Run")
+		i.UnsafeRelease()
+		if err != nil || got != 14 {
+			t.Fatalf("mode %v: %v,%v", mode, got, err)
+		}
 	}
 }

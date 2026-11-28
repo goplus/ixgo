@@ -68,7 +68,7 @@ const (
 	DisableMemo                                                             // Disable the optional memo optimizer.
 	EnableGCExecutionPlan                                                   // Precompute SSA-free GC liveness plans at load time; requires ExperimentalSupportGC.
 	EnableInstructionDescriptions                                           // Build typed instruction metadata at load time; requires the instruction build tag; independent of GC plans.
-	EnableInstructionExecution                                              // Execute instructions using typed descriptions; requires the instruction build tag; also generates descriptions.
+	EnableInstructionExecution                                              // Select the independent instruction backend; requires the instruction build tag; also generates descriptions.
 	OptionLoadDefaultImethod       = 0                                      // Option load default imethod.
 	LastMode                       = EnableInstructionExecution             // Last Mode
 )

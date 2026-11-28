@@ -5,6 +5,7 @@ package ixgo
 import (
 	"bytes"
 	"fmt"
+	"go/types"
 	"math"
 	"reflect"
 	"strings"
@@ -13,13 +14,174 @@ import (
 	"unsafe"
 
 	"github.com/visualfc/xtype"
+	"golang.org/x/tools/go/ssa"
 )
 
 // makeInstruction binds execution metadata to the supplied runtime context.
 // It returns nil when the description has no executor implementation.
-// Unsupported instructions retain their existing lowering.
+// The instruction compiler reports unsupported descriptions as build errors.
 func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
+	result, args := d.Result, d.Args
+	if d.RuntimeBound {
+		result, args = d.RuntimeResult, d.RuntimeArgs
+	}
 	switch d.Op {
+	case opAlloc:
+		aux := d.Aux.(creationAux)
+		typ := aux.Target
+		t, pt := xtype.TypeOfType(typ.Elem()), xtype.TypeOfType(typ)
+		if aux.Heap {
+			return func(fr *frame) { fr.setReg(result, xtype.New(t, pt)) }
+		}
+		zero := reflect.Zero(typ.Elem())
+		return func(fr *frame) {
+			if v := fr.reg(result); v != nil {
+				reflect.ValueOf(v).Elem().Set(zero)
+			} else {
+				fr.setReg(result, xtype.New(t, pt))
+			}
+		}
+	case opMakeChan:
+		typ, size := d.Aux.(creationAux).Target, args[0]
+		channelType := typ
+		if typ.ChanDir() != reflect.BothDir {
+			channelType = reflect.ChanOf(reflect.BothDir, typ.Elem())
+		}
+		return func(fr *frame) {
+			buffer := asInt(fr.reg(size))
+			if buffer < 0 {
+				panic(fr.runtimeError(fr.pfn.InstrForPC(int(fr.ipc)-1), "makechan: size out of range"))
+			}
+			ch := reflect.MakeChan(channelType, buffer)
+			if channelType != typ {
+				ch = ch.Convert(typ)
+			}
+			fr.setReg(result, ch.Interface())
+		}
+	case opMakeMap:
+		typ := d.Aux.(creationAux).Target
+		if len(args) == 0 || args[0] < 0 {
+			return func(fr *frame) { fr.setReg(result, reflect.MakeMap(typ).Interface()) }
+		}
+		reserve := args[0]
+		return func(fr *frame) {
+			fr.setReg(result, reflect.MakeMapWithSize(typ, asInt(fr.reg(reserve))).Interface())
+		}
+	case opMakeSlice:
+		typ, length, capacity := d.Aux.(creationAux).Target, args[0], args[1]
+		return func(fr *frame) {
+			n := asInt(fr.reg(length))
+			if n < 0 || n >= maxMemLen {
+				panic(fr.runtimeError(fr.pfn.InstrForPC(int(fr.ipc)-1), "makeslice: len out of range"))
+			}
+			c := asInt(fr.reg(capacity))
+			if c < 0 || c >= maxMemLen {
+				panic(fr.runtimeError(fr.pfn.InstrForPC(int(fr.ipc)-1), "makeslice: cap out of range"))
+			}
+			fr.setReg(result, reflect.MakeSlice(typ, n, c).Interface())
+		}
+	case opSelect:
+		aux := d.Aux.(selectAux)
+		states := make([]selectOperands, len(aux.States))
+		pos := 0
+		for i, state := range aux.States {
+			states[i] = selectOperands{channel: args[pos], dir: state.Dir, elem: state.Chan.Elem(), hasSend: state.Send != nil}
+			pos++
+			if state.Send != nil {
+				states[i].send = args[pos]
+			}
+			pos++
+		}
+		return func(fr *frame) {
+			cases := make([]reflect.SelectCase, 0, len(states)+1)
+			if !aux.Blocking {
+				cases = append(cases, reflect.SelectCase{Dir: reflect.SelectDefault})
+			}
+			for _, state := range states {
+				var send reflect.Value
+				if state.hasSend {
+					if v := fr.reg(state.send); v != nil {
+						send = reflect.ValueOf(v)
+					} else {
+						send = reflect.Zero(state.elem)
+					}
+				}
+				cases = append(cases, reflect.SelectCase{Dir: state.dir, Chan: reflect.ValueOf(fr.reg(state.channel)), Send: send})
+			}
+			if interp.gcEnabled {
+				fr.gcFrames()
+			}
+			chosen, recv, ok := reflect.Select(cases)
+			if !aux.Blocking {
+				chosen--
+			}
+			values := tuple{chosen, ok}
+			for i, state := range states {
+				if state.dir == reflect.SelectRecv {
+					v := reflect.Zero(state.elem).Interface()
+					if i == chosen && ok {
+						v = recv.Interface()
+					}
+					values = append(values, v)
+				}
+			}
+			fr.setReg(result, values)
+		}
+	case opRange:
+		source := args[0]
+		switch d.Aux.(rangeAux).Source.Kind() {
+		case reflect.String:
+			return func(fr *frame) { fr.setReg(result, &stringIter{Reader: strings.NewReader(fr.string(source))}) }
+		case reflect.Map:
+			return func(fr *frame) { fr.setReg(result, &mapIter{iter: reflect.ValueOf(fr.reg(source)).MapRange()}) }
+		}
+		return nil
+	case opNext:
+		source := args[0]
+		if d.Aux.(nextAux).IsString {
+			return func(fr *frame) { fr.setReg(result, fr.reg(source).(*stringIter).next()) }
+		}
+		return func(fr *frame) { fr.setReg(result, fr.reg(source).(*mapIter).next()) }
+	case opExtract:
+		index := d.Aux.(extractAux).Index
+		if result < 0 {
+			return func(*frame) {}
+		}
+		source := args[0]
+		return func(fr *frame) { fr.setReg(result, fr.reg(source).(tuple)[index]) }
+	case opMapUpdate:
+		container, key, elem := args[0], args[1], args[2]
+		return func(fr *frame) { setMapIndex(reflect.ValueOf(fr.reg(container)), fr.reg(key), fr.reg(elem)) }
+	case opRunDefers:
+		return func(fr *frame) { fr.runDefers() }
+	case opDebugRef:
+		aux, ok := d.Aux.(instructionDebugRefAux)
+		if !ok || aux.Ref == nil {
+			return nil
+		}
+		fset := interp.ctx.FileSet
+		pos := fset.Position(aux.Ref.Pos())
+		tracker := interp.execution
+		if tracker != nil && !tracker.accepts(pos) {
+			tracker = nil
+		}
+		var source register
+		if aux.Variable != nil {
+			source = args[0]
+		}
+		return func(fr *frame) {
+			if tracker != nil {
+				tracker.setPosition(fr, pos)
+			}
+			if debug := interp.ctx.debugFunc; debug != nil {
+				info := &DebugInfo{DebugRef: aux.Ref, fset: fset}
+				if aux.Variable != nil {
+					info.toValue = func() (*types.Var, interface{}, bool) { return aux.Variable, fr.reg(source), true }
+				}
+				debug(info)
+			}
+		}
+
 	case opMakeClosure:
 		aux := d.Aux.(closureAux)
 		if aux.Body == nil {
@@ -38,6 +200,7 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 		}
 	case opGo, opDefer:
 		var desc callDescription
+		var interfaceArgs []bool
 		var stack register
 		switch aux := d.Aux.(type) {
 		case closureCallAux:
@@ -72,6 +235,26 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 				return nil
 			}
 			desc = callDescription{receiver: target, args: args}
+		case directCallAux:
+			target, args := aux.Target, aux.Arguments
+			stack = aux.DeferStack
+			if d.RuntimeBound {
+				target, args, stack = aux.runtime.Target, aux.runtime.Arguments, aux.runtime.DeferStack
+			}
+			if target < 0 {
+				return nil
+			}
+			// Go/defer prepare an ordinary function value, matching their
+			// evaluation and recover semantics in the permanent stack backend.
+			desc = callDescription{receiver: target, args: args}
+		case builtinCallAux:
+			args := aux.Arguments
+			interfaceArgs = aux.InterfaceArgs
+			stack = aux.DeferStack
+			if d.RuntimeBound {
+				args = aux.Runtime.Arguments
+			}
+			desc = callDescription{target: &builtinDescription{name: aux.Name}, args: args}
 		case bodyCallAux:
 			args := aux.Arguments
 			stack = aux.DeferStack
@@ -96,9 +279,9 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 			return nil
 		}
 		if d.Op == opGo {
-			return instructionGoCall(interp, desc)
+			return instructionGoCall(interp, desc, interfaceArgs)
 		}
-		return instructionDeferCall(interp, desc, stack)
+		return instructionDeferCall(interp, desc, stack, interfaceArgs)
 	case opCall:
 		switch aux := d.Aux.(type) {
 		case invokeCallAux:
@@ -117,7 +300,18 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 				return nil
 			}
 			if supportFuncVal && interp.ctx.Mode&DisableDynamicFuncCallAnalysis == 0 {
-				return dynamicFunCall(interp, target, result, args, dests)
+				return func(fr *frame) {
+					fn := fr.reg(target)
+					if closure := interp.getMakeFuncVal(fn); closure != nil && closure.interp == interp {
+						if closure.pfn.Recover == nil {
+							interp.callFunctionByStackNoRecoverWithEnv(fr, closure.pfn, result, args, closure.env, dests)
+						} else {
+							interp.callFunctionByStackWithEnv(fr, closure.pfn, result, args, closure.env, dests)
+						}
+						return
+					}
+					interp.callExternalByStack(fr, reflect.ValueOf(fn), result, args, dests)
+				}
 			}
 			return func(fr *frame) {
 				interp.callExternalByStack(fr, reflect.ValueOf(fr.reg(target)), result, args, dests)
@@ -192,9 +386,6 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 			}
 		}
 	case opField, opFieldAddr:
-		if d.Op == opFieldAddr && interp.ctx.Mode&EnableCachedReg != 0 {
-			return nil
-		}
 		aux := d.Aux.(fieldAux)
 		source := aux.RuntimeSource
 		if !d.RuntimeBound && len(d.Args) > 0 {
@@ -208,7 +399,7 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 			var v value
 			var err error
 			if d.Op == opFieldAddr {
-				v, err = fieldAddrAt(fr.reg(source), aux.Offset, aux.Field)
+				v, err = fieldAddrX(fr.reg(source), aux.Index)
 			} else {
 				v, err = fieldX(fr.reg(source), aux.Index)
 			}
@@ -317,90 +508,69 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 	case opChangeType:
 		aux := d.Aux.(conversionAux)
 		source := aux.RuntimeSource
-		if !d.RuntimeBound && len(d.Args) > 0 {
-			source = d.Args[0]
+		if !d.RuntimeBound {
+			source = -1
+			if len(d.Args) > 0 {
+				source = d.Args[0]
+			}
 		}
 		if source < 0 || aux.Source == nil || aux.Target == nil {
-			return nil
-		}
-		// ChangeType preserves representation; unsafe and interface changes use fallback.
-		if aux.Source.Kind() == reflect.Interface || aux.Target.Kind() == reflect.Interface || aux.Source.Kind() == reflect.UnsafePointer || aux.Target.Kind() == reflect.UnsafePointer {
 			return nil
 		}
 		result := d.Result
 		if d.RuntimeBound {
 			result = d.RuntimeResult
 		}
+		targetType := xtype.TypeOfType(aux.Target)
 		return func(fr *frame) {
 			v := fr.reg(source)
 			if v == nil {
-				fr.setReg(result, nil)
+				fr.setReg(result, reflect.Zero(aux.Target).Interface())
 				return
 			}
-			rv := reflect.ValueOf(v)
-			if rv.Type().ConvertibleTo(aux.Target) {
-				fr.setReg(result, rv.Convert(aux.Target).Interface())
-			} else {
-				fr.setReg(result, v)
+			switch aux.Target.Kind() {
+			case reflect.Ptr, reflect.Chan, reflect.Map, reflect.Slice, reflect.UnsafePointer:
+				fr.setReg(result, xtype.ConvertPtr(targetType, v))
+			case reflect.Func:
+				fr.setReg(result, xtype.ConvertFunc(targetType, v))
+			case reflect.Struct, reflect.Array:
+				fr.setReg(result, xtype.ConvertDirect(targetType, v))
+			default:
+				fr.setReg(result, reflect.ValueOf(v).Convert(aux.Target).Interface())
 			}
 		}
 	case opConvert:
 		aux := d.Aux.(conversionAux)
-		if aux.Source != nil && aux.Target != nil && (aux.Source.Kind() == reflect.UnsafePointer || aux.Target.Kind() == reflect.UnsafePointer) {
-			source := aux.RuntimeSource
-			if !d.RuntimeBound && len(d.Args) > 0 {
+		source := aux.RuntimeSource
+		if !d.RuntimeBound {
+			source = -1
+			if len(d.Args) > 0 {
 				source = d.Args[0]
 			}
-			if source < 0 {
-				return nil
-			}
-			result := d.Result
-			if d.RuntimeBound {
-				result = d.RuntimeResult
-			}
-			sourceKind, targetKind := aux.Source.Kind(), aux.Target.Kind()
-			targetType := xtype.TypeOfType(aux.Target)
-			return func(fr *frame) {
-				v := fr.reg(source)
-				switch {
-				case targetKind == reflect.UnsafePointer && sourceKind == reflect.Uintptr:
-					fr.setReg(result, xtype.ConvertPtr(targetType, unsafe.Pointer(uintptr(fr.uintptr(source)))))
-				case targetKind == reflect.UnsafePointer && sourceKind == reflect.Ptr:
-					fr.setReg(result, xtype.ConvertPtr(targetType, v))
-				case targetKind == reflect.Uintptr && sourceKind == reflect.UnsafePointer:
-					fr.setReg(result, xtype.MakeUintptr(targetType, uintptr(fr.pointer(source))))
-				case targetKind == reflect.Ptr && sourceKind == reflect.UnsafePointer:
-					fr.setReg(result, xtype.Make(targetType, v))
-				default:
-					return
-				}
-			}
-		}
-		source := aux.RuntimeSource
-		if !d.RuntimeBound && len(d.Args) > 0 {
-			source = d.Args[0]
 		}
 		if source < 0 || aux.Source == nil || aux.Target == nil {
-			return nil
-		}
-		if aux.Source.Kind() == reflect.UnsafePointer || aux.Target.Kind() == reflect.UnsafePointer {
 			return nil
 		}
 		result := d.Result
 		if d.RuntimeBound {
 			result = d.RuntimeResult
 		}
+		sourceKind, targetKind := aux.Source.Kind(), aux.Target.Kind()
+		targetType := xtype.TypeOfType(aux.Target)
 		return func(fr *frame) {
 			v := fr.reg(source)
-			if v == nil {
-				fr.setReg(result, nil)
-				return
+			switch {
+			case targetKind == reflect.UnsafePointer && sourceKind == reflect.Uintptr:
+				fr.setReg(result, xtype.ConvertPtr(targetType, toUnsafePointer(fr.uintptr(source))))
+			case targetKind == reflect.UnsafePointer && sourceKind == reflect.Ptr:
+				fr.setReg(result, xtype.ConvertPtr(targetType, v))
+			case targetKind == reflect.Uintptr && sourceKind == reflect.UnsafePointer:
+				fr.setReg(result, xtype.MakeUintptr(targetType, uintptr(fr.pointer(source))))
+			case targetKind == reflect.Ptr && sourceKind == reflect.UnsafePointer:
+				fr.setReg(result, xtype.Make(targetType, v))
+			default:
+				fr.setReg(result, convert(v, aux.Target))
 			}
-			rv := reflect.ValueOf(v)
-			if !rv.Type().ConvertibleTo(aux.Target) {
-				return
-			}
-			fr.setReg(result, rv.Convert(aux.Target).Interface())
 		}
 	case opSliceToArrayPointer:
 		aux := d.Aux.(conversionAux)
@@ -579,11 +749,15 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 
 // instructionGoCall builds the bytecode-only Go executor. Lowering keeps its
 // own implementation in opblock.go.
-func instructionGoCall(interp *Interp, desc callDescription) func(*frame) {
+func instructionGoCall(interp *Interp, desc callDescription, interfaceArgs ...[]bool) func(*frame) {
+	var ia []bool
+	if len(interfaceArgs) != 0 {
+		ia = interfaceArgs[0]
+	}
 	return func(fr *frame) {
 		fn, args := desc.prepare(interp, fr)
 		root := rootFrame()
-		run := interp.prepareGoCall(root, fn, args, nil)
+		run := interp.prepareGoCall(root, fn, args, ia)
 		atomic.AddInt32(&interp.goroutines, 1)
 		go func() {
 			defer atomic.AddInt32(&interp.goroutines, -1)
@@ -601,16 +775,20 @@ func instructionGoCall(interp *Interp, desc callDescription) func(*frame) {
 
 // instructionDeferCall builds the bytecode-only Defer executor. Lowering keeps
 // its own implementation in opblock.go.
-func instructionDeferCall(interp *Interp, desc callDescription, id register) func(*frame) {
+func instructionDeferCall(interp *Interp, desc callDescription, id register, interfaceArgs ...[]bool) func(*frame) {
+	var ia []bool
+	if len(interfaceArgs) != 0 {
+		ia = interfaceArgs[0]
+	}
 	if id < 0 {
 		return func(fr *frame) {
 			fn, args := desc.prepare(interp, fr)
-			fr._defer = &_defer{fn: fn, args: args, tail: fr._defer}
+			fr._defer = &_defer{fn: fn, args: args, interfaceArgs: ia, tail: fr._defer}
 		}
 	}
 	return func(fr *frame) {
 		fn, args := desc.prepare(interp, fr)
-		d := &_defer{fn: fn, args: args}
+		d := &_defer{fn: fn, args: args, interfaceArgs: ia}
 		head, ok := deferStackHead(fr.reg(id))
 		if !ok {
 			panic("range-over-func defer: missing deferstack token")
@@ -621,7 +799,7 @@ func instructionDeferCall(interp *Interp, desc callDescription, id register) fun
 
 // makeBuiltinInstruction preserves the register-based builtin fast paths.
 // Layout builtins use independently computed constants/errors; unknown names
-// return nil to retain lowering.
+// return nil so the compiler can report unsupported descriptions.
 func makeBuiltinInstruction(interp *Interp, d typedInstruction, aux builtinCallAux) func(*frame) {
 	var fn builtinFunction
 	if aux.Target != nil {
@@ -1024,9 +1202,6 @@ func makeBodyCallInstruction(interp *Interp, body *function, result register, ar
 		return nil
 	}
 	if body.Recover == nil {
-		if run := makeCallSpecializerInstr(interp, body, args, dests); run != nil {
-			return run
-		}
 		switch body.nres {
 		case 0:
 			return func(fr *frame) { interp.callFunctionByStackNoRecover0(fr, body, result, args) }
@@ -1045,3 +1220,11 @@ func makeBodyCallInstruction(interp *Interp, body *function, result register, ar
 		return func(fr *frame) { interp.callFunctionByStackN(fr, body, result, args, dests) }
 	}
 }
+
+// instructionDebugRefAux retains the source reference used by debug callbacks.
+type instructionDebugRefAux struct {
+	Ref      *ssa.DebugRef
+	Variable *types.Var
+}
+
+func (instructionDebugRefAux) instructionAux() {}

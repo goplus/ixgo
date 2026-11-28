@@ -677,6 +677,9 @@ type selectOperands struct {
 }
 
 func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *frame) {
+	if instructionSupported && interp != nil && interp.ctx.Mode&EnableInstructionExecution != 0 {
+		panic("stack lowering called with instruction execution enabled")
+	}
 	switch instr := instr.(type) {
 	case *ssa.Alloc:
 		if instr.Heap {
