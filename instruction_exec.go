@@ -83,6 +83,7 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 	case opSelect:
 		aux := d.Aux.(selectAux)
 		states := make([]selectOperands, len(aux.States))
+		// zeros and states have matching lengths and share each case's index.
 		zeros := make([]reflect.Value, len(aux.States))
 		recvZeros := make([]value, 0, len(aux.States))
 		pos := 0

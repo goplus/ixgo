@@ -5138,6 +5138,12 @@ func TestPR598SliceAssertLazyInstruction(t *testing.T) {
 							t.Fatalf("successful assertion allocated %v times", allocs)
 						}
 					}
+					if tc.name == "slice" || tc.name == "string" {
+						// The result header is boxed once; lazy diagnostics add no allocation.
+						if allocs := testing.AllocsPerRun(100, func() { execute(fr) }); allocs != 1 {
+							t.Fatalf("slice executor allocations = %v, want one result box", allocs)
+						}
+					}
 				})
 			}
 		})
@@ -5251,5 +5257,78 @@ func TestSharedMissingInitRule(t *testing.T) {
 	ordinary.Pkg = pkg
 	if skipMissingInit(i, ordinary) {
 		t.Fatal("missing ordinary function must not be omitted")
+	}
+}
+
+func TestPR598ExecutorBoundaryCoverage(t *testing.T) {
+	type ints []int
+	cases := []struct {
+		name  string
+		d     typedInstruction
+		stack []value
+		want  value
+	}{
+		{"index", typedInstruction{Op: opIndex, Result: 2, Args: []register{0, 1}, Aux: indexAux{}}, []value{[]int{3, 9}, 1, nil}, 9},
+		{"stringLookup", typedInstruction{Op: opLookup, Result: 2, Args: []register{0, 1}, Aux: lookupAux{}}, []value{"abc", 1, nil}, byte('b')},
+		{"mapLookup", typedInstruction{Op: opLookup, Result: 2, Args: []register{0, 1}, Aux: lookupAux{Element: reflect.TypeFor[int]()}}, []value{map[string]int{"x": 7}, "x", nil}, 7},
+		{"threeIndexSlice", typedInstruction{Op: opSlice, Result: 4, Args: []register{0, 1, 2, 3}, Aux: sliceAux{Low: true, High: true, Max: true, Target: reflect.TypeFor[[]int]()}}, []value{[]int{1, 2, 3}, 0, 2, 2, nil}, []int{1, 2}},
+		{"namedSlice", typedInstruction{Op: opSlice, Result: 3, Args: []register{0, 1, 2}, Aux: sliceAux{Low: true, High: true, Target: reflect.TypeFor[ints]()}}, []value{ints{1, 2, 3}, 1, 2, nil}, ints{2}},
+		{"arrayPointer", typedInstruction{Op: opSliceToArrayPointer, Result: 1, Args: []register{0}, Aux: conversionAux{Target: reflect.TypeFor[*[2]int]()}}, []value{[]int{3, 4}, nil}, &[2]int{3, 4}},
+		{"interfaceMove", typedInstruction{Op: opMakeInterface, Result: 1, Args: []register{0}, Aux: conversionAux{}}, []value{42, nil}, 42},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			run := makeInstruction(nil, tc.d)
+			fr := &frame{stack: tc.stack}
+			run(fr)
+			if !reflect.DeepEqual(fr.reg(tc.d.Result), tc.want) {
+				t.Fatalf("got %#v want %#v", fr.reg(tc.d.Result), tc.want)
+			}
+		})
+	}
+	for _, d := range []typedInstruction{
+		{Op: opDebugRef},
+		{Op: opRange, Args: []register{0}, Aux: rangeAux{Source: reflect.TypeFor[int]()}},
+		{Op: opFieldAddr, Args: []register{0}, Aux: fieldAux{}},
+		{Op: opSlice, Args: []register{-1}, Aux: sliceAux{}},
+		{Op: opChangeType, Args: []register{-1}, Aux: conversionAux{}},
+		{Op: opConvert, Args: []register{-1}, Aux: conversionAux{}},
+		{Op: opSliceToArrayPointer, Args: []register{-1}, Aux: conversionAux{}},
+		{Op: opMakeInterface, Args: []register{-1}, Aux: conversionAux{}},
+		{Op: opTypeAssert, Args: []register{-1}, Aux: typeAssertAux{}},
+	} {
+		if makeInstruction(nil, d) != nil {
+			t.Fatalf("accepted incomplete opcode %v", d.Op)
+		}
+	}
+	fr := &frame{stack: []value{tuple{1}}}
+	makeInstruction(nil, typedInstruction{Op: opExtract, Result: -1, Args: []register{0}, Aux: extractAux{Index: 0}})(fr)
+	ch := make(chan any, 1)
+	makeInstruction(&Interp{}, typedInstruction{Op: opSend, Args: []register{0, 1}, Aux: sendAux{}})(&frame{stack: []value{ch, nil}})
+	if got := <-ch; got != nil {
+		t.Fatalf("sent %#v", got)
+	}
+	var out any = 42
+	makeInstruction(nil, typedInstruction{Op: opStore, Args: []register{0, 1}, Aux: storeAux{}})(&frame{stack: []value{&out, nil}})
+	if out != nil {
+		t.Fatalf("stored %#v", out)
+	}
+}
+
+func TestPR598SelectNilSendGC(t *testing.T) {
+	const source = `package main
+ func Run() bool {
+  ch:=make(chan any,1)
+  select {case ch<-nil:default:panic("send")}
+  select {case v:=<-ch:return v==nil;default:panic("receive")}
+ }`
+	i, err := NewContext(EnableInstructionExecution|ExperimentalSupportGC|EnableGCExecutionPlan).LoadInterp("select_gc.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	got, err := i.RunFunc("Run")
+	if err != nil || got != true {
+		t.Fatalf("Run=%v,%v", got, err)
 	}
 }
