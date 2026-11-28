@@ -188,17 +188,16 @@ func (sliceAux) instructionAux() {}
 // rangeAux records map iterator types. For a string Source, Key and Element
 // are int and rune, respectively.
 type rangeAux struct {
-	Source        reflect.Type
-	Key           reflect.Type
-	Element       reflect.Type
-	RuntimeSource register
+	Source  reflect.Type
+	Key     reflect.Type
+	Element reflect.Type
 }
 
 func (rangeAux) instructionAux() {}
 
 // typeAssertAux records source/target types and the comma-ok result shape.
-// Reflect types are the in-memory representation; a portable type table remains
-// future work. These descriptions retain no SSA instruction or value.
+// AssertedType preserves the type-checker type needed for shared assertion
+// diagnostics; the other fields are the runtime representation.
 type typeAssertAux struct {
 	AssertedType  types.Type
 	Source        reflect.Type
@@ -222,9 +221,8 @@ func (conversionAux) instructionAux() {}
 // creationAux.Target is the produced type (a pointer for Alloc). Heap is only
 // meaningful for Alloc; sizes and capacities retain their SSA order in Args.
 type creationAux struct {
-	Target      reflect.Type
-	Heap        bool
-	RuntimeArgs []register
+	Target reflect.Type
+	Heap   bool
 }
 
 func (creationAux) instructionAux() {}
@@ -238,10 +236,8 @@ type selectStateAux struct {
 
 // selectAux preserves case order; Blocking is false when a default arm exists.
 type selectAux struct {
-	States        []selectStateAux
-	Blocking      bool
-	RuntimeArgs   []register
-	RuntimeResult register
+	States   []selectStateAux
+	Blocking bool
 }
 
 func (selectAux) instructionAux() {}
@@ -496,9 +492,8 @@ func describeCallResults(pfn *function, instr ssa.Value) []register {
 	}
 	// Direct adapters write one complete result value through DirectCallContext.
 	// Keep their tuple register even when all Extract values have destinations.
-	if fn, ok := call.Call.Value.(*ssa.Function); ok &&
-		directCallTypesCompatible(pfn.Interp, fn.Signature) {
-		if _, ok := resolveStaticDirectCall(pfn.Interp, fn); ok {
+	if fn, ok := call.Call.Value.(*ssa.Function); ok {
+		if _, ok := staticDirectAdapter(pfn.Interp, fn); ok {
 			return nil
 		}
 	}
@@ -961,10 +956,8 @@ func describeCall(pfn *function, call *ssa.CallCommon, dests []register, deferSt
 		return base
 	}
 	fn := call.Value.(*ssa.Function)
-	if directCallTypesCompatible(pfn.Interp, fn.Signature) {
-		if adapter, ok := resolveStaticDirectCall(pfn.Interp, fn); ok {
-			return directCallAux{callAux: base, Adapter: adapter}
-		}
+	if adapter, ok := staticDirectAdapter(pfn.Interp, fn); ok {
+		return directCallAux{callAux: base, Adapter: adapter}
 	}
 
 	if fn.Blocks != nil {

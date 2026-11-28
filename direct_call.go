@@ -183,11 +183,15 @@ func registeredDirectCallMethod(pkg *Package, selector string) (reflect.Type, st
 	return receiver, method, true
 }
 
-func makeStaticDirectCallInstr(interp *Interp, fn *ssa.Function, result register, args []register) func(*frame) {
+func staticDirectAdapter(interp *Interp, fn *ssa.Function) (DirectCallAdapter, bool) {
 	if !directCallTypesCompatible(interp, fn.Signature) {
-		return nil
+		return nil, false
 	}
-	adapter, ok := resolveStaticDirectCall(interp, fn)
+	return resolveStaticDirectCall(interp, fn)
+}
+
+func makeStaticDirectCallInstr(interp *Interp, fn *ssa.Function, result register, args []register) func(*frame) {
+	adapter, ok := staticDirectAdapter(interp, fn)
 	if !ok {
 		return nil
 	}
