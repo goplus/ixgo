@@ -472,6 +472,7 @@ func swap(n int) int {
 						for _, result := range aux.Results {
 							if result != original {
 								aux.Edges[0][j] = result
+								aux.RuntimeEdges[0][j] = result
 								break
 							}
 						}
@@ -482,6 +483,9 @@ func swap(n int) int {
 					}
 					p.Instrs[pc](fr)
 					aux.Edges[0][j] = original
+					if descriptions&EnableInstructionExecution != 0 {
+						aux.RuntimeEdges[0][j] = original
+					}
 					for k, result := range aux.Results {
 						if !reflect.DeepEqual(fr.reg(result), want[k]) {
 							t.Fatalf("parallel assignment %d: got %v, want %v", k, fr.reg(result), want[k])
@@ -2828,6 +2832,47 @@ func TestDescriptionPreservesDirectCall(t *testing.T) {
 	}
 }
 
+func TestDescriptionDirectCallNamedTypeFallback(t *testing.T) {
+	const path = "example.com/instructiondirectnamed"
+	RegisterDirectCalls(path, map[string]DirectCallAdapter{
+		"Take": func(c DirectCallContext) { c.SetResult(42) },
+	})
+	const source = `package instructiondirectnamed
+
+type MyInt int
+
+func Take(v MyInt) int { return 7 }
+func Run(x int) int { return Take(MyInt(x)) }
+`
+	for _, mode := range []Mode{EnableInstructionDescriptions, EnableInstructionDescriptions | EnableInstructionExecution} {
+		ctx := NewContext(DisableMemo | mode)
+		file, err := parser.ParseFile(ctx.FileSet, "direct_named.go", source, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pkg, err := ctx.LoadAstFile(path, file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		i, err := NewInterp(ctx, pkg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := i.RunFunc("Run", 1)
+		if err != nil || got != 7 {
+			t.Fatalf("mode %v = %v, %v", mode, got, err)
+		}
+		for _, p := range i.funcs {
+			for _, d := range p.Code {
+				if _, direct := d.Aux.(directCallAux); direct {
+					t.Fatal("incompatible adapter selected")
+				}
+			}
+		}
+		i.UnsafeRelease()
+	}
+}
+
 func TestDescriptionDirectCallResults(t *testing.T) {
 	const path = "example.com/instructiondirectresults"
 	RegisterDirectCalls(path, map[string]DirectCallAdapter{
@@ -4271,5 +4316,110 @@ func Run() int {
 				t.Fatalf("Run=%v,%v want 42", got, err)
 			}
 		})
+	}
+}
+
+func TestDescriptionReviewedExecution(t *testing.T) {
+	const source = `package main
+
+func pointer(s []int) *[2]int { return (*[2]int)(s) }
+func zero(s []int) *[0]int { return (*[0]int)(s) }
+func assertString(x any) (string, bool) { v, ok := x.(string); return v, ok }
+func assertInt(x any) (int, bool) { v, ok := x.(int); return v, ok }
+func mustString(x any) string { return x.(string) }
+func number(x int) int64 { return int64(x) }
+func boxed(x int) any { return x }
+func sliced(s []int, l, h int) []int { return s[l:h] }
+`
+	for _, mode := range []Mode{0, EnableInstructionExecution, EnableInstructionExecution | EnableCachedReg, EnableInstructionExecution | ExperimentalSupportGC} {
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
+			i, err := NewContext(DisableMemo|EnableInstructionDescriptions|mode).LoadInterp("reviewed.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			if mode&EnableInstructionExecution != 0 {
+				seen := map[instructionOpcode]bool{}
+				for _, p := range i.funcs {
+					for _, d := range p.Code {
+						if d.Op == opTypeAssert || d.Op == opSliceToArrayPointer {
+							if !d.RuntimeBound || makeInstruction(i, d) == nil {
+								t.Fatalf("opcode %d has no bound executor", d.Op)
+							}
+							seen[d.Op] = true
+						}
+					}
+				}
+				if !seen[opTypeAssert] || !seen[opSliceToArrayPointer] {
+					t.Fatal("missing reviewed execution opcodes")
+				}
+			}
+			for _, tc := range []struct {
+				name string
+				args []value
+				want value
+			}{
+				{"assertString", []value{nil}, tuple{"", false}},
+				{"assertInt", []value{nil}, tuple{0, false}},
+				{"assertString", []value{"ok"}, tuple{"ok", true}},
+				{"assertString", []value{1}, tuple{"", false}},
+				{"number", []value{7}, int64(7)},
+				{"boxed", []value{7}, 7},
+				{"sliced", []value{[]int{1, 2, 3}, 1, 3}, []int{2, 3}},
+			} {
+				got, err := i.RunFunc(tc.name, tc.args...)
+				if err != nil || !reflect.DeepEqual(got, tc.want) {
+					t.Fatalf("%s = %#v, %v; want %#v", tc.name, got, err, tc.want)
+				}
+			}
+			for _, s := range [][]int{nil, {}, {1}} {
+				if _, err := i.RunFunc("pointer", s); err == nil || !strings.Contains(err.Error(), "cannot convert slice") {
+					t.Fatalf("pointer(%v): %v", s, err)
+				}
+			}
+			s := []int{1, 2, 3}
+			got, err := i.RunFunc("pointer", s)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got.(*[2]int)[1] = 9
+			if s[1] != 9 {
+				t.Fatal("array pointer lost backing storage")
+			}
+			got, err = i.RunFunc("zero", []int(nil))
+			if err != nil || got != (*[0]int)(nil) {
+				t.Fatalf("zero nil = %v, %v", got, err)
+			}
+			got, err = i.RunFunc("zero", []int{})
+			if err != nil || got.(*[0]int) == nil {
+				t.Fatalf("zero empty = %v, %v", got, err)
+			}
+			if _, err := i.RunFunc("mustString", nil); err == nil {
+				t.Fatal("nil assertion succeeded")
+			}
+			if _, err := i.RunFunc("mustString", 1); err == nil {
+				t.Fatal("invalid assertion succeeded")
+			}
+		})
+	}
+}
+
+func TestInstructionRuntimeRegisterSelection(t *testing.T) {
+	for _, bound := range []bool{false, true} {
+		d := typedInstruction{Op: opConvert, Result: 4, Args: []register{2}, Aux: conversionAux{Source: reflect.TypeOf(0), Target: reflect.TypeOf(int64(0))}}
+		if bound {
+			bindRuntimeRegisters(&d)
+			d.Result, d.Args = 0, []register{0}
+		}
+		fr := &frame{stack: []value{99, nil, 7, nil, nil}}
+		makeInstruction(nil, d)(fr)
+		if fr.stack[4] != int64(7) || fr.stack[0] != 99 {
+			t.Fatalf("bound=%t: registers=%v", bound, fr.stack)
+		}
+	}
+	p := &function{functionCompilation: functionCompilation{descriptionIndex: map[ssa.Value]register{&ssa.Parameter{}: 0}}}
+	p.UnsafeRelease()
+	if p.descriptionIndex != nil {
+		t.Fatal("UnsafeRelease retained description registers")
 	}
 }

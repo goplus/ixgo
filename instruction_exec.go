@@ -192,6 +192,9 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 			}
 		}
 	case opField, opFieldAddr:
+		if d.Op == opFieldAddr && interp.ctx.Mode&EnableCachedReg != 0 {
+			return nil
+		}
 		aux := d.Aux.(fieldAux)
 		source := aux.RuntimeSource
 		if !d.RuntimeBound && len(d.Args) > 0 {
@@ -273,8 +276,23 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 	case opSlice:
 		aux := d.Aux.(sliceAux)
 		x, low, high, max := aux.RuntimeSource, aux.RuntimeLow, aux.RuntimeHigh, aux.RuntimeMax
-		if x < 0 && len(d.Args) > 0 {
-			x = d.Args[0]
+		if !d.RuntimeBound {
+			x, low, high, max = -1, -1, -1, -1
+			if len(d.Args) > 0 {
+				x = d.Args[0]
+			}
+			pos := 1
+			if aux.Low && pos < len(d.Args) {
+				low = d.Args[pos]
+				pos++
+			}
+			if aux.High && pos < len(d.Args) {
+				high = d.Args[pos]
+				pos++
+			}
+			if aux.Max && pos < len(d.Args) {
+				max = d.Args[pos]
+			}
 		}
 		// Static slice bounds still require the stack lowering path until
 		// their constant values have an explicit bytecode representation.
@@ -282,12 +300,13 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 			return nil
 		}
 		result := d.Result
-		if d.RuntimeResult >= 0 {
+		if d.RuntimeBound {
 			result = d.RuntimeResult
 		}
+		isNamed := aux.Target.Kind() == reflect.Slice && aux.Target != reflect.SliceOf(aux.Target.Elem())
 		return func(fr *frame) {
 			v := slice(fr, fr.pfn.InstrForPC(int(fr.ipc)-1), sliceOperands{low: aux.Low, high: aux.High, max: aux.Max}, aux.MakeSliceCheck, x, high, low, max)
-			if aux.Target.Kind() == reflect.Slice && aux.Target != reflect.SliceOf(aux.Target.Elem()) {
+			if isNamed {
 				v = v.Convert(aux.Target)
 			}
 			fr.setReg(result, v.Interface())
@@ -295,7 +314,7 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 	case opChangeType:
 		aux := d.Aux.(conversionAux)
 		source := aux.RuntimeSource
-		if source < 0 && len(d.Args) > 0 {
+		if !d.RuntimeBound && len(d.Args) > 0 {
 			source = d.Args[0]
 		}
 		if source < 0 || aux.Source == nil || aux.Target == nil {
@@ -306,7 +325,7 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 			return nil
 		}
 		result := d.Result
-		if d.RuntimeResult >= 0 {
+		if d.RuntimeBound {
 			result = d.RuntimeResult
 		}
 		return func(fr *frame) {
@@ -326,35 +345,36 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 		aux := d.Aux.(conversionAux)
 		if aux.Source != nil && aux.Target != nil && (aux.Source.Kind() == reflect.UnsafePointer || aux.Target.Kind() == reflect.UnsafePointer) {
 			source := aux.RuntimeSource
-			if source < 0 && len(d.Args) > 0 {
+			if !d.RuntimeBound && len(d.Args) > 0 {
 				source = d.Args[0]
 			}
 			if source < 0 {
 				return nil
 			}
 			result := d.Result
-			if d.RuntimeResult >= 0 {
+			if d.RuntimeBound {
 				result = d.RuntimeResult
 			}
 			sourceKind, targetKind := aux.Source.Kind(), aux.Target.Kind()
+			targetType := xtype.TypeOfType(aux.Target)
 			return func(fr *frame) {
 				v := fr.reg(source)
 				switch {
 				case targetKind == reflect.UnsafePointer && sourceKind == reflect.Uintptr:
-					fr.setReg(result, xtype.ConvertPtr(xtype.TypeOfType(aux.Target), unsafe.Pointer(uintptr(fr.uintptr(source)))))
+					fr.setReg(result, xtype.ConvertPtr(targetType, unsafe.Pointer(uintptr(fr.uintptr(source)))))
 				case targetKind == reflect.UnsafePointer && sourceKind == reflect.Ptr:
-					fr.setReg(result, xtype.ConvertPtr(xtype.TypeOfType(aux.Target), v))
+					fr.setReg(result, xtype.ConvertPtr(targetType, v))
 				case targetKind == reflect.Uintptr && sourceKind == reflect.UnsafePointer:
-					fr.setReg(result, xtype.MakeUintptr(xtype.TypeOfType(aux.Target), uintptr(fr.pointer(source))))
+					fr.setReg(result, xtype.MakeUintptr(targetType, uintptr(fr.pointer(source))))
 				case targetKind == reflect.Ptr && sourceKind == reflect.UnsafePointer:
-					fr.setReg(result, xtype.Make(xtype.TypeOfType(aux.Target), v))
+					fr.setReg(result, xtype.Make(targetType, v))
 				default:
 					return
 				}
 			}
 		}
 		source := aux.RuntimeSource
-		if source < 0 && len(d.Args) > 0 {
+		if !d.RuntimeBound && len(d.Args) > 0 {
 			source = d.Args[0]
 		}
 		if source < 0 || aux.Source == nil || aux.Target == nil {
@@ -364,7 +384,7 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 			return nil
 		}
 		result := d.Result
-		if d.RuntimeResult >= 0 {
+		if d.RuntimeBound {
 			result = d.RuntimeResult
 		}
 		return func(fr *frame) {
@@ -382,103 +402,53 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 	case opSliceToArrayPointer:
 		aux := d.Aux.(conversionAux)
 		source := aux.RuntimeSource
-		if source < 0 && len(d.Args) > 0 {
+		if !d.RuntimeBound && len(d.Args) > 0 {
 			source = d.Args[0]
 		}
 		if source < 0 || aux.Target == nil || aux.Target.Kind() != reflect.Pointer || aux.Target.Elem().Kind() != reflect.Array {
 			return nil
 		}
 		result := d.Result
-		if d.RuntimeResult >= 0 {
+		if d.RuntimeBound {
 			result = d.RuntimeResult
 		}
 		return func(fr *frame) {
-			v := fr.reg(source)
-			if v == nil {
-				fr.setReg(result, reflect.Zero(aux.Target).Interface())
-				return
-			}
-			rv := reflect.ValueOf(v)
-			if rv.Kind() != reflect.Slice || rv.Type().Elem() != aux.Target.Elem().Elem() {
-				return
-			}
-			if rv.IsNil() {
-				return
-			}
+			rv := reflect.ValueOf(fr.reg(source))
 			if rv.Len() < aux.Target.Elem().Len() {
-				return
+				panic(fr.runtimeError(fr.pfn.InstrForPC(int(fr.ipc)-1), fmt.Sprintf(errSliceToArrayPointer, rv.Len(), aux.Target.Elem().Len())))
 			}
-			arrayType := aux.Target.Elem()
-			ptr := reflect.NewAt(arrayType, unsafe.Pointer(rv.Pointer()))
-			fr.setReg(result, ptr.Interface())
+			fr.setReg(result, rv.Convert(aux.Target).Interface())
 		}
 	case opChangeInterface, opMakeInterface:
 		aux := d.Aux.(conversionAux)
 		source := aux.RuntimeSource
-		if source < 0 && len(d.Args) > 0 {
+		if !d.RuntimeBound && len(d.Args) > 0 {
 			source = d.Args[0]
 		}
 		if source < 0 {
 			return nil
 		}
 		result := d.Result
-		if d.RuntimeResult >= 0 {
+		if d.RuntimeBound {
 			result = d.RuntimeResult
 		}
-		return func(fr *frame) {
-			v := fr.reg(source)
-			if v == nil {
-				fr.setReg(result, nil)
-				return
-			}
-			rv := reflect.ValueOf(v)
-			if aux.Target.Kind() == reflect.Interface {
-				if rv.Type().Implements(aux.Target) {
-					fr.setReg(result, v)
-					return
-				}
-				return
-			}
-			if rv.Type().AssignableTo(aux.Target) {
-				fr.setReg(result, v)
-			}
-		}
+		return func(fr *frame) { fr.setReg(result, fr.reg(source)) }
 	case opTypeAssert:
 		aux := d.Aux.(typeAssertAux)
 		source := aux.RuntimeSource
-		if source < 0 && len(d.Args) > 0 {
+		if !d.RuntimeBound && len(d.Args) > 0 {
 			source = d.Args[0]
 		}
 		if source < 0 || aux.Target == nil {
 			return nil
 		}
 		result := d.Result
-		if d.RuntimeResult >= 0 {
+		if d.RuntimeBound {
 			result = d.RuntimeResult
 		}
+		operands := typeAssertOperands{typ: aux.Target, sourceType: aux.Source, assertedType: aux.AssertedType, commaOk: aux.CommaOk}
 		return func(fr *frame) {
-			v := fr.reg(source)
-			if v == nil {
-				if aux.CommaOk {
-					fr.setReg(result, tuple{nil, false})
-					return
-				}
-				panic(fr.runtimeError(fr.pfn.InstrForPC(int(fr.ipc)-1), "interface conversion: nil is not "+aux.Target.String()))
-			}
-			rv := reflect.ValueOf(v)
-			if rv.Type().AssignableTo(aux.Target) {
-				if aux.CommaOk {
-					fr.setReg(result, tuple{v, true})
-				} else {
-					fr.setReg(result, v)
-				}
-				return
-			}
-			if aux.CommaOk {
-				fr.setReg(result, tuple{reflect.Zero(aux.Target).Interface(), false})
-				return
-			}
-			panic(fr.runtimeError(fr.pfn.InstrForPC(int(fr.ipc)-1), "interface conversion: "+rv.Type().String()+" is not "+aux.Target.String()))
+			fr.setReg(result, typeAssert(fr, fr.pfn.InstrForPC(int(fr.ipc)-1), operands, fr.reg(source)))
 		}
 	case opReturn:
 		aux := d.Aux.(returnAux)

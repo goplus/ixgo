@@ -171,7 +171,7 @@ type functionCompilation struct {
 	needInject      bool
 	elidedTuples    []register
 	elidedExtract   map[*ssa.Extract]struct{}
-	// descriptionIndex is the bytecode register plan.
+	// descriptionIndex caches registers when instruction metadata is enabled.
 	descriptionIndex map[ssa.Value]register
 }
 
@@ -196,6 +196,7 @@ func (p *function) UnsafeRelease() {
 	p.Fn = nil
 	p.pool = nil
 	p.index = nil
+	p.descriptionIndex = nil
 	p.cacheRegs = nil
 	p.gcPlan = nil
 	p.gcRegs = nil
@@ -1555,7 +1556,7 @@ func makeCallInstr(pfn *function, interp *Interp, instr ssa.Value, call *ssa.Cal
 		}
 	case *ssa.Function:
 		// "static func/method call"
-		if run := makeStaticDirectCallInstr(pfn, interp, fn, ir, ia); run != nil {
+		if run := makeStaticDirectCallInstr(interp, fn, ir, ia); run != nil {
 			return run
 		}
 		if fn.Blocks == nil {

@@ -200,6 +200,7 @@ func (rangeAux) instructionAux() {}
 // Reflect types are the in-memory representation; a portable type table remains
 // future work. These descriptions retain no SSA instruction or value.
 type typeAssertAux struct {
+	AssertedType  types.Type
 	Source        reflect.Type
 	Target        reflect.Type
 	CommaOk       bool
@@ -349,7 +350,7 @@ type callAux struct {
 }
 
 // callRuntimeRegisters maps logical call registers to the frame slots used by
-// the current runtime. It is filled when an instruction is selected for execution.
+// the current runtime. It is filled when runtime metadata is bound.
 type callRuntimeRegisters struct {
 	DeferStack     register
 	Target         register
@@ -357,7 +358,7 @@ type callRuntimeRegisters struct {
 	ExtractResults []register
 }
 
-// directCallAux retains the adapter selected by lowering.
+// directCallAux records the independently resolved, type-compatible adapter.
 type directCallAux struct {
 	callAux
 	Adapter DirectCallAdapter
@@ -464,22 +465,6 @@ func descriptionRegister(pfn *function, v ssa.Value) register {
 	return reg
 }
 
-// planDescriptionRegisters snapshots the active frame allocation for bytecode
-// metadata. A later runtime frame adapter can replace this physical mapping.
-func planDescriptionRegisters(pfn *function, _ *ssa.Function) {
-	if pfn.descriptionIndex == nil {
-		pfn.descriptionIndex = make(map[ssa.Value]register, len(pfn.index))
-	}
-	for value := range pfn.descriptionIndex {
-		if _, exists := pfn.index[value]; !exists {
-			delete(pfn.descriptionIndex, value)
-		}
-	}
-	for value, encoded := range pfn.index {
-		pfn.descriptionIndex[value] = register(encoded & 0xffffff)
-	}
-}
-
 // descriptionOperand reads metadata without changing the register map or the
 // stack template. Static operands are resolved from SSA values directly.
 func descriptionOperand(pfn *function, v ssa.Value) (kind, value) {
@@ -540,9 +525,10 @@ func describeCallResults(pfn *function, instr ssa.Value) []register {
 	return nil
 }
 
-func bindRuntimeRegisters(pfn *function, d *typedInstruction) {
+func bindRuntimeRegisters(d *typedInstruction) {
 	d.RuntimeResult = d.Result
 	d.RuntimeArgs = append([]register(nil), d.Args...)
+	d.RuntimeBound = true
 	if phi, ok := d.Aux.(phiAux); ok {
 		phi.RuntimeResults = append([]register(nil), phi.Results...)
 		phi.RuntimeEdges = make([][]register, len(phi.Edges))
@@ -599,19 +585,6 @@ func bindRuntimeRegisters(pfn *function, d *typedInstruction) {
 		}
 		d.Aux = slice
 	}
-	if create, ok := d.Aux.(creationAux); ok {
-		create.RuntimeArgs = append([]register(nil), d.Args...)
-		d.Aux = create
-	}
-	if selectAux, ok := d.Aux.(selectAux); ok {
-		selectAux.RuntimeArgs = append([]register(nil), d.Args...)
-		selectAux.RuntimeResult = d.Result
-		d.Aux = selectAux
-	}
-	if rangeAux, ok := d.Aux.(rangeAux); ok && len(d.Args) > 0 {
-		rangeAux.RuntimeSource = d.Args[0]
-		d.Aux = rangeAux
-	}
 	if assert, ok := d.Aux.(typeAssertAux); ok && len(d.Args) > 0 {
 		assert.RuntimeSource = d.Args[0]
 		d.Aux = assert
@@ -627,7 +600,6 @@ func bindRuntimeRegisters(pfn *function, d *typedInstruction) {
 			Arguments:      append([]register(nil), aux.Arguments...),
 			ExtractResults: append([]register(nil), aux.ExtractResults...),
 		}
-		d.RuntimeBound = true
 		return aux
 	}
 	switch aux := d.Aux.(type) {
@@ -846,9 +818,10 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 	case *ssa.TypeAssert:
 		d.Op = opTypeAssert
 		d.Aux = typeAssertAux{
-			Source:  pfn.Interp.preToType(v.X.Type()),
-			Target:  pfn.Interp.preToType(v.AssertedType),
-			CommaOk: v.CommaOk,
+			AssertedType: v.AssertedType,
+			Source:       pfn.Interp.preToType(v.X.Type()),
+			Target:       pfn.Interp.preToType(v.AssertedType),
+			CommaOk:      v.CommaOk,
 		}
 	case *ssa.Extract:
 		d.Op = opExtract
@@ -980,8 +953,10 @@ func describeCall(pfn *function, call *ssa.CallCommon, dests []register, deferSt
 		return base
 	}
 	fn := call.Value.(*ssa.Function)
-	if adapter, ok := resolveStaticDirectCall(pfn.Interp, fn); ok {
-		return directCallAux{callAux: base, Adapter: adapter}
+	if directCallTypesCompatible(pfn.Interp, fn.Signature) {
+		if adapter, ok := resolveStaticDirectCall(pfn.Interp, fn); ok {
+			return directCallAux{callAux: base, Adapter: adapter}
+		}
 	}
 
 	if fn.Blocks != nil {

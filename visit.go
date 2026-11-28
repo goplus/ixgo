@@ -347,15 +347,14 @@ func (visit *visitor) function(fn *ssa.Function) {
 				continue
 			}
 			if instructionSupported && visit.intp.ctx.Mode&(EnableInstructionDescriptions|EnableInstructionExecution) != 0 {
-				planDescriptionRegisters(pfn, fn)
 				var dests []register
 				if call, ok := instr.(ssa.Value); ok {
 					dests = describeCallResults(pfn, call)
 				}
 				descriptions[index] = describeInstruction(pfn, instr, instr.Operands(buf[:0]), dests)
-				bindRuntimeRegisters(pfn, &descriptions[index])
+				bindRuntimeRegisters(&descriptions[index])
 				if visit.intp.ctx.Mode&EnableInstructionExecution != 0 {
-					// Keep logical metadata in Code and map a private copy to runtime slots.
+					// Use the bound runtime registers for supported instructions.
 					if described := makeInstruction(visit.intp, descriptions[index]); described != nil {
 						ifn = described
 					}
@@ -495,8 +494,6 @@ func (visit *visitor) function(fn *ssa.Function) {
 	visit.base += len(pfn.ssaInstrs) + 2
 	pfn.initPool()
 	pfn.finishMetadata()
-	if instructionSupported && visit.intp.ctx.Mode&(EnableInstructionDescriptions|EnableInstructionExecution) != 0 {
-	}
 }
 
 func loc(fset *token.FileSet, pos token.Pos) string {

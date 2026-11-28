@@ -11,8 +11,7 @@ const instructionSupported = false
 type typedInstruction struct{}
 
 func describeCallResults(*function, ssa.Value) []register { return nil }
-func planDescriptionRegisters(*function, *ssa.Function)   {}
-func bindRuntimeRegisters(*function, *typedInstruction)   {}
+func bindRuntimeRegisters(*typedInstruction)              {}
 
 func describeInstruction(*function, ssa.Instruction, []*ssa.Value, []register) typedInstruction {
 	return typedInstruction{}
