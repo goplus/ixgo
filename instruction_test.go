@@ -4319,6 +4319,45 @@ func Run() int {
 	}
 }
 
+func TestDescriptionDirectCallTupleLoop(t *testing.T) {
+	const path = "example.com/instructiondirecttupleloop"
+	RegisterDirectCalls(path, map[string]DirectCallAdapter{
+		"Pair": func(c DirectCallContext) { c.SetResult(tuple{1, 2}) },
+	})
+	const source = `package instructiondirecttupleloop
+
+func Pair() (int, int) { return 0, 0 }
+func Run(n int) int {
+	total := 0
+	for i := 0; i < n; i++ {
+		a, b := Pair()
+		total += a + b
+	}
+	return total
+}
+`
+	for _, mode := range []Mode{EnableInstructionDescriptions, EnableInstructionDescriptions | EnableInstructionExecution} {
+		ctx := NewContext(DisableMemo | mode)
+		file, err := parser.ParseFile(ctx.FileSet, "direct_tuple_loop.go", source, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pkg, err := ctx.LoadAstFile(path, file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		i, err := NewInterp(ctx, pkg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := i.RunFunc("Run", 3)
+		if err != nil || got != 9 {
+			t.Fatalf("mode %v = %v, %v; want 9", mode, got, err)
+		}
+		i.UnsafeRelease()
+	}
+}
+
 func TestDescriptionReviewedExecution(t *testing.T) {
 	const source = `package main
 
@@ -4401,6 +4440,26 @@ func sliced(s []int, l, h int) []int { return s[l:h] }
 				t.Fatal("invalid assertion succeeded")
 			}
 		})
+	}
+}
+
+func TestDescriptionNilArrayPointerIndex(t *testing.T) {
+	const source = `package main
+
+func index(p *[2]int) int { return p[0] }
+func indexAddr(p *[2]int) *int { return &p[0] }
+`
+	for _, mode := range []Mode{0, EnableInstructionExecution} {
+		i, err := NewContext(DisableMemo|EnableInstructionDescriptions|mode).LoadInterp("nil_index.go", source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, name := range []string{"index", "indexAddr"} {
+			if _, err := i.RunFunc(name, (*[2]int)(nil)); err == nil || !strings.Contains(err.Error(), "invalid memory address or nil pointer dereference") {
+				t.Fatalf("mode %v %s: %v", mode, name, err)
+			}
+		}
+		i.UnsafeRelease()
 	}
 }
 

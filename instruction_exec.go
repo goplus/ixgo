@@ -232,6 +232,9 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 			if v.Kind() == reflect.Ptr {
 				v = v.Elem()
 			}
+			if !v.IsValid() {
+				panic(fr.runtimeError(fr.pfn.InstrForPC(int(fr.ipc)-1), "invalid memory address or nil pointer dereference"))
+			}
 			idx := asBound(fr.reg(index))
 			if !idx.ok || idx.n >= v.Len() {
 				panicIndexBound(fr, fr.pfn.InstrForPC(int(fr.ipc)-1), idx, v.Len())

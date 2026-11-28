@@ -494,6 +494,14 @@ func describeCallResults(pfn *function, instr ssa.Value) []register {
 	if !ok {
 		return nil
 	}
+	// Direct adapters write one complete result value through DirectCallContext.
+	// Keep their tuple register even when all Extract values have destinations.
+	if fn, ok := call.Call.Value.(*ssa.Function); ok &&
+		directCallTypesCompatible(pfn.Interp, fn.Signature) {
+		if _, ok := resolveStaticDirectCall(pfn.Interp, fn); ok {
+			return nil
+		}
+	}
 	nres := callResultCount(&call.Call)
 	if nres <= 1 {
 		return nil
