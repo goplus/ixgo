@@ -136,6 +136,8 @@ func (nextAux) instructionAux() {}
 // Offset describe the field within the struct, after dereferencing Source;
 // Offset is relative to the start of that struct.
 type fieldAux struct {
+	Cached        bool
+	ReceiverCache register
 	Index         int
 	Source        reflect.Type
 	Field         reflect.Type
@@ -320,7 +322,7 @@ const (
 // signature.
 type callSiteAux struct {
 	// DeferStack is the enclosing defer-stack register, or -1 for the current
-	// frame or an unavailable token. An unavailable token retains lowering.
+	// frame or an unavailable token. Execution rejects unavailable tokens.
 	DeferStack register
 	Kind       callKind
 	Signature  reflect.Type
@@ -336,8 +338,8 @@ func (callSiteAux) instructionAux() {}
 
 // callAux adds result placement to common call metadata. A nil ExtractResults
 // uses the ordinary result register; a -1 entry denotes an unused result.
-// Unresolved targets retain this base auxiliary data.
-// Missing defer-stack or closure-binding registers also retain the base aux.
+// Unresolved targets and missing defer-stack or closure-binding registers retain
+// this base auxiliary data for diagnostics; instruction execution rejects it.
 // Dynamic calls with a target register use dynamicCallAux.
 type callAux struct {
 	callSiteAux
@@ -362,7 +364,7 @@ type directCallAux struct {
 
 func (directCallAux) instructionAux() {}
 
-// externalCallAux retains the callee register value allocated by lowering.
+// externalCallAux records the resolved external callee value.
 type externalCallAux struct {
 	callAux
 	External reflect.Value
@@ -414,7 +416,7 @@ func (builtinCallAux) instructionAux() {}
 
 func (dynamicCallAux) instructionAux() {}
 
-// bodyCallAux retains the interpreted body loaded by lowering.
+// bodyCallAux records the resolved interpreted body.
 type bodyCallAux struct {
 	callAux
 	Body *function
@@ -759,7 +761,12 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 		d.Aux = describeField(pfn, v.X, v.Field)
 	case *ssa.FieldAddr:
 		d.Op = opFieldAddr
-		d.Aux = describeField(pfn, v.X, v.Field)
+		aux := describeField(pfn, v.X, v.Field)
+		if pfn.Interp.ctx.Mode&EnableInstructionExecution != 0 && pfn.Interp.ctx.Mode&EnableCachedReg != 0 {
+			aux.Cached = true
+			aux.ReceiverCache = pfn.newCacheReg()
+		}
+		d.Aux = aux
 	case *ssa.Lookup:
 		d.Op = opLookup
 		source := pfn.Interp.preToType(v.X.Type())
@@ -895,7 +902,7 @@ func describeCall(pfn *function, call *ssa.CallCommon, dests []register, deferSt
 	if deferStack != nil {
 		base.DeferStack = descriptionRegister(pfn, deferStack)
 		if base.DeferStack < 0 {
-			// Keep lowering when the enclosing defer-stack token is unavailable.
+			// Preserve incomplete metadata for diagnostics; execution rejects it.
 			return base
 		}
 	}

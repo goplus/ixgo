@@ -395,14 +395,34 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 		if d.RuntimeBound {
 			result = d.RuntimeResult
 		}
-		return func(fr *frame) {
-			var v value
-			var err error
-			if d.Op == opFieldAddr {
-				v, err = fieldAddrX(fr.reg(source), aux.Index)
-			} else {
-				v, err = fieldX(fr.reg(source), aux.Index)
+		if d.Op == opFieldAddr {
+			if aux.Field == nil {
+				return nil
 			}
+			if aux.Cached {
+				return func(fr *frame) {
+					receiver := fr.reg(source)
+					if fr.reg(result) != nil && fr.reg(aux.ReceiverCache) == receiver {
+						return
+					}
+					v, err := fieldAddrAt(receiver, aux.Offset, aux.Field)
+					if err != nil {
+						panic(fr.runtimeError(fr.pfn.InstrForPC(int(fr.ipc)-1), err.Error()))
+					}
+					fr.setReg(aux.ReceiverCache, receiver)
+					fr.setReg(result, v)
+				}
+			}
+			return func(fr *frame) {
+				v, err := fieldAddrAt(fr.reg(source), aux.Offset, aux.Field)
+				if err != nil {
+					panic(fr.runtimeError(fr.pfn.InstrForPC(int(fr.ipc)-1), err.Error()))
+				}
+				fr.setReg(result, v)
+			}
+		}
+		return func(fr *frame) {
+			v, err := fieldX(fr.reg(source), aux.Index)
 			if err != nil {
 				panic(fr.runtimeError(fr.pfn.InstrForPC(int(fr.ipc)-1), err.Error()))
 			}
@@ -488,8 +508,8 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 				max = d.Args[pos]
 			}
 		}
-		// Static slice bounds still require the stack lowering path until
-		// their constant values have an explicit bytecode representation.
+		// The planner reserves slots for all supplied slice operands. Missing
+		// slots indicate incomplete metadata, which execution compilation rejects.
 		if x < 0 || (aux.Low && low < 0) || (aux.High && high < 0) || (aux.Max && max < 0) {
 			return nil
 		}
@@ -522,10 +542,11 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 			result = d.RuntimeResult
 		}
 		targetType := xtype.TypeOfType(aux.Target)
+		zero := reflect.Zero(aux.Target).Interface()
 		return func(fr *frame) {
 			v := fr.reg(source)
 			if v == nil {
-				fr.setReg(result, reflect.Zero(aux.Target).Interface())
+				fr.setReg(result, zero)
 				return
 			}
 			switch aux.Target.Kind() {
@@ -1182,7 +1203,24 @@ func makeInvokeInstruction(interp *Interp, d typedInstruction, aux invokeCallAux
 			}
 			if adapter, ok := resolveInvokeDirectCall(rtype, mname); ok {
 				method = func(fr *frame) {
-					interp.invokeDirectCall(fr, adapter, ir, ia)
+					if dests == nil {
+						interp.invokeDirectCall(fr, adapter, ir, ia)
+						return
+					}
+					// Adapters return a tuple, while invokes may elide its slot.
+					scratch := ir
+					if scratch < 0 {
+						scratch = iv
+					}
+					spare := fr.reg(scratch)
+					interp.invokeDirectCall(fr, adapter, scratch, ia)
+					values := fr.reg(scratch).(tuple)
+					fr.setReg(scratch, spare)
+					for i, dest := range dests {
+						if dest >= 0 {
+							fr.setReg(dest, values[i])
+						}
+					}
 				}
 			} else {
 				method = func(fr *frame) {
@@ -1202,6 +1240,9 @@ func makeBodyCallInstruction(interp *Interp, body *function, result register, ar
 		return nil
 	}
 	if body.Recover == nil {
+		if run := makeInstructionBodyCallSpecializer(body, args, dests); run != nil {
+			return run
+		}
 		switch body.nres {
 		case 0:
 			return func(fr *frame) { interp.callFunctionByStackNoRecover0(fr, body, result, args) }
@@ -1218,6 +1259,37 @@ func makeBodyCallInstruction(interp *Interp, body *function, result register, ar
 		return func(fr *frame) { interp.callFunctionByStack1(fr, body, result, args) }
 	default:
 		return func(fr *frame) { interp.callFunctionByStackN(fr, body, result, args, dests) }
+	}
+}
+
+// makeInstructionBodyCallSpecializer binds common body-call shapes without
+// consulting the stack backend's specializer registry.
+func makeInstructionBodyCallSpecializer(body *function, args, dests []register) func(*frame) {
+	if body.Recover != nil || body.nres != 2 || len(dests) != 2 || dests[0] < 0 || dests[1] < 0 {
+		return nil
+	}
+	if len(args) != 1 && len(args) != 2 {
+		return nil
+	}
+	arg0, result0, result1 := args[0], dests[0], dests[1]
+	arg1 := register(-1)
+	if len(args) == 2 {
+		arg1 = args[1]
+	}
+	return func(fr *frame) {
+		child := body.allocFrameFromCaller(fr)
+		child.stack[2] = fr.reg(arg0)
+		if arg1 >= 0 {
+			child.stack[3] = fr.reg(arg1)
+		}
+		for child.ipc != -1 {
+			run := child.pfn.Instrs[child.ipc]
+			child.ipc++
+			run(child)
+		}
+		fr.setReg(result0, child.stack[0])
+		fr.setReg(result1, child.stack[1])
+		body.deleteFrameToCaller(fr, child)
 	}
 }
 

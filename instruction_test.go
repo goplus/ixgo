@@ -74,6 +74,9 @@ func gcPhi(n int) int { a,b:=new(int),new(int); *a=7; *b=9; p:=a; if n>0 { p=b }
 			}
 			gcFunctions := 0
 			for fn, p := range described.funcs {
+				if config.descriptions&EnableInstructionExecution != 0 {
+					checkInstructionLayout(t, p, extra&ExperimentalSupportGC != 0)
+				}
 				old := byName[fn.String()]
 				if old == nil {
 					t.Fatalf("description added function %s", fn)
@@ -2744,9 +2747,10 @@ func TestDescriptionStaticCallExecution(t *testing.T) {
 							t.Fatal("missing description executor")
 						}
 						name := runtime.FuncForPC(reflect.ValueOf(p.Instrs[pc]).Pointer()).Name()
-						// Call specializers and dynamic-call helpers are shared by both paths.
+						// Only stack execution may use the stack specializer exemption.
 						_, specialized := d.Aux.(dynamicCallAux)
-						if aux, ok := d.Aux.(bodyCallAux); ok && aux.Body.Recover == nil {
+						specialized = specialized && mode&EnableInstructionExecution == 0
+						if aux, ok := d.Aux.(bodyCallAux); ok && aux.Body.Recover == nil && mode&EnableInstructionExecution == 0 {
 							specialized = makeCallSpecializerInstr(i, aux.Body, aux.Arguments, aux.ExtractResults) != nil
 						}
 						if (strings.Contains(name, "makeInstruction") || strings.Contains(name, "makeBodyCallInstruction")) != (mode&EnableInstructionExecution != 0) && !specialized {
@@ -4647,5 +4651,396 @@ func Run() int {
 		if err != nil || got != 14 {
 			t.Fatalf("mode %v: %v,%v", mode, got, err)
 		}
+	}
+}
+
+// checkInstructionLayout validates the instruction backend's own frame contract.
+func checkInstructionLayout(t *testing.T, p *function, gc bool) {
+	t.Helper()
+	check := func(r register) {
+		t.Helper()
+		if r < -1 || int(r) >= len(p.stack) {
+			t.Fatalf("%s: register %d outside frame of %d slots", p.Fn, r, len(p.stack))
+		}
+	}
+	if len(p.Code) != len(p.Instrs) || len(p.ssaInstrs) != len(p.Instrs) {
+		t.Fatalf("%s: instruction/source alignment mismatch", p.Fn)
+	}
+	if gc && p.hasGCRegs && (len(p.gcRegs) != len(p.Instrs) || len(p.gcReady) != len(p.Instrs)) {
+		t.Fatalf("%s: GC metadata does not cover every PC", p.Fn)
+	}
+	for _, d := range p.Code {
+		if !d.RuntimeBound {
+			t.Fatalf("%s: unbound instruction", p.Fn)
+		}
+		check(d.Result)
+		check(d.RuntimeResult)
+		for _, r := range d.Args {
+			check(r)
+		}
+		for _, r := range d.RuntimeArgs {
+			check(r)
+		}
+		if aux, ok := d.Aux.(fieldAux); ok && aux.Cached {
+			check(aux.ReceiverCache)
+		}
+		if aux, ok := d.Aux.(phiAux); ok {
+			for _, r := range aux.Results {
+				check(r)
+			}
+			for _, r := range aux.RuntimeResults {
+				check(r)
+			}
+			for _, edges := range aux.RuntimeEdges {
+				for _, r := range edges {
+					check(r)
+				}
+			}
+		}
+	}
+	for pc := range p.gcRegs {
+		for _, r := range p.gcRegsForPC(pc) {
+			check(r)
+		}
+	}
+	for _, pc := range p.Blocks {
+		if pc < 0 || pc >= len(p.Instrs) {
+			t.Fatalf("%s: block PC %d out of range", p.Fn, pc)
+		}
+	}
+}
+
+func TestInstructionCreationErrors(t *testing.T) {
+	const source = `package main
+func channel(n int) { _=make(chan int,n) }
+func slice(n,c int) { _=make([]int,n,c) }
+func recoverSlice(n,c int) (ok bool) { defer func(){ok=recover()!=nil}(); slice(n,c); return }
+`
+	i, err := NewContext(EnableInstructionExecution|DisableMemo).LoadInterp("creation_errors.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	for _, tc := range []struct {
+		name    string
+		args    []any
+		message string
+	}{
+		{"channel", []any{-1}, "makechan: size out of range"},
+		{"slice", []any{-1, 0}, "makeslice: len out of range"},
+		{"slice", []any{0, -1}, "makeslice: cap out of range"},
+	} {
+		_, err := i.RunFunc(tc.name, tc.args...)
+		if err == nil || !strings.Contains(err.Error(), tc.message) {
+			t.Fatalf("%s%v: %v", tc.name, tc.args, err)
+		}
+	}
+	got, err := i.RunFunc("recoverSlice", 2, 1)
+	if err != nil || got != true {
+		t.Fatalf("recoverSlice: %v,%v", got, err)
+	}
+	// Directional channel types are supported by the runtime factory even though
+	// ordinary SSA make instructions generally use a bidirectional channel.
+	for _, dir := range []reflect.ChanDir{reflect.RecvDir, reflect.SendDir} {
+		typ := reflect.ChanOf(dir, reflect.TypeOf(0))
+		run := makeInstruction(i, typedInstruction{Op: opMakeChan, Result: 1, Args: []register{0}, Aux: creationAux{Target: typ}})
+		fr := &frame{stack: []value{1, nil}}
+		run(fr)
+		if reflect.TypeOf(fr.reg(1)) != typ {
+			t.Fatal("directional channel type lost")
+		}
+	}
+}
+
+func TestInstructionReviewedCallDestinations(t *testing.T) {
+	const source = `package main
+import "strings"
+func pair(x int) (int,int) { return x,x+1 }
+func pair2(x,y int) (int,int) { return x+y,x-y }
+func recovered(x int) (a,b int) { defer func(){ if recover()!=nil { a,b=x,x+1 } }(); panic(x) }
+type source interface { Pair(int) (int,int) }
+type item int
+func (v item) Pair(x int) (int,int) { return int(v)+x,x }
+func Run(n int) int {
+ total:=0
+ f:=pair
+ var v source=item(3)
+ for x:=0;x<n;x++ {
+  a,b:=pair(x); total+=a+b
+  c,d:=pair2(x,2); total+=c+d
+  e,_:=pair(x); total+=e
+  g,h:=f(x); total+=g+h
+  j,k:=v.Pair(x); total+=j+k
+  l,m:=recovered(x); total+=l+m
+  s,_,ok:=strings.Cut("a:b",":"); if !ok { panic("cut") }; total+=len(s)
+  captured:=x
+  q,r:=func(y int)(int,int){ return captured+y,y }(2); total+=q+r
+  pair(x)
+ }
+ return total
+}`
+	var want interface{}
+	for _, mode := range []Mode{0, EnableInstructionExecution, EnableInstructionExecution | EnableCachedReg, EnableInstructionExecution | ExperimentalSupportGC} {
+		ctx := NewContext(DisableMemo | mode)
+		ctx.SetLeastCallForEnablePool(0)
+		i, err := ctx.LoadInterp("review_calls.go", source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if mode&EnableInstructionExecution != 0 {
+			var elided int
+			for _, fn := range i.funcs {
+				elided += len(fn.elidedExtract)
+				for _, instr := range fn.ssaInstrs {
+					if ex, ok := instr.(*ssa.Extract); ok {
+						if _, found := fn.elidedExtract[ex]; found {
+							t.Fatalf("elided Extract still executes in %s", fn.Fn)
+						}
+					}
+				}
+				if len(fn.elidedTuples) > 0 && fn.childFrameReg != fn.elidedTuples[0] {
+					t.Fatalf("%s has no reusable tuple slot", fn.Fn)
+				}
+			}
+			if elided == 0 {
+				t.Fatal("no call Extracts elided")
+			}
+		}
+		for repeat := 0; repeat < 3; repeat++ {
+			got, runErr := i.RunFunc("Run", 10)
+			if runErr != nil {
+				t.Fatal(runErr)
+			}
+			if mode == 0 {
+				want = got
+			} else if got != want {
+				t.Fatalf("mode %v: got %v want %v", mode, got, want)
+			}
+		}
+		i.UnsafeRelease()
+	}
+}
+
+func TestInstructionReviewedBodySpecializers(t *testing.T) {
+	const source = `package main
+func one(x int)(int,int){return x,x+1}
+func two(x,y int)(int,int){return x+y,x-y}
+func recovering(x int)(a,b int){defer func(){recover()}();return x,x}
+func Run() int {a,b:=one(5);c,d:=two(a,b);return c+d}`
+	i, err := NewContext(DisableMemo|EnableInstructionExecution).LoadInterp("review_specializers.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	for _, fn := range i.funcs {
+		switch fn.Fn.Name() {
+		case "one", "two":
+			args := []register{0}
+			if fn.Fn.Name() == "two" {
+				args = append(args, 1)
+			}
+			if makeInstructionBodyCallSpecializer(fn, args, []register{2, 3}) == nil {
+				t.Fatalf("missing specializer for %s", fn.Fn)
+			}
+			if makeInstructionBodyCallSpecializer(fn, args, []register{2, -1}) != nil {
+				t.Fatal("specialized discarded result")
+			}
+			atomic.StoreInt32(&fn.cached, 1)
+			caller := &frame{pfn: &function{}, stack: []value{5, 6, nil, nil, nil}}
+			caller.pfn.childFrameReg = 4
+			run := makeInstructionBodyCallSpecializer(fn, args, []register{2, 3})
+			run(caller)
+			spare, ok := caller.stack[4].(*frame)
+			if !ok || spare.caller != nil || caller.callee != nil {
+				t.Fatalf("%s did not cache a detached child", fn.Fn)
+			}
+			run(caller)
+			if caller.stack[4] != spare {
+				t.Fatalf("%s did not reuse its child", fn.Fn)
+			}
+		case "recovering":
+			if makeInstructionBodyCallSpecializer(fn, []register{0}, []register{2, 3}) != nil {
+				t.Fatal("specialized recovering body")
+			}
+		}
+	}
+	got, err := i.RunFunc("Run")
+	if err != nil || got != 10 {
+		t.Fatalf("got %v, %v; want 10", got, err)
+	}
+}
+
+func TestPR598FieldAddrOffsetExecution(t *testing.T) {
+	type record struct {
+		padding byte
+		hidden  int
+	}
+	typ := reflect.TypeFor[record]()
+	field := typ.Field(1)
+	for _, cached := range []bool{false, true} {
+		for _, bound := range []bool{false, true} {
+			t.Run(fmt.Sprintf("cached=%t/bound=%t", cached, bound), func(t *testing.T) {
+				left, right := &record{hidden: 7}, &record{hidden: 11}
+				d := typedInstruction{
+					Op: opFieldAddr, Result: 1, Args: []register{0},
+					Aux: fieldAux{Index: -1, Source: reflect.TypeFor[*record](), Field: field.Type, Offset: field.Offset, Cached: cached, ReceiverCache: 2},
+				}
+				if bound {
+					bindRuntimeRegisters(&d)
+					d.Result, d.Args = 99, nil
+				}
+				execute := makeInstruction(nil, d)
+				fr := &frame{stack: []value{left, nil, nil}}
+				for _, receiver := range []*record{left, left, right, right, left} {
+					fr.stack[0] = receiver
+					execute(fr)
+					if got := fr.stack[1].(*int); got != &receiver.hidden {
+						t.Fatalf("address = %p, want %p", got, &receiver.hidden)
+					}
+				}
+				if cached && fr.stack[2] != left {
+					t.Fatalf("receiver cache = %v, want %v", fr.stack[2], left)
+				}
+			})
+		}
+	}
+}
+
+func TestPR598FieldExecutionModes(t *testing.T) {
+	const source = `package main
+import "runtime"
+type inner struct { hidden int }
+type record struct { padding byte; inner }
+type pointer *record
+func identity(v inner) inner { return v }
+func read(v inner) int { return identity(v).hidden }
+func update() int {
+ left, right := &record{inner:inner{hidden:1}}, &record{inner:inner{hidden:10}}
+ for i:=0; i<6; i++ {
+  current:=pointer(left)
+  if i>=3 { current=pointer(right) }
+  current.hidden += i
+  runtime.GC()
+ }
+ return read(left.inner)*100+read(right.inner)
+}
+func nilAfterValid() {
+ current:=new(record)
+ for i:=0; i<2; i++ {
+  if i>0 { current=nil }
+  _=&current.hidden
+ }
+}
+`
+	for _, mode := range []Mode{0, EnableCachedReg, ExperimentalSupportGC, ExperimentalSupportGC | EnableCachedReg, ExperimentalSupportGC | EnableGCExecutionPlan | EnableCachedReg} {
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
+			ctx := NewContext(DisableMemo | EnableInstructionExecution | mode)
+			ctx.SetLeastCallForEnablePool(0)
+			i, err := ctx.LoadInterp("pr598_fields.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			p := i.funcs[i.mainpkg.Func("update")]
+			cachedFields := 0
+			for _, d := range p.Code {
+				if d.Op != opFieldAddr {
+					continue
+				}
+				aux := d.Aux.(fieldAux)
+				if aux.Cached != (mode&EnableCachedReg != 0) {
+					t.Fatalf("unexpected cache metadata: %#v", aux)
+				}
+				if aux.Cached {
+					cachedFields++
+					found := false
+					for _, reg := range p.cacheRegs {
+						found = found || reg == aux.ReceiverCache
+					}
+					if !found {
+						t.Fatalf("cache register %d is not GC tracked", aux.ReceiverCache)
+					}
+				}
+			}
+			if mode&EnableCachedReg != 0 && cachedFields == 0 {
+				t.Fatal("missing cached field instructions")
+			}
+			for n := 0; n < 3; n++ {
+				if got, err := i.RunFunc("update"); err != nil || got != 422 {
+					t.Fatalf("update = %v, %v; want 422", got, err)
+				}
+			}
+			if _, err := i.RunFunc("nilAfterValid"); err == nil || !strings.Contains(err.Error(), "invalid memory address or nil pointer dereference") {
+				t.Fatalf("nil receiver error = %v", err)
+			}
+		})
+	}
+}
+
+func TestPR598ChangeTypeNilZero(t *testing.T) {
+	type pointer *int
+	type slice []int
+	type mapping map[string]int
+	type channel chan int
+	type function func() int
+	type record struct{ hidden int }
+	for _, target := range []reflect.Type{
+		reflect.TypeFor[pointer](), reflect.TypeFor[slice](), reflect.TypeFor[mapping](),
+		reflect.TypeFor[channel](), reflect.TypeFor[function](), reflect.TypeFor[record](),
+		reflect.TypeFor[[3]int](), reflect.TypeFor[any](), reflect.TypeFor[int](),
+	} {
+		t.Run(target.String(), func(t *testing.T) {
+			for _, bound := range []bool{false, true} {
+				d := typedInstruction{Op: opChangeType, Result: 1, Args: []register{0}, Aux: conversionAux{Source: target, Target: target}}
+				if bound {
+					bindRuntimeRegisters(&d)
+					d.Result, d.Args = 99, nil
+				}
+				execute := makeInstruction(nil, d)
+				fr := &frame{stack: []value{nil, nil}}
+				want := reflect.Zero(target).Interface()
+				for n := 0; n < 3; n++ {
+					execute(fr)
+					if !reflect.DeepEqual(fr.stack[1], want) || reflect.TypeOf(fr.stack[1]) != reflect.TypeOf(want) {
+						t.Fatalf("zero = %#v (%T), want %#v (%T)", fr.stack[1], fr.stack[1], want, want)
+					}
+				}
+				if allocs := testing.AllocsPerRun(100, func() { execute(fr) }); allocs != 0 {
+					t.Fatalf("nil ChangeType allocated %v times", allocs)
+				}
+			}
+		})
+	}
+}
+
+func TestInstructionReviewedInvokeAdapterDestinations(t *testing.T) {
+	receiver := reflect.TypeOf((*bytes.Buffer)(nil))
+	methods := new(sync.Map)
+	methods.Store("ReadByte", DirectCallAdapter(func(c DirectCallContext) { c.SetResult(tuple{byte(42), nil}) }))
+	old, existed := directCallMethods.Load(receiver)
+	directCallMethods.Store(receiver, methods)
+	defer func() {
+		if existed {
+			directCallMethods.Store(receiver, old)
+		} else {
+			directCallMethods.Delete(receiver)
+		}
+	}()
+	const source = `package main
+import("bytes";"io")
+func Run() int {
+ var r io.ByteReader=bytes.NewBufferString("abc")
+ total:=0
+ for j:=0;j<3;j++ { b,err:=r.ReadByte();if err!=nil {panic(err)};total+=int(b) }
+ return total
+}`
+	i, err := NewContext(DisableMemo|EnableInstructionExecution).LoadInterp("review_invoke_adapter.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	got, err := i.RunFunc("Run")
+	if err != nil || got != 126 {
+		t.Fatalf("got %v, %v; want 126", got, err)
 	}
 }

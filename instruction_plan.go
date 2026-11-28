@@ -13,12 +13,13 @@ import (
 // planInstructionLayout reserves frame slots directly from SSA. It does not
 // build stack instructions or depend on their elision decisions.
 func planInstructionLayout(pfn *function) {
+	var buf [32]*ssa.Value
 	for _, block := range pfn.Fn.Blocks {
 		for _, instr := range block.Instrs {
 			if value, ok := instr.(ssa.Value); ok {
 				pfn.regIndex(value)
 			}
-			for _, operand := range instr.Operands(nil) {
+			for _, operand := range instr.Operands(buf[:0]) {
 				if operand != nil && *operand != nil {
 					if _, builtin := (*operand).(*ssa.Builtin); !builtin {
 						pfn.regIndex(*operand)
@@ -46,9 +47,34 @@ func planInstructionLayout(pfn *function) {
 			}
 		}
 	}
+	// Destination registers must exist before call descriptions inspect referrers.
+	for _, block := range pfn.Fn.Blocks {
+		for _, instr := range block.Instrs {
+			call, ok := instr.(*ssa.Call)
+			if !ok || describeCallResults(pfn, call) == nil {
+				continue
+			}
+			if pfn.elidedExtract == nil {
+				pfn.elidedExtract = make(map[*ssa.Extract]struct{})
+			}
+			if refs := call.Referrers(); refs != nil {
+				for _, ref := range *refs {
+					if extract, ok := ref.(*ssa.Extract); ok {
+						pfn.elidedExtract[extract] = struct{}{}
+					}
+				}
+			}
+			pfn.elidedTuples = append(pfn.elidedTuples, pfn.regIndex(call))
+		}
+	}
 }
 
 func compileInstruction(pfn *function, instr ssa.Instruction) (typedInstruction, func(*frame)) {
+	if extract, ok := instr.(*ssa.Extract); ok {
+		if _, elided := pfn.elidedExtract[extract]; elided {
+			return typedInstruction{}, nil
+		}
+	}
 	if load, ok := instr.(*ssa.UnOp); ok && load.Op == token.MUL &&
 		skipUnusedArrayDeref(load) && !arrayPointerOperandHasEffectAfter(load.X, load.Pos(), nil) {
 		return typedInstruction{}, nil
@@ -78,7 +104,8 @@ func compileInstruction(pfn *function, instr ssa.Instruction) (typedInstruction,
 			}
 		}
 	}
-	operands := instr.Operands(nil)
+	var buf [32]*ssa.Value
+	operands := instr.Operands(buf[:0])
 	if _, slice := instr.(*ssa.Slice); slice {
 		compact := operands[:0]
 		for _, operand := range operands {
@@ -88,7 +115,11 @@ func compileInstruction(pfn *function, instr ssa.Instruction) (typedInstruction,
 		}
 		operands = compact
 	}
-	d := describeInstruction(pfn, instr, operands, nil)
+	var dests []register
+	if call, ok := instr.(*ssa.Call); ok {
+		dests = describeCallResults(pfn, call)
+	}
+	d := describeInstruction(pfn, instr, operands, dests)
 	bindRuntimeRegisters(&d)
 	execute := makeInstruction(pfn.Interp, d)
 	if execute == nil {
