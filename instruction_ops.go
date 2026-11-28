@@ -15,6 +15,12 @@ import (
 func makeBinaryInstruction(d typedInstruction) func(*frame) {
 	aux := d.Aux.(binaryOpAux)
 	ir, ix, iy := d.Result, d.Args[0], d.Args[1]
+	if d.RuntimeBound {
+		ir = d.RuntimeResult
+		if len(d.RuntimeArgs) >= 2 {
+			ix, iy = d.RuntimeArgs[0], d.RuntimeArgs[1]
+		}
+	}
 	kx, ky := kindInvalid, kindInvalid
 	if aux.Constant[0] {
 		kx = kindConst
@@ -9705,6 +9711,12 @@ func makeBinaryInstruction(d typedInstruction) func(*frame) {
 func makeUnaryInstruction(d typedInstruction) func(*frame) {
 	aux := d.Aux.(unaryOpAux)
 	ir, ix := d.Result, d.Args[0]
+	if d.RuntimeBound {
+		ir = d.RuntimeResult
+		if len(d.RuntimeArgs) > 0 {
+			ix = d.RuntimeArgs[0]
+		}
+	}
 	kx := kindInvalid
 	if aux.Constant {
 		kx = kindConst

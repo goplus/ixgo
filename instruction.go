@@ -90,9 +90,11 @@ func (unaryOpAux) instructionAux() {}
 // phiAux describes the parallel assignment performed by one grouped closure.
 // Edges[i][j] supplies Results[i] when control arrives from Preds[j].
 type phiAux struct {
-	Preds   []int32
-	Results []register
-	Edges   [][]register
+	Preds          []int32
+	Results        []register
+	Edges          [][]register
+	RuntimeResults []register
+	RuntimeEdges   [][]register
 }
 
 func (phiAux) instructionAux() {}
@@ -113,7 +115,10 @@ type ifAux struct {
 func (ifAux) instructionAux() {}
 
 // returnAux records the number of returned values, whose registers are in Args.
-type returnAux struct{ Results int }
+type returnAux struct {
+	Results        int
+	RuntimeResults []register
+}
 
 func (returnAux) instructionAux() {}
 
@@ -131,10 +136,11 @@ func (nextAux) instructionAux() {}
 // Offset describe the field within the struct, after dereferencing Source;
 // Offset is relative to the start of that struct.
 type fieldAux struct {
-	Index  int
-	Source reflect.Type
-	Field  reflect.Type
-	Offset uintptr
+	Index         int
+	Source        reflect.Type
+	Field         reflect.Type
+	Offset        uintptr
+	RuntimeSource register
 }
 
 func (fieldAux) instructionAux() {}
@@ -142,10 +148,12 @@ func (fieldAux) instructionAux() {}
 // lookupAux records map key/element types. For a string Source, Key is the
 // index operand type and Element is byte.
 type lookupAux struct {
-	Source  reflect.Type
-	Key     reflect.Type
-	Element reflect.Type
-	CommaOk bool
+	Source        reflect.Type
+	Key           reflect.Type
+	Element       reflect.Type
+	CommaOk       bool
+	RuntimeSource register
+	RuntimeKey    register
 }
 
 func (lookupAux) instructionAux() {}
@@ -153,8 +161,10 @@ func (lookupAux) instructionAux() {}
 // indexAux.Source retains fixed array lengths; slice/string lengths and index
 // bounds are checked against the runtime value. Target is the produced type.
 type indexAux struct {
-	Source reflect.Type
-	Target reflect.Type
+	Source        reflect.Type
+	Target        reflect.Type
+	RuntimeSource register
+	RuntimeIndex  register
 }
 
 func (indexAux) instructionAux() {}
@@ -167,6 +177,10 @@ type sliceAux struct {
 	Target         reflect.Type
 	Low, High, Max bool
 	MakeSliceCheck bool
+	RuntimeSource  register
+	RuntimeLow     register
+	RuntimeHigh    register
+	RuntimeMax     register
 }
 
 func (sliceAux) instructionAux() {}
@@ -182,12 +196,14 @@ type rangeAux struct {
 func (rangeAux) instructionAux() {}
 
 // typeAssertAux records source/target types and the comma-ok result shape.
-// Reflect types are the in-memory representation; a portable type table remains
-// future work. These descriptions retain no SSA instruction or value.
+// AssertedType preserves the type-checker type needed for shared assertion
+// diagnostics; the other fields are the runtime representation.
 type typeAssertAux struct {
-	Source  reflect.Type
-	Target  reflect.Type
-	CommaOk bool
+	AssertedType  types.Type
+	Source        reflect.Type
+	Target        reflect.Type
+	CommaOk       bool
+	RuntimeSource register
 }
 
 func (typeAssertAux) instructionAux() {}
@@ -195,8 +211,9 @@ func (typeAssertAux) instructionAux() {}
 // conversionAux records in-memory types, independently of the SSA values.
 // Conversion behavior is selected by the instruction opcode and these types.
 type conversionAux struct {
-	Source reflect.Type
-	Target reflect.Type
+	Source        reflect.Type
+	Target        reflect.Type
+	RuntimeSource register
 }
 
 func (conversionAux) instructionAux() {}
@@ -227,16 +244,20 @@ func (selectAux) instructionAux() {}
 
 // sendAux records the channel and sent value types for Send.
 type sendAux struct {
-	Chan  reflect.Type
-	Value reflect.Type
+	Chan         reflect.Type
+	Value        reflect.Type
+	RuntimeChan  register
+	RuntimeValue register
 }
 
 func (sendAux) instructionAux() {}
 
 // storeAux records the destination pointer and stored value types for Store.
 type storeAux struct {
-	Address reflect.Type
-	Value   reflect.Type
+	Address        reflect.Type
+	Value          reflect.Type
+	RuntimeAddress register
+	RuntimeValue   register
 }
 
 func (storeAux) instructionAux() {}
@@ -251,7 +272,10 @@ type mapUpdateAux struct {
 func (mapUpdateAux) instructionAux() {}
 
 // panicAux records the type of the interface operand passed to Panic.
-type panicAux struct{ Value reflect.Type }
+type panicAux struct {
+	Value        reflect.Type
+	RuntimeValue register
+}
 
 func (panicAux) instructionAux() {}
 
@@ -318,9 +342,19 @@ func (callSiteAux) instructionAux() {}
 type callAux struct {
 	callSiteAux
 	ExtractResults []register
+	runtime        callRuntimeRegisters
 }
 
-// directCallAux retains the adapter selected by lowering.
+// callRuntimeRegisters maps logical call registers to the frame slots used by
+// the current runtime. It is filled when runtime metadata is bound.
+type callRuntimeRegisters struct {
+	DeferStack     register
+	Target         register
+	Arguments      []register
+	ExtractResults []register
+}
+
+// directCallAux records the independently resolved, type-compatible adapter.
 type directCallAux struct {
 	callAux
 	Adapter DirectCallAdapter
@@ -358,6 +392,13 @@ type invokeCallAux struct {
 
 func (invokeCallAux) instructionAux() {}
 
+// builtinRuntimeRegisters preserves builtin-specific argument positions.
+type builtinRuntimeRegisters struct {
+	Arguments []register
+	Result    register
+	Bound     bool
+}
+
 // builtinCallAux retains interface argument layout and the original target for
 // panic callback compatibility. Constant and Error apply only to unsafe layout builtins.
 type builtinCallAux struct {
@@ -366,6 +407,7 @@ type builtinCallAux struct {
 	InterfaceArgs []bool
 	Constant      uintptr
 	Error         string
+	Runtime       builtinRuntimeRegisters
 }
 
 func (builtinCallAux) instructionAux() {}
@@ -392,32 +434,211 @@ type typedInstruction struct {
 	Args     []register
 	ArgKinds []operandKind
 	Aux      instructionAux
+
+	// RuntimeResult is the frame slot used by the selected executor. Result
+	// remains the logical bytecode register.
+	RuntimeResult register
+	RuntimeArgs   []register
+	RuntimeBound  bool
 }
 
 func descriptionRegister(pfn *function, v ssa.Value) register {
-	if v != nil {
-		if encoded, ok := pfn.index[v]; ok {
-			return register(encoded & 0xffffff)
-		}
+	if v == nil {
+		return -1
 	}
-	return -1
+	if _, allocated := pfn.index[v]; !allocated {
+		return -1
+	}
+	if pfn.descriptionIndex == nil {
+		pfn.descriptionIndex = make(map[ssa.Value]register, len(pfn.index))
+	}
+	if encoded, ok := pfn.descriptionIndex[v]; ok {
+		return encoded
+	}
+	encoded := pfn.index[v]
+	reg := register(encoded & 0xffffff)
+	pfn.descriptionIndex[v] = reg
+	return reg
 }
 
-// descriptionOperand reads the allocation without changing the register map.
+// descriptionOperand reads metadata without changing the register map or the
+// stack template. Static operands are resolved from SSA values directly.
 func descriptionOperand(pfn *function, v ssa.Value) (kind, value) {
 	encoded, ok := pfn.index[v]
 	if !ok {
 		return kindInvalid, nil
 	}
+	k := kind(encoded >> 30)
+	if k == kindConst || k == kindGlobal {
+		value, ok := staticToValue(pfn.Interp, v)
+		if !ok {
+			return kindInvalid, nil
+		}
+		return k, value
+	}
 	r := register(encoded & 0xffffff)
 	if int(r) >= len(pfn.stack) {
 		return kindInvalid, nil
 	}
-	return kind(encoded >> 30), pfn.stack[r]
+	return k, pfn.stack[r]
+}
+
+// describeCallResults independently plans tuple-result destinations for bytecode.
+// It reads SSA referrers and the description register plan without changing stack lowering state.
+func describeCallResults(pfn *function, instr ssa.Value) []register {
+	call, ok := instr.(*ssa.Call)
+	if !ok {
+		return nil
+	}
+	// Direct adapters write one complete result value through DirectCallContext.
+	// Keep their tuple register even when all Extract values have destinations.
+	if fn, ok := call.Call.Value.(*ssa.Function); ok {
+		if _, ok := staticDirectAdapter(pfn.Interp, fn); ok {
+			return nil
+		}
+	}
+	nres := callResultCount(&call.Call)
+	if nres <= 1 {
+		return nil
+	}
+	refs := instr.Referrers()
+	dests := make([]register, nres)
+	for i := range dests {
+		dests[i] = -1
+	}
+	if refs != nil {
+		for _, ref := range *refs {
+			ex, ok := ref.(*ssa.Extract)
+			if !ok {
+				if _, debug := ref.(*ssa.DebugRef); debug {
+					continue
+				}
+				return nil
+			}
+			if ex.Referrers() != nil && len(*ex.Referrers()) > 0 {
+				dests[ex.Index] = descriptionRegister(pfn, ex)
+			}
+		}
+	}
+	for _, dest := range dests {
+		if dest >= 0 {
+			return dests
+		}
+	}
+	return nil
+}
+
+func bindRuntimeRegisters(d *typedInstruction) {
+	d.RuntimeResult = d.Result
+	d.RuntimeArgs = append([]register(nil), d.Args...)
+	d.RuntimeBound = true
+	if phi, ok := d.Aux.(phiAux); ok {
+		phi.RuntimeResults = append([]register(nil), phi.Results...)
+		phi.RuntimeEdges = make([][]register, len(phi.Edges))
+		for i := range phi.Edges {
+			phi.RuntimeEdges[i] = append([]register(nil), phi.Edges[i]...)
+		}
+		d.Aux = phi
+	}
+	if ret, ok := d.Aux.(returnAux); ok {
+		ret.RuntimeResults = append([]register(nil), d.Args...)
+		d.Aux = ret
+	}
+	if panicAux, ok := d.Aux.(panicAux); ok && len(d.Args) > 0 {
+		panicAux.RuntimeValue = d.Args[0]
+		d.Aux = panicAux
+	}
+	if send, ok := d.Aux.(sendAux); ok && len(d.Args) >= 2 {
+		send.RuntimeChan, send.RuntimeValue = d.Args[0], d.Args[1]
+		d.Aux = send
+	}
+	if store, ok := d.Aux.(storeAux); ok && len(d.Args) >= 2 {
+		store.RuntimeAddress, store.RuntimeValue = d.Args[0], d.Args[1]
+		d.Aux = store
+	}
+	if field, ok := d.Aux.(fieldAux); ok && len(d.Args) > 0 {
+		field.RuntimeSource = d.Args[0]
+		d.Aux = field
+	}
+	if lookup, ok := d.Aux.(lookupAux); ok && len(d.Args) >= 2 {
+		lookup.RuntimeSource, lookup.RuntimeKey = d.Args[0], d.Args[1]
+		d.Aux = lookup
+	}
+	if index, ok := d.Aux.(indexAux); ok && len(d.Args) >= 2 {
+		index.RuntimeSource, index.RuntimeIndex = d.Args[0], d.Args[1]
+		d.Aux = index
+	}
+	if slice, ok := d.Aux.(sliceAux); ok {
+		slice.RuntimeSource = -1
+		slice.RuntimeLow, slice.RuntimeHigh, slice.RuntimeMax = -1, -1, -1
+		if len(d.Args) > 0 {
+			slice.RuntimeSource = d.Args[0]
+		}
+		pos := 1
+		if slice.Low && pos < len(d.Args) {
+			slice.RuntimeLow = d.Args[pos]
+			pos++
+		}
+		if slice.High && pos < len(d.Args) {
+			slice.RuntimeHigh = d.Args[pos]
+			pos++
+		}
+		if slice.Max && pos < len(d.Args) {
+			slice.RuntimeMax = d.Args[pos]
+		}
+		d.Aux = slice
+	}
+	if assert, ok := d.Aux.(typeAssertAux); ok && len(d.Args) > 0 {
+		assert.RuntimeSource = d.Args[0]
+		d.Aux = assert
+	}
+	if conversion, ok := d.Aux.(conversionAux); ok && len(d.Args) > 0 {
+		conversion.RuntimeSource = d.Args[0]
+		d.Aux = conversion
+	}
+	bind := func(aux callAux) callAux {
+		aux.runtime = callRuntimeRegisters{
+			DeferStack:     aux.DeferStack,
+			Target:         aux.Target,
+			Arguments:      append([]register(nil), aux.Arguments...),
+			ExtractResults: append([]register(nil), aux.ExtractResults...),
+		}
+		return aux
+	}
+	switch aux := d.Aux.(type) {
+	case callAux:
+		d.Aux = bind(aux)
+	case directCallAux:
+		aux.callAux = bind(aux.callAux)
+		d.Aux = aux
+	case externalCallAux:
+		aux.callAux = bind(aux.callAux)
+		d.Aux = aux
+	case dynamicCallAux:
+		aux.callAux = bind(aux.callAux)
+		d.Aux = aux
+	case closureCallAux:
+		aux.callAux = bind(aux.callAux)
+		aux.runtime.Arguments = append(aux.runtime.Arguments, aux.Bindings...)
+		d.Aux = aux
+	case invokeCallAux:
+		aux.callAux = bind(aux.callAux)
+		d.Aux = aux
+	case builtinCallAux:
+		aux.Runtime = builtinRuntimeRegisters{
+			Arguments: append([]register(nil), aux.Arguments...),
+			Result:    d.Result,
+			Bound:     true,
+		}
+		d.Aux = aux
+	case bodyCallAux:
+		aux.callAux = bind(aux.callAux)
+		d.Aux = aux
+	}
 }
 
 func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.Value, elidedResults []register) typedInstruction {
-	d := typedInstruction{Result: -1}
+	d := typedInstruction{Result: -1, RuntimeResult: -1}
 	for _, operand := range operands {
 		if operand != nil {
 			r := descriptionRegister(pfn, *operand)
@@ -440,6 +661,7 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 	}
 	if v, ok := instr.(ssa.Value); ok {
 		d.Result = descriptionRegister(pfn, v)
+		d.RuntimeResult = d.Result
 	}
 	switch v := instr.(type) {
 	case *ssa.BinOp:
@@ -599,9 +821,10 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 	case *ssa.TypeAssert:
 		d.Op = opTypeAssert
 		d.Aux = typeAssertAux{
-			Source:  pfn.Interp.preToType(v.X.Type()),
-			Target:  pfn.Interp.preToType(v.AssertedType),
-			CommaOk: v.CommaOk,
+			AssertedType: v.AssertedType,
+			Source:       pfn.Interp.preToType(v.X.Type()),
+			Target:       pfn.Interp.preToType(v.AssertedType),
+			CommaOk:      v.CommaOk,
 		}
 	case *ssa.Extract:
 		d.Op = opExtract
@@ -732,10 +955,11 @@ func describeCall(pfn *function, call *ssa.CallCommon, dests []register, deferSt
 	if base.Kind != callStatic {
 		return base
 	}
-	if pfn.directCall == call && pfn.directAdapter != nil {
-		return directCallAux{callAux: base, Adapter: pfn.directAdapter}
-	}
 	fn := call.Value.(*ssa.Function)
+	if adapter, ok := staticDirectAdapter(pfn.Interp, fn); ok {
+		return directCallAux{callAux: base, Adapter: adapter}
+	}
+
 	if fn.Blocks != nil {
 		if body := pfn.Interp.funcs[fn]; body != nil {
 			return bodyCallAux{callAux: base, Body: body}

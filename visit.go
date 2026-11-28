@@ -291,6 +291,7 @@ func (visit *visitor) function(fn *ssa.Function) {
 		// Reserve tracking state after the fixed call slots.
 		pfn.stack = append(pfn.stack, nil)
 	}
+
 	var buf [32]*ssa.Value // avoid alloc in common case
 	for _, b := range fn.Blocks {
 		Instrs := make([]func(*frame), len(b.Instrs))
@@ -348,11 +349,12 @@ func (visit *visitor) function(fn *ssa.Function) {
 			if instructionSupported && visit.intp.ctx.Mode&(EnableInstructionDescriptions|EnableInstructionExecution) != 0 {
 				var dests []register
 				if call, ok := instr.(ssa.Value); ok {
-					dests = pfn.callDests[call]
+					dests = describeCallResults(pfn, call)
 				}
 				descriptions[index] = describeInstruction(pfn, instr, instr.Operands(buf[:0]), dests)
+				bindRuntimeRegisters(&descriptions[index])
 				if visit.intp.ctx.Mode&EnableInstructionExecution != 0 {
-					// Lower first to preserve register allocation and instruction elision.
+					// Use the bound runtime registers for supported instructions.
 					if described := makeInstruction(visit.intp, descriptions[index]); described != nil {
 						ifn = described
 					}
@@ -492,12 +494,6 @@ func (visit *visitor) function(fn *ssa.Function) {
 	visit.base += len(pfn.ssaInstrs) + 2
 	pfn.initPool()
 	pfn.finishMetadata()
-	if instructionSupported && visit.intp.ctx.Mode&(EnableInstructionDescriptions|EnableInstructionExecution) != 0 {
-		// Code now owns call metadata; release temporary lowering state.
-		pfn.callDests = nil
-		pfn.directCall = nil
-		pfn.directAdapter = nil
-	}
 }
 
 func loc(fset *token.FileSet, pos token.Pos) string {
