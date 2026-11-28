@@ -5332,3 +5332,159 @@ func TestPR598SelectNilSendGC(t *testing.T) {
 		t.Fatalf("Run=%v,%v", got, err)
 	}
 }
+
+func TestInstructionScalarChangeType(t *testing.T) {
+	type namedBool bool
+	type otherBool bool
+	type namedInt int
+	type otherInt int
+	type namedInt8 int8
+	type otherInt8 int8
+	type namedInt16 int16
+	type otherInt16 int16
+	type namedInt32 int32
+	type otherInt32 int32
+	type namedInt64 int64
+	type otherInt64 int64
+	type namedUint uint
+	type otherUint uint
+	type namedUint8 uint8
+	type otherUint8 uint8
+	type namedUint16 uint16
+	type otherUint16 uint16
+	type namedUint32 uint32
+	type otherUint32 uint32
+	type namedUint64 uint64
+	type otherUint64 uint64
+	type namedUintptr uintptr
+	type otherUintptr uintptr
+	type namedFloat32 float32
+	type otherFloat32 float32
+	type namedFloat64 float64
+	type otherFloat64 float64
+	type namedComplex64 complex64
+	type otherComplex64 complex64
+	type namedComplex128 complex128
+	type otherComplex128 complex128
+	type namedString string
+	type otherString string
+	cases := []struct{ basic, named, other value }{
+		{bool(true), namedBool(true), otherBool(true)},
+		{int(-7), namedInt(-7), otherInt(-7)},
+		{int8(-127), namedInt8(-127), otherInt8(-127)},
+		{int16(-32767), namedInt16(-32767), otherInt16(-32767)},
+		{int32(-2147483647), namedInt32(-2147483647), otherInt32(-2147483647)},
+		{int64(-9223372036854775807), namedInt64(-9223372036854775807), otherInt64(-9223372036854775807)},
+		{uint(42), namedUint(42), otherUint(42)},
+		{uint8(255), namedUint8(255), otherUint8(255)},
+		{uint16(65535), namedUint16(65535), otherUint16(65535)},
+		{uint32(4294967295), namedUint32(4294967295), otherUint32(4294967295)},
+		{uint64(18446744073709551615), namedUint64(18446744073709551615), otherUint64(18446744073709551615)},
+		{uintptr(42), namedUintptr(42), otherUintptr(42)},
+		{float32(-1.25), namedFloat32(-1.25), otherFloat32(-1.25)},
+		{float64(-3.5), namedFloat64(-3.5), otherFloat64(-3.5)},
+		{complex64(complex(1.5, -2.5)), namedComplex64(complex(1.5, -2.5)), otherComplex64(complex(1.5, -2.5))},
+		{complex128(complex(-3.5, 4.5)), namedComplex128(complex(-3.5, 4.5)), otherComplex128(complex(-3.5, 4.5))},
+		{string("hello"), namedString("hello"), otherString("hello")},
+	}
+	for _, tc := range cases {
+		for _, from := range []value{tc.basic, tc.named} {
+			for _, want := range []value{tc.basic, tc.named, tc.other} {
+				for _, bound := range []bool{false, true} {
+					target := reflect.TypeOf(want)
+					t.Run(fmt.Sprintf("%T_to_%T/bound=%t", from, want, bound), func(t *testing.T) {
+						d := typedInstruction{Op: opChangeType, Result: 2, Args: []register{1}, Aux: conversionAux{Source: reflect.TypeOf(from), Target: target}}
+						if bound {
+							bindRuntimeRegisters(&d)
+							d.Result = 0
+							d.Args = []register{0}
+						}
+						run := makeInstruction(nil, d)
+						fr := &frame{stack: []value{"sentinel", from, nil}}
+						run(fr)
+						if got := fr.reg(2); reflect.TypeOf(got) != target || !reflect.DeepEqual(got, want) {
+							t.Fatalf("got %#v (%T), want %#v (%T)", got, got, want, want)
+						}
+						fr.stack[1] = nil
+						run(fr)
+						if got := fr.reg(2); !reflect.DeepEqual(got, reflect.Zero(target).Interface()) {
+							t.Fatalf("nil input: %#v", got)
+						}
+						if fr.reg(0) != "sentinel" {
+							t.Fatal("wrong register written")
+						}
+					})
+				}
+			}
+		}
+	}
+	type counter int
+	d := typedInstruction{Op: opChangeType, Result: 1, Args: []register{0}, Aux: conversionAux{Source: reflect.TypeFor[counter](), Target: reflect.TypeFor[int]()}}
+	fr := &frame{stack: []value{counter(42), nil}}
+	run := makeInstruction(nil, d)
+	if n := testing.AllocsPerRun(1000, func() { run(fr) }); n != 0 {
+		t.Fatalf("counter to int allocated %v times", n)
+	}
+}
+
+func BenchmarkInstructionScalarInterface(b *testing.B) {
+	for _, mode := range []Mode{0, EnableInstructionExecution} {
+		b.Run(fmt.Sprint(mode), func(b *testing.B) {
+			ctx := NewContext(DisableMemo | mode)
+			ctx.SetLeastCallForEnablePool(0)
+			i, err := ctx.LoadInterp("scalar_bench.go", executionDescriptionSource)
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.Cleanup(i.UnsafeRelease)
+			for n := 0; n < 10; n++ {
+				if v, e := i.RunFunc("interfaceCall"); e != nil || v != 42 {
+					b.Fatalf("%v,%v", v, e)
+				}
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				if v, e := i.RunFunc("interfaceCall"); e != nil || v != 42 {
+					b.Fatalf("%v,%v", v, e)
+				}
+			}
+		})
+	}
+}
+
+func TestInstructionScalarChangeTypeSSA(t *testing.T) {
+	const source = `package main
+ type number int
+ type text string
+ type flag bool
+ type imaginary complex128
+ func Run() bool {
+  n:=number(42);s:=text("ok");b:=flag(true);z:=imaginary(1+2i)
+  return int(n)==42 && string(s)=="ok" && bool(b) && complex128(z)==1+2i
+ }`
+	for _, mode := range []Mode{0, EnableInstructionExecution} {
+		i, err := NewContext(DisableMemo|mode).LoadInterp("scalar_ssa.go", source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := i.RunFunc("Run")
+		if err != nil || got != true {
+			t.Fatalf("mode %v: %v,%v", mode, got, err)
+		}
+		if mode != 0 {
+			found := false
+			for _, p := range i.funcs {
+				for _, d := range p.Code {
+					if d.Op == opChangeType {
+						found = true
+					}
+				}
+			}
+			if !found {
+				t.Fatal("no SSA ChangeType executed")
+			}
+		}
+		i.UnsafeRelease()
+	}
+}

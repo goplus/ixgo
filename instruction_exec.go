@@ -550,6 +550,9 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 		if d.RuntimeBound {
 			result = d.RuntimeResult
 		}
+		if scalar := makeScalarChangeInstruction(source, result, aux.Target); scalar != nil {
+			return scalar
+		}
 		targetType := xtype.TypeOfType(aux.Target)
 		zero := reflect.Zero(aux.Target).Interface()
 		return func(fr *frame) {
@@ -1236,7 +1239,6 @@ func makeInvokeInstruction(interp *Interp, d typedInstruction, aux invokeCallAux
 
 // makeBodyCallInstruction constructs bytecode calls to known bodies.
 func makeBodyCallInstruction(interp *Interp, body *function, result register, args, dests []register) func(*frame) {
-
 	if body == nil {
 		return nil
 	}
@@ -1301,3 +1303,336 @@ type instructionDebugRefAux struct {
 }
 
 func (instructionDebugRefAux) instructionAux() {}
+
+// makeScalarChangeInstruction selects representation-preserving conversions
+// during compilation. ChangeType keeps the scalar's underlying kind unchanged.
+func makeScalarChangeInstruction(source, result register, target reflect.Type) func(*frame) {
+	targetType := xtype.TypeOfType(target)
+	zero := reflect.Zero(target).Interface()
+	switch target.Kind() {
+	case reflect.Bool:
+		if target.PkgPath() == "" {
+			return func(fr *frame) {
+				v := fr.reg(source)
+				if v == nil {
+					fr.setReg(result, zero)
+					return
+				}
+				fr.setReg(result, xtype.Bool(v))
+			}
+		}
+		return func(fr *frame) {
+			v := fr.reg(source)
+			if v == nil {
+				fr.setReg(result, zero)
+				return
+			}
+			fr.setReg(result, xtype.ConvertBool(targetType, v))
+		}
+	case reflect.Int:
+		if target.PkgPath() == "" {
+			return func(fr *frame) {
+				v := fr.reg(source)
+				if v == nil {
+					fr.setReg(result, zero)
+					return
+				}
+				fr.setReg(result, xtype.Int(v))
+			}
+		}
+		return func(fr *frame) {
+			v := fr.reg(source)
+			if v == nil {
+				fr.setReg(result, zero)
+				return
+			}
+			fr.setReg(result, xtype.ConvertInt(targetType, v))
+		}
+	case reflect.Int8:
+		if target.PkgPath() == "" {
+			return func(fr *frame) {
+				v := fr.reg(source)
+				if v == nil {
+					fr.setReg(result, zero)
+					return
+				}
+				fr.setReg(result, xtype.Int8(v))
+			}
+		}
+		return func(fr *frame) {
+			v := fr.reg(source)
+			if v == nil {
+				fr.setReg(result, zero)
+				return
+			}
+			fr.setReg(result, xtype.ConvertInt8(targetType, v))
+		}
+	case reflect.Int16:
+		if target.PkgPath() == "" {
+			return func(fr *frame) {
+				v := fr.reg(source)
+				if v == nil {
+					fr.setReg(result, zero)
+					return
+				}
+				fr.setReg(result, xtype.Int16(v))
+			}
+		}
+		return func(fr *frame) {
+			v := fr.reg(source)
+			if v == nil {
+				fr.setReg(result, zero)
+				return
+			}
+			fr.setReg(result, xtype.ConvertInt16(targetType, v))
+		}
+	case reflect.Int32:
+		if target.PkgPath() == "" {
+			return func(fr *frame) {
+				v := fr.reg(source)
+				if v == nil {
+					fr.setReg(result, zero)
+					return
+				}
+				fr.setReg(result, xtype.Int32(v))
+			}
+		}
+		return func(fr *frame) {
+			v := fr.reg(source)
+			if v == nil {
+				fr.setReg(result, zero)
+				return
+			}
+			fr.setReg(result, xtype.ConvertInt32(targetType, v))
+		}
+	case reflect.Int64:
+		if target.PkgPath() == "" {
+			return func(fr *frame) {
+				v := fr.reg(source)
+				if v == nil {
+					fr.setReg(result, zero)
+					return
+				}
+				fr.setReg(result, xtype.Int64(v))
+			}
+		}
+		return func(fr *frame) {
+			v := fr.reg(source)
+			if v == nil {
+				fr.setReg(result, zero)
+				return
+			}
+			fr.setReg(result, xtype.ConvertInt64(targetType, v))
+		}
+	case reflect.Uint:
+		if target.PkgPath() == "" {
+			return func(fr *frame) {
+				v := fr.reg(source)
+				if v == nil {
+					fr.setReg(result, zero)
+					return
+				}
+				fr.setReg(result, xtype.Uint(v))
+			}
+		}
+		return func(fr *frame) {
+			v := fr.reg(source)
+			if v == nil {
+				fr.setReg(result, zero)
+				return
+			}
+			fr.setReg(result, xtype.ConvertUint(targetType, v))
+		}
+	case reflect.Uint8:
+		if target.PkgPath() == "" {
+			return func(fr *frame) {
+				v := fr.reg(source)
+				if v == nil {
+					fr.setReg(result, zero)
+					return
+				}
+				fr.setReg(result, xtype.Uint8(v))
+			}
+		}
+		return func(fr *frame) {
+			v := fr.reg(source)
+			if v == nil {
+				fr.setReg(result, zero)
+				return
+			}
+			fr.setReg(result, xtype.ConvertUint8(targetType, v))
+		}
+	case reflect.Uint16:
+		if target.PkgPath() == "" {
+			return func(fr *frame) {
+				v := fr.reg(source)
+				if v == nil {
+					fr.setReg(result, zero)
+					return
+				}
+				fr.setReg(result, xtype.Uint16(v))
+			}
+		}
+		return func(fr *frame) {
+			v := fr.reg(source)
+			if v == nil {
+				fr.setReg(result, zero)
+				return
+			}
+			fr.setReg(result, xtype.ConvertUint16(targetType, v))
+		}
+	case reflect.Uint32:
+		if target.PkgPath() == "" {
+			return func(fr *frame) {
+				v := fr.reg(source)
+				if v == nil {
+					fr.setReg(result, zero)
+					return
+				}
+				fr.setReg(result, xtype.Uint32(v))
+			}
+		}
+		return func(fr *frame) {
+			v := fr.reg(source)
+			if v == nil {
+				fr.setReg(result, zero)
+				return
+			}
+			fr.setReg(result, xtype.ConvertUint32(targetType, v))
+		}
+	case reflect.Uint64:
+		if target.PkgPath() == "" {
+			return func(fr *frame) {
+				v := fr.reg(source)
+				if v == nil {
+					fr.setReg(result, zero)
+					return
+				}
+				fr.setReg(result, xtype.Uint64(v))
+			}
+		}
+		return func(fr *frame) {
+			v := fr.reg(source)
+			if v == nil {
+				fr.setReg(result, zero)
+				return
+			}
+			fr.setReg(result, xtype.ConvertUint64(targetType, v))
+		}
+	case reflect.Uintptr:
+		if target.PkgPath() == "" {
+			return func(fr *frame) {
+				v := fr.reg(source)
+				if v == nil {
+					fr.setReg(result, zero)
+					return
+				}
+				fr.setReg(result, xtype.Uintptr(v))
+			}
+		}
+		return func(fr *frame) {
+			v := fr.reg(source)
+			if v == nil {
+				fr.setReg(result, zero)
+				return
+			}
+			fr.setReg(result, xtype.ConvertUintptr(targetType, v))
+		}
+	case reflect.Float32:
+		if target.PkgPath() == "" {
+			return func(fr *frame) {
+				v := fr.reg(source)
+				if v == nil {
+					fr.setReg(result, zero)
+					return
+				}
+				fr.setReg(result, xtype.Float32(v))
+			}
+		}
+		return func(fr *frame) {
+			v := fr.reg(source)
+			if v == nil {
+				fr.setReg(result, zero)
+				return
+			}
+			fr.setReg(result, xtype.ConvertFloat32(targetType, v))
+		}
+	case reflect.Float64:
+		if target.PkgPath() == "" {
+			return func(fr *frame) {
+				v := fr.reg(source)
+				if v == nil {
+					fr.setReg(result, zero)
+					return
+				}
+				fr.setReg(result, xtype.Float64(v))
+			}
+		}
+		return func(fr *frame) {
+			v := fr.reg(source)
+			if v == nil {
+				fr.setReg(result, zero)
+				return
+			}
+			fr.setReg(result, xtype.ConvertFloat64(targetType, v))
+		}
+	case reflect.Complex64:
+		if target.PkgPath() == "" {
+			return func(fr *frame) {
+				v := fr.reg(source)
+				if v == nil {
+					fr.setReg(result, zero)
+					return
+				}
+				fr.setReg(result, xtype.Complex64(v))
+			}
+		}
+		return func(fr *frame) {
+			v := fr.reg(source)
+			if v == nil {
+				fr.setReg(result, zero)
+				return
+			}
+			fr.setReg(result, xtype.ConvertComplex64(targetType, v))
+		}
+	case reflect.Complex128:
+		if target.PkgPath() == "" {
+			return func(fr *frame) {
+				v := fr.reg(source)
+				if v == nil {
+					fr.setReg(result, zero)
+					return
+				}
+				fr.setReg(result, xtype.Complex128(v))
+			}
+		}
+		return func(fr *frame) {
+			v := fr.reg(source)
+			if v == nil {
+				fr.setReg(result, zero)
+				return
+			}
+			fr.setReg(result, xtype.ConvertComplex128(targetType, v))
+		}
+	case reflect.String:
+		if target.PkgPath() == "" {
+			return func(fr *frame) {
+				v := fr.reg(source)
+				if v == nil {
+					fr.setReg(result, zero)
+					return
+				}
+				fr.setReg(result, xtype.String(v))
+			}
+		}
+		return func(fr *frame) {
+			v := fr.reg(source)
+			if v == nil {
+				fr.setReg(result, zero)
+				return
+			}
+			fr.setReg(result, xtype.ConvertString(targetType, v))
+		}
+	}
+	return nil
+}
