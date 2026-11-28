@@ -172,7 +172,9 @@ type indexAux struct {
 func (indexAux) instructionAux() {}
 
 // sliceAux records source/target types and whether each boundary is present.
-// Args are source, low, high, max, including -1 for omitted bounds.
+// Metadata-only Args preserve source/low/high/max slots, using -1 for
+// omitted bounds. Execution planning compacts omitted bounds; Low/High/Max
+// identify the present operands in order. Runtime fields name explicit slots.
 // MakeSliceCheck preserves the checks used when slicing an allocation.
 type sliceAux struct {
 	Source         reflect.Type
@@ -424,12 +426,12 @@ type bodyCallAux struct {
 
 func (bodyCallAux) instructionAux() {}
 
-// typedInstruction records partial execution metadata alongside the closure
-// backend. Each entry corresponds to one generated closure; Phi auxiliary data
+// typedInstruction records metadata for diagnostic stack compilation or the
+// independently selected instruction backend. Each entry has one executor; Phi auxiliary data
 // covers the entire group; the common Result and Args fields still refer to
 // the first Phi entry. Args preserve SSA operand order; ArgKinds distinguishes
 // the source class independently from whether Args has a valid register.
-// Opcode-specific lowering and static target resolution are incremental.
+// Execution compilation rejects descriptions without an executor.
 type typedInstruction struct {
 	Op       instructionOpcode
 	Result   register
@@ -531,6 +533,8 @@ func describeCallResults(pfn *function, instr ssa.Value) []register {
 }
 
 func bindRuntimeRegisters(d *typedInstruction) {
+	// Keep runtime tables independent so logical register rewrites cannot
+	// change already-bound executors or diagnostic metadata.
 	d.RuntimeResult = d.Result
 	d.RuntimeArgs = append([]register(nil), d.Args...)
 	d.RuntimeBound = true
@@ -763,8 +767,7 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 		d.Op = opFieldAddr
 		aux := describeField(pfn, v.X, v.Field)
 		if pfn.Interp.ctx.Mode&EnableInstructionExecution != 0 && pfn.Interp.ctx.Mode&EnableCachedReg != 0 {
-			aux.Cached = true
-			aux.ReceiverCache = pfn.newCacheReg()
+			aux.ReceiverCache, aux.Cached = pfn.fieldAddrCache[v]
 		}
 		d.Aux = aux
 	case *ssa.Lookup:

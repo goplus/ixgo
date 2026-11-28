@@ -3152,7 +3152,7 @@ func TestDescriptionDeferStackExecution(t *testing.T) {
 	for _, op := range []instructionOpcode{opGo, opDefer} {
 		for _, aux := range []instructionAux{callAux{}, bodyCallAux{}, externalCallAux{}} {
 			if makeInstruction(interp, typedInstruction{Op: op, Aux: aux}) != nil {
-				t.Fatal("unresolved go/defer should retain lowering")
+				t.Fatal("unresolved go/defer should have no executor")
 			}
 		}
 	}
@@ -3207,7 +3207,7 @@ func TestDescriptionRangeDefer(t *testing.T) {
 						case bodyCallAux:
 							body = true
 						}
-						// Missing token must retain lowering for every target kind.
+						// Missing token must reject execution for every target kind.
 						encoded, exists := p.index[instr.DeferStack]
 						if !exists {
 							t.Fatal("unallocated token")
@@ -3216,7 +3216,7 @@ func TestDescriptionRangeDefer(t *testing.T) {
 						missing := describeInstruction(p, instr, nil, nil)
 						p.index[instr.DeferStack] = encoded
 						if _, ok := missing.Aux.(callAux); !ok || makeInstruction(i, missing) != nil {
-							t.Fatal("missing token replaced lowering")
+							t.Fatal("missing token selected an unexpected executor")
 						}
 					}
 				}
@@ -3361,7 +3361,7 @@ func TestInstructionGoCallRunContext(t *testing.T) {
 	done := make(chan struct{})
 	run := instructionGoCall(interp, callDescription{
 		target: reflect.ValueOf(func() { close(done) }),
-	})
+	}, nil)
 	root := &frame{pfn: &function{Interp: interp}, block: -1}
 	run(root)
 	select {
@@ -3443,7 +3443,7 @@ func TestInstructionBuiltinOutputAndErrors(t *testing.T) {
 	}
 	for _, name := range []string{"unknown"} {
 		if makeInstruction(interp, typedInstruction{Op: opCall, Aux: builtinCallAux{callAux: callAux{callSiteAux: callSiteAux{Name: name}}}}) != nil {
-			t.Fatalf("unsupported builtin %s replaced lowering", name)
+			t.Fatalf("unsupported builtin %s selected an unexpected executor", name)
 		}
 	}
 	t.Run("closed channel", func(t *testing.T) {
@@ -3995,7 +3995,7 @@ func Run() int {
 	for _, op := range []instructionOpcode{opCall, opGo, opDefer} {
 		for _, aux := range []invokeCallAux{{}, {callAux: callAux{callSiteAux: callSiteAux{Target: -1}}, Method: "M"}} {
 			if makeInstruction(nil, typedInstruction{Op: op, Aux: aux}) != nil {
-				t.Fatal("unresolved invoke replaced lowering")
+				t.Fatal("unresolved invoke selected an unexpected executor")
 			}
 		}
 	}
@@ -4176,7 +4176,7 @@ func Run() int {
 	}
 	for _, op := range []instructionOpcode{opCall, opGo, opDefer} {
 		if makeInstruction(nil, typedInstruction{Op: op, Aux: closureCallAux{}}) != nil {
-			t.Fatal("unresolved closure replaced lowering")
+			t.Fatal("unresolved closure selected an unexpected executor")
 		}
 	}
 }
@@ -4254,7 +4254,7 @@ func Run() int {
 				aux := describeCall(p, &call.Call, nil, nil)
 				p.index[binding] = saved
 				if _, ok := aux.(callAux); !ok {
-					t.Fatal("missing binding replaced lowering")
+					t.Fatal("missing binding selected an unexpected executor")
 				}
 				fn := closure.Fn.(*ssa.Function)
 				body := i.funcs[fn]
@@ -4262,7 +4262,7 @@ func Run() int {
 				aux = describeCall(p, &call.Call, nil, nil)
 				i.funcs[fn] = body
 				if _, ok := aux.(callAux); !ok {
-					t.Fatal("missing body replaced lowering")
+					t.Fatal("missing body selected an unexpected executor")
 				}
 			}
 		}
@@ -5013,6 +5013,42 @@ func TestPR598ChangeTypeNilZero(t *testing.T) {
 	}
 }
 
+func TestPR598FieldAddrDescriptionIsIdempotent(t *testing.T) {
+	const source = `package main
+
+type record struct { padding byte; hidden int }
+func Run(p *record) *int { return &p.hidden }
+`
+	ctx := NewContext(DisableMemo | EnableInstructionExecution | EnableCachedReg)
+	i, err := ctx.LoadInterp("pr598_field_addr_description.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	p := i.funcs[i.mainpkg.Func("Run")]
+	var field *ssa.FieldAddr
+	for _, instr := range p.ssaInstrs {
+		if v, ok := instr.(*ssa.FieldAddr); ok {
+			field = v
+			break
+		}
+	}
+	if field == nil {
+		t.Fatal("missing FieldAddr")
+	}
+	beforeStack, beforeCache := len(p.stack), len(p.cacheRegs)
+	want := describeInstruction(p, field, field.Operands(nil), nil)
+	for n := 0; n < 100; n++ {
+		got := describeInstruction(p, field, field.Operands(nil), nil)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("description %d changed: %#v != %#v", n, got, want)
+		}
+	}
+	if len(p.stack) != beforeStack || len(p.cacheRegs) != beforeCache {
+		t.Fatalf("repeated descriptions grew layout: stack %d/%d cache %d/%d", len(p.stack), beforeStack, len(p.cacheRegs), beforeCache)
+	}
+}
+
 func TestInstructionReviewedInvokeAdapterDestinations(t *testing.T) {
 	receiver := reflect.TypeOf((*bytes.Buffer)(nil))
 	methods := new(sync.Map)
@@ -5042,5 +5078,178 @@ func Run() int {
 	got, err := i.RunFunc("Run")
 	if err != nil || got != 126 {
 		t.Fatalf("got %v, %v; want 126", got, err)
+	}
+}
+
+func TestInstructionSelectZeroLayout(t *testing.T) {
+	const source = `package main
+ type large struct{ Data [128]int }
+ func Run() int {
+  a,b:=make(chan large,1),make(chan large)
+  close(b)
+  a<-large{Data:[128]int{7}}
+  var disabled chan large
+  select {case x:=<-a: if x.Data[0]!=7 {panic("value")}; case <-disabled: }
+  select {case x,ok:=<-b: if ok || x.Data[0]!=0 {panic("closed")}; default: panic("default")}
+  select {case x:=<-a: return x.Data[0]; default: return 42}
+ }`
+	i, err := NewContext(EnableInstructionExecution|DisableMemo).LoadInterp("select_zero.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	for n := 0; n < 20; n++ {
+		got, err := i.RunFunc("Run")
+		if err != nil || got != 42 {
+			t.Fatalf("Run=%v,%v", got, err)
+		}
+	}
+}
+
+func TestPR598SliceAssertLazyInstruction(t *testing.T) {
+	for _, bound := range []bool{false, true} {
+		t.Run(fmt.Sprintf("bound=%v", bound), func(t *testing.T) {
+			for _, tc := range []struct {
+				name string
+				d    typedInstruction
+				in   []value
+				want value
+			}{
+				{"slice", typedInstruction{Op: opSlice, Result: 3, Args: []register{0, 1, 2}, Aux: sliceAux{Low: true, High: true, Target: reflect.TypeFor[[]int]()}}, []value{[]int{1, 2, 3}, 1, 2, nil}, []int{2}},
+				{"string", typedInstruction{Op: opSlice, Result: 3, Args: []register{0, 1, 2}, Aux: sliceAux{Low: true, High: true, Target: reflect.TypeFor[string]()}}, []value{"abc", 1, 2, nil}, "b"},
+				{"assert", typedInstruction{Op: opTypeAssert, Result: 1, Args: []register{0}, Aux: typeAssertAux{Source: reflect.TypeFor[any](), Target: reflect.TypeFor[int](), AssertedType: types.Typ[types.Int]}}, []value{42, nil}, 42},
+				{"assertCommaOK", typedInstruction{Op: opTypeAssert, Result: 1, Args: []register{0}, Aux: typeAssertAux{Source: reflect.TypeFor[any](), Target: reflect.TypeFor[int](), AssertedType: types.Typ[types.Int], CommaOk: true}}, []value{42, nil}, tuple{42, true}},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					d := tc.d
+					if bound {
+						bindRuntimeRegisters(&d)
+						d.Result, d.Args = 99, nil
+					}
+					execute := makeInstruction(nil, d)
+					// A nil function makes any normal-path InstrForPC lookup panic.
+					fr := &frame{stack: tc.in}
+					execute(fr)
+					if got := fr.stack[tc.d.Result]; !reflect.DeepEqual(got, tc.want) {
+						t.Fatalf("got %#v, want %#v", got, tc.want)
+					}
+					if tc.name == "assert" {
+						if allocs := testing.AllocsPerRun(100, func() { execute(fr) }); allocs != 0 {
+							t.Fatalf("successful assertion allocated %v times", allocs)
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestPR598SliceAssertPanicIdentity(t *testing.T) {
+	const source = `package main
+func Slice(n int) []int { return []int{1,2,3}[:n] }
+func Slice3(n int) []int { return []int{1,2,3}[0:1:n] }
+func Assert(v any) int { return v.(int) }
+func CommaOK(v any) bool { _, ok := v.(int); return ok }
+`
+	for _, mode := range []Mode{0, EnableInstructionExecution} {
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
+			ctx := NewContext(DisableMemo | mode)
+			var seen []funcInstr
+			replacement := fmt.Errorf("replacement panic")
+			ctx.SetPanic(func(info *PanicInfo) {
+				switch info.funcInstr.(type) {
+				case *ssa.Slice, *ssa.TypeAssert:
+					seen = append(seen, info.funcInstr)
+					if info.Parent() == nil || info.Position().Filename != "pr598_slice_assert.go" {
+						t.Errorf("invalid panic position: %v", info.Position())
+					}
+					if info.Error == nil {
+						t.Error("missing panic error")
+					}
+					info.Error = replacement
+				case *ssa.Function:
+				default:
+					t.Errorf("panic callback identity = %T", info.funcInstr)
+				}
+			})
+			i, err := ctx.LoadInterp("pr598_slice_assert.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			for _, tc := range []struct {
+				name string
+				arg  value
+			}{
+				{"Slice", 4}, {"Slice3", 4}, {"Assert", "bad"}, {"Assert", nil}, {"CommaOK", "bad"}, {"CommaOK", nil},
+			} {
+				seen = nil
+				got, err := i.RunFunc(tc.name, tc.arg)
+				if tc.name == "CommaOK" {
+					if err != nil || got != false {
+						t.Fatalf("CommaOK = %v, %v", got, err)
+					}
+				} else if err == nil || !strings.Contains(err.Error(), replacement.Error()) {
+					t.Fatalf("%s error = %v", tc.name, err)
+				}
+				if len(seen) != 1 {
+					t.Fatalf("%s callbacks = %d, want 1", tc.name, len(seen))
+				}
+				p := i.funcs[i.mainpkg.Func(tc.name)]
+				found := false
+				for _, block := range p.Fn.Blocks {
+					for _, instr := range block.Instrs {
+						if instr == seen[0] {
+							found = true
+						}
+					}
+				}
+				if !found {
+					t.Fatalf("%s callback did not receive original SSA instruction", tc.name)
+				}
+			}
+		})
+	}
+}
+
+func TestSharedMissingInitRule(t *testing.T) {
+	i, err := NewContext(DisableMemo).LoadInterp("missing_init.go", "package main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	prog := ssa.NewProgram(token.NewFileSet(), 0)
+	pkg := prog.CreatePackage(types.NewPackage("example.com/sharedmissinginit", "missing"), nil, nil, true)
+	sig := types.NewSignatureType(nil, nil, nil, nil, nil, false)
+	fn := prog.NewFunction("init", sig, "package initializer")
+	fn.Pkg = pkg
+	if !skipMissingInit(i, fn) {
+		t.Fatal("missing package initializer must be omitted")
+	}
+	key := fn.String()
+	directCallBindings.Store(key, DirectCallAdapter(func(DirectCallContext) {}))
+	defer directCallBindings.Delete(key)
+	if skipMissingInit(i, fn) {
+		t.Fatal("direct initializer must not be omitted")
+	}
+	// Overrides disable direct adapters, even when they are not reflected functions.
+	i.ctx.override.Store(key, struct{}{})
+	if !skipMissingInit(i, fn) {
+		t.Fatal("disabled direct initializer without reflected code must be omitted")
+	}
+	i.ctx.override.Store(key, reflect.ValueOf(func() {}))
+	if skipMissingInit(i, fn) {
+		t.Fatal("reflected initializer must not be omitted")
+	}
+	i.ctx.override.Delete(key)
+	directCallBindings.Delete(key)
+	fn.Blocks = []*ssa.BasicBlock{{}}
+	if skipMissingInit(i, fn) {
+		t.Fatal("source initializer must not be omitted")
+	}
+	ordinary := prog.NewFunction("ordinary", sig, "")
+	ordinary.Pkg = pkg
+	if skipMissingInit(i, ordinary) {
+		t.Fatal("missing ordinary function must not be omitted")
 	}
 }

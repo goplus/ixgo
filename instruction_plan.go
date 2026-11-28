@@ -4,8 +4,6 @@ package ixgo
 
 import (
 	"fmt"
-	"go/token"
-	"go/types"
 
 	"golang.org/x/tools/go/ssa"
 )
@@ -33,6 +31,13 @@ func planInstructionLayout(pfn *function) {
 				}
 			case *ssa.RunDefers:
 				pfn.hasRunDefers = true
+			case *ssa.FieldAddr:
+				if pfn.Interp.ctx.Mode&EnableInstructionExecution != 0 && pfn.Interp.ctx.Mode&EnableCachedReg != 0 {
+					if pfn.fieldAddrCache == nil {
+						pfn.fieldAddrCache = make(map[*ssa.FieldAddr]register)
+					}
+					pfn.fieldAddrCache[v] = pfn.newCacheReg()
+				}
 			case *ssa.Defer:
 				if v.DeferStack != nil {
 					pfn.hasDeferStack = true
@@ -75,33 +80,21 @@ func compileInstruction(pfn *function, instr ssa.Instruction) (typedInstruction,
 			return typedInstruction{}, nil
 		}
 	}
-	if load, ok := instr.(*ssa.UnOp); ok && load.Op == token.MUL &&
-		skipUnusedArrayDeref(load) && !arrayPointerOperandHasEffectAfter(load.X, load.Pos(), nil) {
+	if load, ok := instr.(*ssa.UnOp); ok && skipArrayRangeDeref(load) {
 		return typedInstruction{}, nil
 	}
-	// One Phi executor performs the complete parallel assignment.
-	if phi, ok := instr.(*ssa.Phi); ok && phi.Block().Instrs[0] != phi {
+	if phi, ok := instr.(*ssa.Phi); ok && skipNonleadingPhi(phi) {
 		return typedInstruction{}, nil
 	}
 	if store, ok := instr.(*ssa.Store); ok {
-		if addr, ok := store.Addr.(*ssa.FieldAddr); ok {
-			if ptr, ok := addr.X.Type().Underlying().(*types.Pointer); ok {
-				if fields, ok := ptr.Elem().Underlying().(*types.Struct); ok && fields.Field(addr.Field).Name() == "_" {
-					return typedInstruction{}, nil
-				}
-			}
+		if skipBlankFieldStore(store) {
+			return typedInstruction{}, nil
 		}
-		if pfn.Fn.Name() == "init" && pfn.Fn.Synthetic == "package initializer" {
-			pfn.Interp.chkinit[store.Addr.String()] = true
-		}
+		recordPackageInitStore(pfn, store)
 	}
 	if call, ok := instr.(*ssa.Call); ok {
-		if fn, ok := call.Call.Value.(*ssa.Function); ok && fn.Blocks == nil && fn.Pkg != nil && fn.Name() == "init" {
-			if _, ok := staticDirectAdapter(pfn.Interp, fn); !ok {
-				if _, ok := findExternFunc(pfn.Interp, fn); !ok {
-					return typedInstruction{}, nil
-				}
-			}
+		if fn, ok := call.Call.Value.(*ssa.Function); ok && skipMissingInit(pfn.Interp, fn) {
+			return typedInstruction{}, nil
 		}
 	}
 	var buf [32]*ssa.Value

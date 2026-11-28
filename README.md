@@ -10,6 +10,16 @@ A fast Go interpreter that supports all Go language features, including generics
 
 - Go 1.26 ~ 1.27
 
+### Experimental instruction backend
+
+Build with `-tags instruction` and set `EnableInstructionExecution` to select
+instruction execution. The default stack backend remains available. This mode
+disables memo optimization, including optimizers installed through
+`RegisterMemoPlugin`. Unsupported instruction descriptions reject loading;
+with `DisableRecover`, compilation panics propagate to the caller.
+`EnableInstructionDescriptions` alone keeps stack execution and generates
+metadata for diagnostics.
+
 ### Compilers
 
 - Go (gc)

@@ -173,6 +173,8 @@ type functionCompilation struct {
 	elidedExtract   map[*ssa.Extract]struct{}
 	// descriptionIndex caches registers when instruction metadata is enabled.
 	descriptionIndex map[ssa.Value]register
+	// fieldAddrCache reserves receiver cache slots during instruction planning.
+	fieldAddrCache map[*ssa.FieldAddr]register
 }
 
 const (
@@ -197,6 +199,7 @@ func (p *function) UnsafeRelease() {
 	p.pool = nil
 	p.index = nil
 	p.descriptionIndex = nil
+	p.fieldAddrCache = nil
 	p.cacheRegs = nil
 	p.gcPlan = nil
 	p.gcRegs = nil
@@ -706,7 +709,7 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 		}
 	case *ssa.Phi:
 		block := instr.Block()
-		if block.Instrs[0] != instr {
+		if skipNonleadingPhi(instr) {
 			return nil
 		}
 		var phis []*ssa.Phi
@@ -1325,17 +1328,10 @@ func makeInstr(interp *Interp, pfn *function, instr ssa.Instruction) func(fr *fr
 			}
 		}
 	case *ssa.Store:
-		// skip struct field _
-		if addr, ok := instr.Addr.(*ssa.FieldAddr); ok {
-			if p, ok := addr.X.Type().Underlying().(*types.Pointer); ok {
-				if s, ok := p.Elem().Underlying().(*types.Struct); ok && s.Field(addr.Field).Name() == "_" {
-					return nil
-				}
-			}
+		if skipBlankFieldStore(instr) {
+			return nil
 		}
-		if pfn.Fn.Name() == "init" && pfn.Fn.Synthetic == "package initializer" {
-			pfn.Interp.chkinit[instr.Addr.String()] = true
-		}
+		recordPackageInitStore(pfn, instr)
 		ia := pfn.regIndex(instr.Addr)
 		iv, kv, vv := pfn.regIndex3(instr.Val)
 		if kv.isStatic() {
@@ -1567,7 +1563,7 @@ func makeCallInstr(pfn *function, interp *Interp, instr ssa.Value, call *ssa.Cal
 			ext, ok := findExternFunc(interp, fn)
 			if !ok {
 				// skip pkg.init
-				if fn.Pkg != nil && fn.Name() == "init" {
+				if skipMissingInit(interp, fn) {
 					return nil
 				}
 				panic(fmt.Errorf("no code for function: %v", fn))

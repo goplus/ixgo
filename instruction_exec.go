@@ -83,9 +83,15 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 	case opSelect:
 		aux := d.Aux.(selectAux)
 		states := make([]selectOperands, len(aux.States))
+		zeros := make([]reflect.Value, len(aux.States))
+		recvZeros := make([]value, 0, len(aux.States))
 		pos := 0
 		for i, state := range aux.States {
 			states[i] = selectOperands{channel: args[pos], dir: state.Dir, elem: state.Chan.Elem(), hasSend: state.Send != nil}
+			zeros[i] = reflect.Zero(state.Chan.Elem())
+			if state.Dir == reflect.SelectRecv {
+				recvZeros = append(recvZeros, zeros[i].Interface())
+			}
 			pos++
 			if state.Send != nil {
 				states[i].send = args[pos]
@@ -97,13 +103,13 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 			if !aux.Blocking {
 				cases = append(cases, reflect.SelectCase{Dir: reflect.SelectDefault})
 			}
-			for _, state := range states {
+			for i, state := range states {
 				var send reflect.Value
 				if state.hasSend {
 					if v := fr.reg(state.send); v != nil {
 						send = reflect.ValueOf(v)
 					} else {
-						send = reflect.Zero(state.elem)
+						send = zeros[i]
 					}
 				}
 				cases = append(cases, reflect.SelectCase{Dir: state.dir, Chan: reflect.ValueOf(fr.reg(state.channel)), Send: send})
@@ -115,14 +121,16 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 			if !aux.Blocking {
 				chosen--
 			}
-			values := tuple{chosen, ok}
+			values := make(tuple, 2+len(recvZeros))
+			values[0], values[1] = chosen, ok
+			copy(values[2:], recvZeros)
+			recvIndex := 2
 			for i, state := range states {
 				if state.dir == reflect.SelectRecv {
-					v := reflect.Zero(state.elem).Interface()
 					if i == chosen && ok {
-						v = recv.Interface()
+						values[recvIndex] = recv.Interface()
 					}
-					values = append(values, v)
+					recvIndex++
 				}
 			}
 			fr.setReg(result, values)
@@ -245,7 +253,7 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 				return nil
 			}
 			// Go/defer prepare an ordinary function value, matching their
-			// evaluation and recover semantics in the permanent stack backend.
+			// evaluation and recover semantics of the stack backend in opblock.go.
 			desc = callDescription{receiver: target, args: args}
 		case builtinCallAux:
 			args := aux.Arguments
@@ -519,7 +527,7 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 		}
 		isNamed := aux.Target.Kind() == reflect.Slice && aux.Target != reflect.SliceOf(aux.Target.Elem())
 		return func(fr *frame) {
-			v := slice(fr, fr.pfn.InstrForPC(int(fr.ipc)-1), sliceOperands{low: aux.Low, high: aux.High, max: aux.Max}, aux.MakeSliceCheck, x, high, low, max)
+			v := slice(fr, lazyFuncInstr{fr: fr}, sliceOperands{low: aux.Low, high: aux.High, max: aux.Max}, aux.MakeSliceCheck, x, high, low, max)
 			if isNamed {
 				v = v.Convert(aux.Target)
 			}
@@ -642,7 +650,7 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 		}
 		operands := typeAssertOperands{typ: aux.Target, sourceType: aux.Source, assertedType: aux.AssertedType, commaOk: aux.CommaOk}
 		return func(fr *frame) {
-			fr.setReg(result, typeAssert(fr, fr.pfn.InstrForPC(int(fr.ipc)-1), operands, fr.reg(source)))
+			fr.setReg(result, typeAssert(fr, lazyFuncInstr{fr: fr}, operands, fr.reg(source)))
 		}
 	case opReturn:
 		aux := d.Aux.(returnAux)
@@ -770,15 +778,11 @@ func makeInstruction(interp *Interp, d typedInstruction) func(*frame) {
 
 // instructionGoCall builds the bytecode-only Go executor. Lowering keeps its
 // own implementation in opblock.go.
-func instructionGoCall(interp *Interp, desc callDescription, interfaceArgs ...[]bool) func(*frame) {
-	var ia []bool
-	if len(interfaceArgs) != 0 {
-		ia = interfaceArgs[0]
-	}
+func instructionGoCall(interp *Interp, desc callDescription, interfaceArgs []bool) func(*frame) {
 	return func(fr *frame) {
 		fn, args := desc.prepare(interp, fr)
 		root := rootFrame()
-		run := interp.prepareGoCall(root, fn, args, ia)
+		run := interp.prepareGoCall(root, fn, args, interfaceArgs)
 		atomic.AddInt32(&interp.goroutines, 1)
 		go func() {
 			defer atomic.AddInt32(&interp.goroutines, -1)
@@ -796,20 +800,16 @@ func instructionGoCall(interp *Interp, desc callDescription, interfaceArgs ...[]
 
 // instructionDeferCall builds the bytecode-only Defer executor. Lowering keeps
 // its own implementation in opblock.go.
-func instructionDeferCall(interp *Interp, desc callDescription, id register, interfaceArgs ...[]bool) func(*frame) {
-	var ia []bool
-	if len(interfaceArgs) != 0 {
-		ia = interfaceArgs[0]
-	}
+func instructionDeferCall(interp *Interp, desc callDescription, id register, interfaceArgs []bool) func(*frame) {
 	if id < 0 {
 		return func(fr *frame) {
 			fn, args := desc.prepare(interp, fr)
-			fr._defer = &_defer{fn: fn, args: args, interfaceArgs: ia, tail: fr._defer}
+			fr._defer = &_defer{fn: fn, args: args, interfaceArgs: interfaceArgs, tail: fr._defer}
 		}
 	}
 	return func(fr *frame) {
 		fn, args := desc.prepare(interp, fr)
-		d := &_defer{fn: fn, args: args, interfaceArgs: ia}
+		d := &_defer{fn: fn, args: args, interfaceArgs: interfaceArgs}
 		head, ok := deferStackHead(fr.reg(id))
 		if !ok {
 			panic("range-over-func defer: missing deferstack token")
