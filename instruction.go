@@ -136,6 +136,8 @@ func (nextAux) instructionAux() {}
 // Offset describe the field within the struct, after dereferencing Source;
 // Offset is relative to the start of that struct.
 type fieldAux struct {
+	Cached        bool
+	ReceiverCache register
 	Index         int
 	Source        reflect.Type
 	Field         reflect.Type
@@ -170,7 +172,9 @@ type indexAux struct {
 func (indexAux) instructionAux() {}
 
 // sliceAux records source/target types and whether each boundary is present.
-// Args are source, low, high, max, including -1 for omitted bounds.
+// Metadata-only Args preserve source/low/high/max slots, using -1 for
+// omitted bounds. Execution planning compacts omitted bounds; Low/High/Max
+// identify the present operands in order. Runtime fields name explicit slots.
 // MakeSliceCheck preserves the checks used when slicing an allocation.
 type sliceAux struct {
 	Source         reflect.Type
@@ -320,7 +324,7 @@ const (
 // signature.
 type callSiteAux struct {
 	// DeferStack is the enclosing defer-stack register, or -1 for the current
-	// frame or an unavailable token. An unavailable token retains lowering.
+	// frame or an unavailable token. Execution rejects unavailable tokens.
 	DeferStack register
 	Kind       callKind
 	Signature  reflect.Type
@@ -336,8 +340,8 @@ func (callSiteAux) instructionAux() {}
 
 // callAux adds result placement to common call metadata. A nil ExtractResults
 // uses the ordinary result register; a -1 entry denotes an unused result.
-// Unresolved targets retain this base auxiliary data.
-// Missing defer-stack or closure-binding registers also retain the base aux.
+// Unresolved targets and missing defer-stack or closure-binding registers retain
+// this base auxiliary data for diagnostics; instruction execution rejects it.
 // Dynamic calls with a target register use dynamicCallAux.
 type callAux struct {
 	callSiteAux
@@ -362,7 +366,7 @@ type directCallAux struct {
 
 func (directCallAux) instructionAux() {}
 
-// externalCallAux retains the callee register value allocated by lowering.
+// externalCallAux records the resolved external callee value.
 type externalCallAux struct {
 	callAux
 	External reflect.Value
@@ -414,7 +418,7 @@ func (builtinCallAux) instructionAux() {}
 
 func (dynamicCallAux) instructionAux() {}
 
-// bodyCallAux retains the interpreted body loaded by lowering.
+// bodyCallAux records the resolved interpreted body.
 type bodyCallAux struct {
 	callAux
 	Body *function
@@ -422,12 +426,12 @@ type bodyCallAux struct {
 
 func (bodyCallAux) instructionAux() {}
 
-// typedInstruction records partial execution metadata alongside the closure
-// backend. Each entry corresponds to one generated closure; Phi auxiliary data
+// typedInstruction records metadata for diagnostic stack compilation or the
+// independently selected instruction backend. Each entry has one executor; Phi auxiliary data
 // covers the entire group; the common Result and Args fields still refer to
 // the first Phi entry. Args preserve SSA operand order; ArgKinds distinguishes
 // the source class independently from whether Args has a valid register.
-// Opcode-specific lowering and static target resolution are incremental.
+// Execution compilation rejects descriptions without an executor.
 type typedInstruction struct {
 	Op       instructionOpcode
 	Result   register
@@ -529,6 +533,8 @@ func describeCallResults(pfn *function, instr ssa.Value) []register {
 }
 
 func bindRuntimeRegisters(d *typedInstruction) {
+	// Keep runtime tables independent so logical register rewrites cannot
+	// change already-bound executors or diagnostic metadata.
 	d.RuntimeResult = d.Result
 	d.RuntimeArgs = append([]register(nil), d.Args...)
 	d.RuntimeBound = true
@@ -759,7 +765,11 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 		d.Aux = describeField(pfn, v.X, v.Field)
 	case *ssa.FieldAddr:
 		d.Op = opFieldAddr
-		d.Aux = describeField(pfn, v.X, v.Field)
+		aux := describeField(pfn, v.X, v.Field)
+		if pfn.Interp.ctx.Mode&EnableInstructionExecution != 0 && pfn.Interp.ctx.Mode&EnableCachedReg != 0 {
+			aux.ReceiverCache, aux.Cached = pfn.fieldAddrCache[v]
+		}
+		d.Aux = aux
 	case *ssa.Lookup:
 		d.Op = opLookup
 		source := pfn.Interp.preToType(v.X.Type())
@@ -857,6 +867,11 @@ func describeInstruction(pfn *function, instr ssa.Instruction, operands []*ssa.V
 		d.Op = opRunDefers
 	case *ssa.DebugRef:
 		d.Op = opDebugRef
+		var variable *types.Var
+		if v, ok := v.Object().(*types.Var); ok {
+			variable = v
+		}
+		d.Aux = instructionDebugRefAux{Ref: v, Variable: variable}
 	}
 	return d
 }
@@ -890,7 +905,7 @@ func describeCall(pfn *function, call *ssa.CallCommon, dests []register, deferSt
 	if deferStack != nil {
 		base.DeferStack = descriptionRegister(pfn, deferStack)
 		if base.DeferStack < 0 {
-			// Keep lowering when the enclosing defer-stack token is unavailable.
+			// Preserve incomplete metadata for diagnostics; execution rejects it.
 			return base
 		}
 	}

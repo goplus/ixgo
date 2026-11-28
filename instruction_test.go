@@ -74,11 +74,14 @@ func gcPhi(n int) int { a,b:=new(int),new(int); *a=7; *b=9; p:=a; if n>0 { p=b }
 			}
 			gcFunctions := 0
 			for fn, p := range described.funcs {
+				if config.descriptions&EnableInstructionExecution != 0 {
+					checkInstructionLayout(t, p, extra&ExperimentalSupportGC != 0)
+				}
 				old := byName[fn.String()]
 				if old == nil {
 					t.Fatalf("description added function %s", fn)
 				}
-				if len(p.stack) != len(old.stack) || len(p.index) != len(old.index) || p.hasGCRegs != old.hasGCRegs {
+				if config.descriptions&EnableInstructionExecution == 0 && (len(p.stack) != len(old.stack) || len(p.index) != len(old.index) || p.hasGCRegs != old.hasGCRegs) {
 					t.Fatalf("%s layout changed: stack %d/%d, index %d/%d, GC %t/%t", fn, len(p.stack), len(old.stack), len(p.index), len(old.index), p.hasGCRegs, old.hasGCRegs)
 				}
 				registers := func(f *function) map[uint32]string {
@@ -88,11 +91,11 @@ func gcPhi(n int) int { a,b:=new(int),new(int); *a=7; *b=9; p:=a; if n>0 { p=b }
 					}
 					return result
 				}
-				if !reflect.DeepEqual(registers(p), registers(old)) {
+				if config.descriptions&EnableInstructionExecution == 0 && !reflect.DeepEqual(registers(p), registers(old)) {
 					t.Fatalf("%s register mapping changed: got %v want %v", fn, registers(p), registers(old))
 				}
-				if len(p.Code) != len(p.Instrs) || len(p.Instrs) != len(old.Instrs) ||
-					!reflect.DeepEqual(p.Blocks, old.Blocks) {
+				if len(p.Code) != len(p.Instrs) || (config.descriptions&EnableInstructionExecution == 0 && (len(p.Instrs) != len(old.Instrs) ||
+					!reflect.DeepEqual(p.Blocks, old.Blocks))) {
 					t.Fatalf("%s execution PC alignment changed: Code=%d, closures=%d/%d, blocks=%v/%v", fn, len(p.Code), len(p.Instrs), len(old.Instrs), p.Blocks, old.Blocks)
 				}
 				for pc := range p.Instrs {
@@ -104,18 +107,18 @@ func gcPhi(n int) int { a,b:=new(int),new(int); *a=7; *b=9; p:=a; if n>0 { p=b }
 						t.Fatalf("%s source position misaligned at PC %d", fn, pc)
 					}
 					// Generated builtin declarations may have a different source order.
-					if pos := p.PositionForPC(pc); pos.Filename == "description_layout.go" && pos != old.PositionForPC(pc) {
+					if pos := p.PositionForPC(pc); config.descriptions&EnableInstructionExecution == 0 && pos.Filename == "description_layout.go" && pos != old.PositionForPC(pc) {
 						t.Fatalf("%s source position changed at PC %d: %v/%v", fn, pc, pos, old.PositionForPC(pc))
 					}
 				}
-				if len(p.gcRegs) != len(old.gcRegs) {
+				if config.descriptions&EnableInstructionExecution == 0 && len(p.gcRegs) != len(old.gcRegs) {
 					t.Fatalf("%s GC PC count changed", fn)
 				}
 				if len(p.gcRegs) > 0 {
 					gcFunctions++
 				}
 				for pc := range p.gcRegs {
-					if !reflect.DeepEqual(p.gcRegsForPC(pc), old.gcRegsForPC(pc)) {
+					if config.descriptions&EnableInstructionExecution == 0 && !reflect.DeepEqual(p.gcRegsForPC(pc), old.gcRegsForPC(pc)) {
 						t.Fatalf("%s GC registers changed at PC %d", fn, pc)
 					}
 				}
@@ -1400,6 +1403,7 @@ func TestDescriptionClosureMetadata(t *testing.T) {
 func noCapture(n int) int { f:=func(x int) int { return x+1 }; return f(n) }
 func captures(a,b int) int { f:=func(x int) int { return x+a+b }; return f(3) }
 func nested(a int) func(int) int { return func(x int) int { return x+a } }
+func twoCaptures(a,b int) func(int) int { return func(x int) int { return x+a+b } }
 func top() func(int) int { return func(x int) int { return x+1 } }
 type Counter struct { Base int }
 func (c Counter) Add(n int) int { return c.Base+n }
@@ -2744,9 +2748,10 @@ func TestDescriptionStaticCallExecution(t *testing.T) {
 							t.Fatal("missing description executor")
 						}
 						name := runtime.FuncForPC(reflect.ValueOf(p.Instrs[pc]).Pointer()).Name()
-						// Call specializers and dynamic-call helpers are shared by both paths.
+						// Only stack execution may use the stack specializer exemption.
 						_, specialized := d.Aux.(dynamicCallAux)
-						if aux, ok := d.Aux.(bodyCallAux); ok && aux.Body.Recover == nil {
+						specialized = specialized && mode&EnableInstructionExecution == 0
+						if aux, ok := d.Aux.(bodyCallAux); ok && aux.Body.Recover == nil && mode&EnableInstructionExecution == 0 {
 							specialized = makeCallSpecializerInstr(i, aux.Body, aux.Arguments, aux.ExtractResults) != nil
 						}
 						if (strings.Contains(name, "makeInstruction") || strings.Contains(name, "makeBodyCallInstruction")) != (mode&EnableInstructionExecution != 0) && !specialized {
@@ -3148,7 +3153,7 @@ func TestDescriptionDeferStackExecution(t *testing.T) {
 	for _, op := range []instructionOpcode{opGo, opDefer} {
 		for _, aux := range []instructionAux{callAux{}, bodyCallAux{}, externalCallAux{}} {
 			if makeInstruction(interp, typedInstruction{Op: op, Aux: aux}) != nil {
-				t.Fatal("unresolved go/defer should retain lowering")
+				t.Fatal("unresolved go/defer should have no executor")
 			}
 		}
 	}
@@ -3203,7 +3208,7 @@ func TestDescriptionRangeDefer(t *testing.T) {
 						case bodyCallAux:
 							body = true
 						}
-						// Missing token must retain lowering for every target kind.
+						// Missing token must reject execution for every target kind.
 						encoded, exists := p.index[instr.DeferStack]
 						if !exists {
 							t.Fatal("unallocated token")
@@ -3212,7 +3217,7 @@ func TestDescriptionRangeDefer(t *testing.T) {
 						missing := describeInstruction(p, instr, nil, nil)
 						p.index[instr.DeferStack] = encoded
 						if _, ok := missing.Aux.(callAux); !ok || makeInstruction(i, missing) != nil {
-							t.Fatal("missing token replaced lowering")
+							t.Fatal("missing token selected an unexpected executor")
 						}
 					}
 				}
@@ -3357,7 +3362,7 @@ func TestInstructionGoCallRunContext(t *testing.T) {
 	done := make(chan struct{})
 	run := instructionGoCall(interp, callDescription{
 		target: reflect.ValueOf(func() { close(done) }),
-	})
+	}, nil)
 	root := &frame{pfn: &function{Interp: interp}, block: -1}
 	run(root)
 	select {
@@ -3439,7 +3444,7 @@ func TestInstructionBuiltinOutputAndErrors(t *testing.T) {
 	}
 	for _, name := range []string{"unknown"} {
 		if makeInstruction(interp, typedInstruction{Op: opCall, Aux: builtinCallAux{callAux: callAux{callSiteAux: callSiteAux{Name: name}}}}) != nil {
-			t.Fatalf("unsupported builtin %s replaced lowering", name)
+			t.Fatalf("unsupported builtin %s selected an unexpected executor", name)
 		}
 	}
 	t.Run("closed channel", func(t *testing.T) {
@@ -3991,7 +3996,7 @@ func Run() int {
 	for _, op := range []instructionOpcode{opCall, opGo, opDefer} {
 		for _, aux := range []invokeCallAux{{}, {callAux: callAux{callSiteAux: callSiteAux{Target: -1}}, Method: "M"}} {
 			if makeInstruction(nil, typedInstruction{Op: op, Aux: aux}) != nil {
-				t.Fatal("unresolved invoke replaced lowering")
+				t.Fatal("unresolved invoke selected an unexpected executor")
 			}
 		}
 	}
@@ -4172,7 +4177,7 @@ func Run() int {
 	}
 	for _, op := range []instructionOpcode{opCall, opGo, opDefer} {
 		if makeInstruction(nil, typedInstruction{Op: op, Aux: closureCallAux{}}) != nil {
-			t.Fatal("unresolved closure replaced lowering")
+			t.Fatal("unresolved closure selected an unexpected executor")
 		}
 	}
 }
@@ -4250,7 +4255,7 @@ func Run() int {
 				aux := describeCall(p, &call.Call, nil, nil)
 				p.index[binding] = saved
 				if _, ok := aux.(callAux); !ok {
-					t.Fatal("missing binding replaced lowering")
+					t.Fatal("missing binding selected an unexpected executor")
 				}
 				fn := closure.Fn.(*ssa.Function)
 				body := i.funcs[fn]
@@ -4258,7 +4263,7 @@ func Run() int {
 				aux = describeCall(p, &call.Call, nil, nil)
 				i.funcs[fn] = body
 				if _, ok := aux.(callAux); !ok {
-					t.Fatal("missing body replaced lowering")
+					t.Fatal("missing body selected an unexpected executor")
 				}
 			}
 		}
@@ -4480,5 +4485,1183 @@ func TestInstructionRuntimeRegisterSelection(t *testing.T) {
 	p.UnsafeRelease()
 	if p.descriptionIndex != nil {
 		t.Fatal("UnsafeRelease retained description registers")
+	}
+}
+
+func TestInstructionExclusiveBackend(t *testing.T) {
+	const source = `package main
+func pair(n int) (int, int) { return n, n+1 }
+func Run() (result int) {
+ defer func() { result++ }()
+ m := make(map[int]int)
+ s := make([]int, 2, 4)
+ for i := range s { a,b := pair(i); s[i] = a+b; m[i] = s[i] }
+ ch := make(chan int, 1)
+ ch <- m[1]
+ select { case n := <-ch: result = n; default: result = -10 }
+ for _, n := range m { result += n }
+ for _, r := range "a" { result += int(r)-97 }
+ return
+}`
+	for _, mode := range []Mode{0, EnableInstructionDescriptions, EnableInstructionExecution} {
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
+			i, err := NewContext(DisableMemo|mode).LoadInterp("exclusive.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			got, err := i.RunFunc("Run")
+			if err != nil || got != 8 {
+				t.Fatalf("Run=%v,%v; want 8", got, err)
+			}
+			for _, p := range i.funcs {
+				if mode&EnableInstructionExecution != 0 {
+					for pc, d := range p.Code {
+						if makeInstruction(i, d) == nil {
+							t.Fatalf("missing executor at %s:%d", p.Fn, pc)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestInstructionExclusiveTestdata(t *testing.T) {
+	for _, name := range []string{"boundmeth.go", "complit.go", "coverage.go", "defer.go", "fieldprom.go", "ifaceconv.go", "ifaceprom.go", "initorder.go", "methprom.go", "mrvchain.go", "range.go", "recover.go", "reflect.go", "static.go", "recover2.go", "issue23536.go", "issue5963.go"} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Run("testdata/"+name, nil, DisableMemo|EnableInstructionExecution); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestInstructionRejectsStackLowering(t *testing.T) {
+	defer func() {
+		if got := recover(); got != "stack lowering called with instruction execution enabled" {
+			t.Fatalf("panic=%v", got)
+		}
+	}()
+	makeInstr(&Interp{ctx: NewContext(EnableInstructionExecution)}, nil, nil)
+}
+
+func TestInstructionExclusiveGCAndDebug(t *testing.T) {
+	const source = `package main
+import "runtime"
+func Run(n int) int {
+ p,q := new(int),new(int)
+ *p,*q = 7,9
+ if n > 0 { p=q }
+ runtime.GC()
+ return *p
+}`
+	for _, extra := range []Mode{0, EnableCachedReg, ExperimentalSupportGC, ExperimentalSupportGC | EnableGCExecutionPlan} {
+		t.Run(fmt.Sprint(extra), func(t *testing.T) {
+			ctx := NewContext(EnableInstructionExecution | extra)
+			callbacks := 0
+			ctx.SetDebug(func(info *DebugInfo) { callbacks++ })
+			i, err := ctx.LoadInterp("exclusive_debug.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			for _, n := range []int{0, 1, 0, 1} {
+				got, err := i.RunFunc("Run", n)
+				want := 7
+				if n > 0 {
+					want = 9
+				}
+				if err != nil || got != want {
+					t.Fatalf("Run(%d)=%v,%v; want %d", n, got, err, want)
+				}
+			}
+			if callbacks == 0 {
+				t.Fatal("debug callback was not invoked")
+			}
+		})
+	}
+}
+
+func TestInstructionExclusiveBlankFields(t *testing.T) {
+	const source = `package main
+import "reflect"
+var calls int
+func value() int { calls++; return 9 }
+func Run() int {
+ v := struct { _ int; X int }{value(),3}
+ if reflect.ValueOf(v).Field(0).Int()!=0 { panic("blank field was written") }
+ return calls+v.X
+}`
+	for _, mode := range []Mode{0, EnableInstructionExecution} {
+		i, err := NewContext(mode).LoadInterp("blank.go", source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := i.RunFunc("Run")
+		i.UnsafeRelease()
+		if err != nil || got != 4 {
+			t.Fatalf("mode %v: %v,%v", mode, got, err)
+		}
+	}
+}
+
+func TestInstructionExclusiveLinknameInit(t *testing.T) {
+	const source = `package main
+import (_ "unsafe"; _ "pkg")
+//go:linkname a pkg.v
+var a int=200
+func main() {}`
+	for _, mode := range []Mode{0, EnableInstructionExecution} {
+		ctx := NewContext(mode)
+		ctx.AddImportFile("pkg", "pkg.go", "package pkg; var v int=100")
+		_, err := ctx.RunFile("main.go", source, nil)
+		if err == nil || err.Error() != `duplicated definition of symbol pkg.v, from main and pkg` {
+			t.Fatalf("mode %v: %v", mode, err)
+		}
+	}
+}
+
+func TestInstructionExclusiveDirectGoDefer(t *testing.T) {
+	const path = "example.com/instructiondirectgodefer"
+	RegisterDirectCalls(path, map[string]DirectCallAdapter{"Send": func(c DirectCallContext) { DirectCallArg[chan int](c, 0) <- 99 }})
+	const source = `package p
+func Send(ch chan int) { ch<-7 }
+func Run() int {
+ ch:=make(chan int,2)
+ func(){defer Send(ch)}()
+ go Send(ch)
+ return <-ch + <-ch
+}`
+	for _, mode := range []Mode{0, EnableInstructionExecution} {
+		ctx := NewContext(mode)
+		file, err := parser.ParseFile(ctx.FileSet, "direct_go_defer.go", source, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pkg, err := ctx.LoadAstFile(path, file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		i, err := NewInterp(ctx, pkg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := i.RunFunc("Run")
+		i.UnsafeRelease()
+		if err != nil || got != 14 {
+			t.Fatalf("mode %v: %v,%v", mode, got, err)
+		}
+	}
+}
+
+// checkInstructionLayout validates the instruction backend's own frame contract.
+func checkInstructionLayout(t *testing.T, p *function, gc bool) {
+	t.Helper()
+	check := func(r register) {
+		t.Helper()
+		if r < -1 || int(r) >= len(p.stack) {
+			t.Fatalf("%s: register %d outside frame of %d slots", p.Fn, r, len(p.stack))
+		}
+	}
+	if len(p.Code) != len(p.Instrs) || len(p.ssaInstrs) != len(p.Instrs) {
+		t.Fatalf("%s: instruction/source alignment mismatch", p.Fn)
+	}
+	if gc && p.hasGCRegs && (len(p.gcRegs) != len(p.Instrs) || len(p.gcReady) != len(p.Instrs)) {
+		t.Fatalf("%s: GC metadata does not cover every PC", p.Fn)
+	}
+	for _, d := range p.Code {
+		if !d.RuntimeBound {
+			t.Fatalf("%s: unbound instruction", p.Fn)
+		}
+		check(d.Result)
+		check(d.RuntimeResult)
+		for _, r := range d.Args {
+			check(r)
+		}
+		for _, r := range d.RuntimeArgs {
+			check(r)
+		}
+		if aux, ok := d.Aux.(fieldAux); ok && aux.Cached {
+			check(aux.ReceiverCache)
+		}
+		if aux, ok := d.Aux.(phiAux); ok {
+			for _, r := range aux.Results {
+				check(r)
+			}
+			for _, r := range aux.RuntimeResults {
+				check(r)
+			}
+			for _, edges := range aux.RuntimeEdges {
+				for _, r := range edges {
+					check(r)
+				}
+			}
+		}
+	}
+	for pc := range p.gcRegs {
+		for _, r := range p.gcRegsForPC(pc) {
+			check(r)
+		}
+	}
+	for _, pc := range p.Blocks {
+		if pc < 0 || pc >= len(p.Instrs) {
+			t.Fatalf("%s: block PC %d out of range", p.Fn, pc)
+		}
+	}
+}
+
+func TestInstructionCreationErrors(t *testing.T) {
+	const source = `package main
+func channel(n int) { _=make(chan int,n) }
+func slice(n,c int) { _=make([]int,n,c) }
+func recoverSlice(n,c int) (ok bool) { defer func(){ok=recover()!=nil}(); slice(n,c); return }
+`
+	i, err := NewContext(EnableInstructionExecution|DisableMemo).LoadInterp("creation_errors.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	for _, tc := range []struct {
+		name    string
+		args    []any
+		message string
+	}{
+		{"channel", []any{-1}, "makechan: size out of range"},
+		{"slice", []any{-1, 0}, "makeslice: len out of range"},
+		{"slice", []any{0, -1}, "makeslice: cap out of range"},
+	} {
+		_, err := i.RunFunc(tc.name, tc.args...)
+		if err == nil || !strings.Contains(err.Error(), tc.message) {
+			t.Fatalf("%s%v: %v", tc.name, tc.args, err)
+		}
+	}
+	got, err := i.RunFunc("recoverSlice", 2, 1)
+	if err != nil || got != true {
+		t.Fatalf("recoverSlice: %v,%v", got, err)
+	}
+	// Directional channel types are supported by the runtime factory even though
+	// ordinary SSA make instructions generally use a bidirectional channel.
+	for _, dir := range []reflect.ChanDir{reflect.RecvDir, reflect.SendDir} {
+		typ := reflect.ChanOf(dir, reflect.TypeOf(0))
+		run := makeInstruction(i, typedInstruction{Op: opMakeChan, Result: 1, Args: []register{0}, Aux: creationAux{Target: typ}})
+		fr := &frame{stack: []value{1, nil}}
+		run(fr)
+		if reflect.TypeOf(fr.reg(1)) != typ {
+			t.Fatal("directional channel type lost")
+		}
+	}
+}
+
+func TestInstructionReviewedCallDestinations(t *testing.T) {
+	const source = `package main
+import "strings"
+func pair(x int) (int,int) { return x,x+1 }
+func pair2(x,y int) (int,int) { return x+y,x-y }
+func recovered(x int) (a,b int) { defer func(){ if recover()!=nil { a,b=x,x+1 } }(); panic(x) }
+type source interface { Pair(int) (int,int) }
+type item int
+func (v item) Pair(x int) (int,int) { return int(v)+x,x }
+func Run(n int) int {
+ total:=0
+ f:=pair
+ var v source=item(3)
+ for x:=0;x<n;x++ {
+  a,b:=pair(x); total+=a+b
+  c,d:=pair2(x,2); total+=c+d
+  e,_:=pair(x); total+=e
+  g,h:=f(x); total+=g+h
+  j,k:=v.Pair(x); total+=j+k
+  l,m:=recovered(x); total+=l+m
+  s,_,ok:=strings.Cut("a:b",":"); if !ok { panic("cut") }; total+=len(s)
+  captured:=x
+  q,r:=func(y int)(int,int){ return captured+y,y }(2); total+=q+r
+  pair(x)
+ }
+ return total
+}`
+	var want interface{}
+	for _, mode := range []Mode{0, EnableInstructionExecution, EnableInstructionExecution | EnableCachedReg, EnableInstructionExecution | ExperimentalSupportGC} {
+		ctx := NewContext(DisableMemo | mode)
+		ctx.SetLeastCallForEnablePool(0)
+		i, err := ctx.LoadInterp("review_calls.go", source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if mode&EnableInstructionExecution != 0 {
+			var elided int
+			for _, fn := range i.funcs {
+				elided += len(fn.elidedExtract)
+				for _, instr := range fn.ssaInstrs {
+					if ex, ok := instr.(*ssa.Extract); ok {
+						if _, found := fn.elidedExtract[ex]; found {
+							t.Fatalf("elided Extract still executes in %s", fn.Fn)
+						}
+					}
+				}
+				if len(fn.elidedTuples) > 0 && fn.childFrameReg != fn.elidedTuples[0] {
+					t.Fatalf("%s has no reusable tuple slot", fn.Fn)
+				}
+			}
+			if elided == 0 {
+				t.Fatal("no call Extracts elided")
+			}
+		}
+		for repeat := 0; repeat < 3; repeat++ {
+			got, runErr := i.RunFunc("Run", 10)
+			if runErr != nil {
+				t.Fatal(runErr)
+			}
+			if mode == 0 {
+				want = got
+			} else if got != want {
+				t.Fatalf("mode %v: got %v want %v", mode, got, want)
+			}
+		}
+		i.UnsafeRelease()
+	}
+}
+
+func TestInstructionReviewedBodySpecializers(t *testing.T) {
+	const source = `package main
+func one(x int)(int,int){return x,x+1}
+func two(x,y int)(int,int){return x+y,x-y}
+func recovering(x int)(a,b int){defer func(){recover()}();return x,x}
+func Run() int {a,b:=one(5);c,d:=two(a,b);return c+d}`
+	i, err := NewContext(DisableMemo|EnableInstructionExecution).LoadInterp("review_specializers.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	for _, fn := range i.funcs {
+		switch fn.Fn.Name() {
+		case "one", "two":
+			args := []register{0}
+			if fn.Fn.Name() == "two" {
+				args = append(args, 1)
+			}
+			if makeInstructionBodyCallSpecializer(fn, args, []register{2, 3}) == nil {
+				t.Fatalf("missing specializer for %s", fn.Fn)
+			}
+			if makeInstructionBodyCallSpecializer(fn, args, []register{2, -1}) != nil {
+				t.Fatal("specialized discarded result")
+			}
+			atomic.StoreInt32(&fn.cached, 1)
+			caller := &frame{pfn: &function{}, stack: []value{5, 6, nil, nil, nil}}
+			caller.pfn.childFrameReg = 4
+			run := makeInstructionBodyCallSpecializer(fn, args, []register{2, 3})
+			run(caller)
+			spare, ok := caller.stack[4].(*frame)
+			if !ok || spare.caller != nil || caller.callee != nil {
+				t.Fatalf("%s did not cache a detached child", fn.Fn)
+			}
+			run(caller)
+			if caller.stack[4] != spare {
+				t.Fatalf("%s did not reuse its child", fn.Fn)
+			}
+		case "recovering":
+			if makeInstructionBodyCallSpecializer(fn, []register{0}, []register{2, 3}) != nil {
+				t.Fatal("specialized recovering body")
+			}
+		}
+	}
+	got, err := i.RunFunc("Run")
+	if err != nil || got != 10 {
+		t.Fatalf("got %v, %v; want 10", got, err)
+	}
+}
+
+func TestPR598FieldAddrOffsetExecution(t *testing.T) {
+	type record struct {
+		padding byte
+		hidden  int
+	}
+	typ := reflect.TypeFor[record]()
+	field := typ.Field(1)
+	for _, cached := range []bool{false, true} {
+		for _, bound := range []bool{false, true} {
+			t.Run(fmt.Sprintf("cached=%t/bound=%t", cached, bound), func(t *testing.T) {
+				left, right := &record{hidden: 7}, &record{hidden: 11}
+				d := typedInstruction{
+					Op: opFieldAddr, Result: 1, Args: []register{0},
+					Aux: fieldAux{Index: -1, Source: reflect.TypeFor[*record](), Field: field.Type, Offset: field.Offset, Cached: cached, ReceiverCache: 2},
+				}
+				if bound {
+					bindRuntimeRegisters(&d)
+					d.Result, d.Args = 99, nil
+				}
+				execute := makeInstruction(nil, d)
+				fr := &frame{stack: []value{left, nil, nil}}
+				for _, receiver := range []*record{left, left, right, right, left} {
+					fr.stack[0] = receiver
+					execute(fr)
+					if got := fr.stack[1].(*int); got != &receiver.hidden {
+						t.Fatalf("address = %p, want %p", got, &receiver.hidden)
+					}
+				}
+				if cached && fr.stack[2] != left {
+					t.Fatalf("receiver cache = %v, want %v", fr.stack[2], left)
+				}
+			})
+		}
+	}
+}
+
+func TestPR598FieldExecutionModes(t *testing.T) {
+	const source = `package main
+import "runtime"
+type inner struct { hidden int }
+type record struct { padding byte; inner }
+type pointer *record
+func identity(v inner) inner { return v }
+func read(v inner) int { return identity(v).hidden }
+func update() int {
+ left, right := &record{inner:inner{hidden:1}}, &record{inner:inner{hidden:10}}
+ for i:=0; i<6; i++ {
+  current:=pointer(left)
+  if i>=3 { current=pointer(right) }
+  current.hidden += i
+  runtime.GC()
+ }
+ return read(left.inner)*100+read(right.inner)
+}
+func nilAfterValid() {
+ current:=new(record)
+ for i:=0; i<2; i++ {
+  if i>0 { current=nil }
+  _=&current.hidden
+ }
+}
+`
+	for _, mode := range []Mode{0, EnableCachedReg, ExperimentalSupportGC, ExperimentalSupportGC | EnableCachedReg, ExperimentalSupportGC | EnableGCExecutionPlan | EnableCachedReg} {
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
+			ctx := NewContext(DisableMemo | EnableInstructionExecution | mode)
+			ctx.SetLeastCallForEnablePool(0)
+			i, err := ctx.LoadInterp("pr598_fields.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			p := i.funcs[i.mainpkg.Func("update")]
+			cachedFields := 0
+			for _, d := range p.Code {
+				if d.Op != opFieldAddr {
+					continue
+				}
+				aux := d.Aux.(fieldAux)
+				if aux.Cached != (mode&EnableCachedReg != 0) {
+					t.Fatalf("unexpected cache metadata: %#v", aux)
+				}
+				if aux.Cached {
+					cachedFields++
+					found := false
+					for _, reg := range p.cacheRegs {
+						found = found || reg == aux.ReceiverCache
+					}
+					if !found {
+						t.Fatalf("cache register %d is not GC tracked", aux.ReceiverCache)
+					}
+				}
+			}
+			if mode&EnableCachedReg != 0 && cachedFields == 0 {
+				t.Fatal("missing cached field instructions")
+			}
+			for n := 0; n < 3; n++ {
+				if got, err := i.RunFunc("update"); err != nil || got != 422 {
+					t.Fatalf("update = %v, %v; want 422", got, err)
+				}
+			}
+			if _, err := i.RunFunc("nilAfterValid"); err == nil || !strings.Contains(err.Error(), "invalid memory address or nil pointer dereference") {
+				t.Fatalf("nil receiver error = %v", err)
+			}
+		})
+	}
+}
+
+func TestPR598ChangeTypeNilZero(t *testing.T) {
+	type pointer *int
+	type slice []int
+	type mapping map[string]int
+	type channel chan int
+	type function func() int
+	type record struct{ hidden int }
+	for _, target := range []reflect.Type{
+		reflect.TypeFor[pointer](), reflect.TypeFor[slice](), reflect.TypeFor[mapping](),
+		reflect.TypeFor[channel](), reflect.TypeFor[function](), reflect.TypeFor[record](),
+		reflect.TypeFor[[3]int](), reflect.TypeFor[any](), reflect.TypeFor[int](),
+	} {
+		t.Run(target.String(), func(t *testing.T) {
+			for _, bound := range []bool{false, true} {
+				d := typedInstruction{Op: opChangeType, Result: 1, Args: []register{0}, Aux: conversionAux{Source: target, Target: target}}
+				if bound {
+					bindRuntimeRegisters(&d)
+					d.Result, d.Args = 99, nil
+				}
+				execute := makeInstruction(nil, d)
+				fr := &frame{stack: []value{nil, nil}}
+				want := reflect.Zero(target).Interface()
+				for n := 0; n < 3; n++ {
+					execute(fr)
+					if !reflect.DeepEqual(fr.stack[1], want) || reflect.TypeOf(fr.stack[1]) != reflect.TypeOf(want) {
+						t.Fatalf("zero = %#v (%T), want %#v (%T)", fr.stack[1], fr.stack[1], want, want)
+					}
+				}
+				if allocs := testing.AllocsPerRun(100, func() { execute(fr) }); allocs != 0 {
+					t.Fatalf("nil ChangeType allocated %v times", allocs)
+				}
+			}
+		})
+	}
+}
+
+func TestPR598FieldAddrDescriptionIsIdempotent(t *testing.T) {
+	const source = `package main
+
+type record struct { padding byte; hidden int }
+func Run(p *record) *int { return &p.hidden }
+`
+	ctx := NewContext(DisableMemo | EnableInstructionExecution | EnableCachedReg)
+	i, err := ctx.LoadInterp("pr598_field_addr_description.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	p := i.funcs[i.mainpkg.Func("Run")]
+	var field *ssa.FieldAddr
+	for _, instr := range p.ssaInstrs {
+		if v, ok := instr.(*ssa.FieldAddr); ok {
+			field = v
+			break
+		}
+	}
+	if field == nil {
+		t.Fatal("missing FieldAddr")
+	}
+	beforeStack, beforeCache := len(p.stack), len(p.cacheRegs)
+	want := describeInstruction(p, field, field.Operands(nil), nil)
+	for n := 0; n < 100; n++ {
+		got := describeInstruction(p, field, field.Operands(nil), nil)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("description %d changed: %#v != %#v", n, got, want)
+		}
+	}
+	if len(p.stack) != beforeStack || len(p.cacheRegs) != beforeCache {
+		t.Fatalf("repeated descriptions grew layout: stack %d/%d cache %d/%d", len(p.stack), beforeStack, len(p.cacheRegs), beforeCache)
+	}
+}
+
+func TestInstructionReviewedInvokeAdapterDestinations(t *testing.T) {
+	receiver := reflect.TypeOf((*bytes.Buffer)(nil))
+	methods := new(sync.Map)
+	methods.Store("ReadByte", DirectCallAdapter(func(c DirectCallContext) { c.SetResult(tuple{byte(42), nil}) }))
+	old, existed := directCallMethods.Load(receiver)
+	directCallMethods.Store(receiver, methods)
+	defer func() {
+		if existed {
+			directCallMethods.Store(receiver, old)
+		} else {
+			directCallMethods.Delete(receiver)
+		}
+	}()
+	const source = `package main
+import("bytes";"io")
+func Run() int {
+ var r io.ByteReader=bytes.NewBufferString("abc")
+ total:=0
+ for j:=0;j<3;j++ { b,err:=r.ReadByte();if err!=nil {panic(err)};total+=int(b) }
+ return total
+}`
+	i, err := NewContext(DisableMemo|EnableInstructionExecution).LoadInterp("review_invoke_adapter.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	got, err := i.RunFunc("Run")
+	if err != nil || got != 126 {
+		t.Fatalf("got %v, %v; want 126", got, err)
+	}
+}
+
+func TestInstructionSelectZeroLayout(t *testing.T) {
+	const source = `package main
+ type large struct{ Data [128]int }
+ func Run() int {
+  a,b:=make(chan large,1),make(chan large)
+  close(b)
+  a<-large{Data:[128]int{7}}
+  var disabled chan large
+  select {case x:=<-a: if x.Data[0]!=7 {panic("value")}; case <-disabled: }
+  select {case x,ok:=<-b: if ok || x.Data[0]!=0 {panic("closed")}; default: panic("default")}
+  select {case x:=<-a: return x.Data[0]; default: return 42}
+ }`
+	i, err := NewContext(EnableInstructionExecution|DisableMemo).LoadInterp("select_zero.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	for n := 0; n < 20; n++ {
+		got, err := i.RunFunc("Run")
+		if err != nil || got != 42 {
+			t.Fatalf("Run=%v,%v", got, err)
+		}
+	}
+}
+
+func TestPR598SliceAssertLazyInstruction(t *testing.T) {
+	for _, bound := range []bool{false, true} {
+		t.Run(fmt.Sprintf("bound=%v", bound), func(t *testing.T) {
+			for _, tc := range []struct {
+				name string
+				d    typedInstruction
+				in   []value
+				want value
+			}{
+				{"slice", typedInstruction{Op: opSlice, Result: 3, Args: []register{0, 1, 2}, Aux: sliceAux{Low: true, High: true, Target: reflect.TypeFor[[]int]()}}, []value{[]int{1, 2, 3}, 1, 2, nil}, []int{2}},
+				{"string", typedInstruction{Op: opSlice, Result: 3, Args: []register{0, 1, 2}, Aux: sliceAux{Low: true, High: true, Target: reflect.TypeFor[string]()}}, []value{"abc", 1, 2, nil}, "b"},
+				{"assert", typedInstruction{Op: opTypeAssert, Result: 1, Args: []register{0}, Aux: typeAssertAux{Source: reflect.TypeFor[any](), Target: reflect.TypeFor[int](), AssertedType: types.Typ[types.Int]}}, []value{42, nil}, 42},
+				{"assertCommaOK", typedInstruction{Op: opTypeAssert, Result: 1, Args: []register{0}, Aux: typeAssertAux{Source: reflect.TypeFor[any](), Target: reflect.TypeFor[int](), AssertedType: types.Typ[types.Int], CommaOk: true}}, []value{42, nil}, tuple{42, true}},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					d := tc.d
+					if bound {
+						bindRuntimeRegisters(&d)
+						d.Result, d.Args = 99, nil
+					}
+					execute := makeInstruction(nil, d)
+					// A nil function makes any normal-path InstrForPC lookup panic.
+					fr := &frame{stack: tc.in}
+					execute(fr)
+					if got := fr.stack[tc.d.Result]; !reflect.DeepEqual(got, tc.want) {
+						t.Fatalf("got %#v, want %#v", got, tc.want)
+					}
+					if tc.name == "assert" {
+						if allocs := testing.AllocsPerRun(100, func() { execute(fr) }); allocs != 0 {
+							t.Fatalf("successful assertion allocated %v times", allocs)
+						}
+					}
+					if tc.name == "slice" || tc.name == "string" {
+						// The result header is boxed once; lazy diagnostics add no allocation.
+						if allocs := testing.AllocsPerRun(100, func() { execute(fr) }); allocs != 1 {
+							t.Fatalf("slice executor allocations = %v, want one result box", allocs)
+						}
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestPR598SliceAssertPanicIdentity(t *testing.T) {
+	const source = `package main
+func Slice(n int) []int { return []int{1,2,3}[:n] }
+func Slice3(n int) []int { return []int{1,2,3}[0:1:n] }
+func Assert(v any) int { return v.(int) }
+func CommaOK(v any) bool { _, ok := v.(int); return ok }
+`
+	for _, mode := range []Mode{0, EnableInstructionExecution} {
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
+			ctx := NewContext(DisableMemo | mode)
+			var seen []funcInstr
+			replacement := fmt.Errorf("replacement panic")
+			ctx.SetPanic(func(info *PanicInfo) {
+				switch info.funcInstr.(type) {
+				case *ssa.Slice, *ssa.TypeAssert:
+					seen = append(seen, info.funcInstr)
+					if info.Parent() == nil || info.Position().Filename != "pr598_slice_assert.go" {
+						t.Errorf("invalid panic position: %v", info.Position())
+					}
+					if info.Error == nil {
+						t.Error("missing panic error")
+					}
+					info.Error = replacement
+				case *ssa.Function:
+				default:
+					t.Errorf("panic callback identity = %T", info.funcInstr)
+				}
+			})
+			i, err := ctx.LoadInterp("pr598_slice_assert.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			for _, tc := range []struct {
+				name string
+				arg  value
+			}{
+				{"Slice", 4}, {"Slice3", 4}, {"Assert", "bad"}, {"Assert", nil}, {"CommaOK", "bad"}, {"CommaOK", nil},
+			} {
+				seen = nil
+				got, err := i.RunFunc(tc.name, tc.arg)
+				if tc.name == "CommaOK" {
+					if err != nil || got != false {
+						t.Fatalf("CommaOK = %v, %v", got, err)
+					}
+				} else if err == nil || !strings.Contains(err.Error(), replacement.Error()) {
+					t.Fatalf("%s error = %v", tc.name, err)
+				}
+				if len(seen) != 1 {
+					t.Fatalf("%s callbacks = %d, want 1", tc.name, len(seen))
+				}
+				p := i.funcs[i.mainpkg.Func(tc.name)]
+				found := false
+				for _, block := range p.Fn.Blocks {
+					for _, instr := range block.Instrs {
+						if instr == seen[0] {
+							found = true
+						}
+					}
+				}
+				if !found {
+					t.Fatalf("%s callback did not receive original SSA instruction", tc.name)
+				}
+			}
+		})
+	}
+}
+
+func TestSharedMissingInitRule(t *testing.T) {
+	i, err := NewContext(DisableMemo).LoadInterp("missing_init.go", "package main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	prog := ssa.NewProgram(token.NewFileSet(), 0)
+	pkg := prog.CreatePackage(types.NewPackage("example.com/sharedmissinginit", "missing"), nil, nil, true)
+	sig := types.NewSignatureType(nil, nil, nil, nil, nil, false)
+	fn := prog.NewFunction("init", sig, "package initializer")
+	fn.Pkg = pkg
+	if !skipMissingInit(i, fn) {
+		t.Fatal("missing package initializer must be omitted")
+	}
+	key := fn.String()
+	directCallBindings.Store(key, DirectCallAdapter(func(DirectCallContext) {}))
+	defer directCallBindings.Delete(key)
+	if skipMissingInit(i, fn) {
+		t.Fatal("direct initializer must not be omitted")
+	}
+	// Overrides disable direct adapters, even when they are not reflected functions.
+	i.ctx.override.Store(key, struct{}{})
+	if !skipMissingInit(i, fn) {
+		t.Fatal("disabled direct initializer without reflected code must be omitted")
+	}
+	i.ctx.override.Store(key, reflect.ValueOf(func() {}))
+	if skipMissingInit(i, fn) {
+		t.Fatal("reflected initializer must not be omitted")
+	}
+	i.ctx.override.Delete(key)
+	directCallBindings.Delete(key)
+	fn.Blocks = []*ssa.BasicBlock{{}}
+	if skipMissingInit(i, fn) {
+		t.Fatal("source initializer must not be omitted")
+	}
+	ordinary := prog.NewFunction("ordinary", sig, "")
+	ordinary.Pkg = pkg
+	if skipMissingInit(i, ordinary) {
+		t.Fatal("missing ordinary function must not be omitted")
+	}
+}
+
+func TestPR598ExecutorBoundaryCoverage(t *testing.T) {
+	type ints []int
+	cases := []struct {
+		name  string
+		d     typedInstruction
+		stack []value
+		want  value
+	}{
+		{"index", typedInstruction{Op: opIndex, Result: 2, Args: []register{0, 1}, Aux: indexAux{}}, []value{[]int{3, 9}, 1, nil}, 9},
+		{"stringLookup", typedInstruction{Op: opLookup, Result: 2, Args: []register{0, 1}, Aux: lookupAux{}}, []value{"abc", 1, nil}, byte('b')},
+		{"mapLookup", typedInstruction{Op: opLookup, Result: 2, Args: []register{0, 1}, Aux: lookupAux{Element: reflect.TypeFor[int]()}}, []value{map[string]int{"x": 7}, "x", nil}, 7},
+		{"threeIndexSlice", typedInstruction{Op: opSlice, Result: 4, Args: []register{0, 1, 2, 3}, Aux: sliceAux{Low: true, High: true, Max: true, Target: reflect.TypeFor[[]int]()}}, []value{[]int{1, 2, 3}, 0, 2, 2, nil}, []int{1, 2}},
+		{"namedSlice", typedInstruction{Op: opSlice, Result: 3, Args: []register{0, 1, 2}, Aux: sliceAux{Low: true, High: true, Target: reflect.TypeFor[ints]()}}, []value{ints{1, 2, 3}, 1, 2, nil}, ints{2}},
+		{"arrayPointer", typedInstruction{Op: opSliceToArrayPointer, Result: 1, Args: []register{0}, Aux: conversionAux{Target: reflect.TypeFor[*[2]int]()}}, []value{[]int{3, 4}, nil}, &[2]int{3, 4}},
+		{"interfaceMove", typedInstruction{Op: opMakeInterface, Result: 1, Args: []register{0}, Aux: conversionAux{}}, []value{42, nil}, 42},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			run := makeInstruction(nil, tc.d)
+			fr := &frame{stack: tc.stack}
+			run(fr)
+			if !reflect.DeepEqual(fr.reg(tc.d.Result), tc.want) {
+				t.Fatalf("got %#v want %#v", fr.reg(tc.d.Result), tc.want)
+			}
+		})
+	}
+	for _, d := range []typedInstruction{
+		{Op: opDebugRef},
+		{Op: opRange, Args: []register{0}, Aux: rangeAux{Source: reflect.TypeFor[int]()}},
+		{Op: opFieldAddr, Args: []register{0}, Aux: fieldAux{}},
+		{Op: opSlice, Args: []register{-1}, Aux: sliceAux{}},
+		{Op: opChangeType, Args: []register{-1}, Aux: conversionAux{}},
+		{Op: opConvert, Args: []register{-1}, Aux: conversionAux{}},
+		{Op: opSliceToArrayPointer, Args: []register{-1}, Aux: conversionAux{}},
+		{Op: opMakeInterface, Args: []register{-1}, Aux: conversionAux{}},
+		{Op: opTypeAssert, Args: []register{-1}, Aux: typeAssertAux{}},
+	} {
+		if makeInstruction(nil, d) != nil {
+			t.Fatalf("accepted incomplete opcode %v", d.Op)
+		}
+	}
+	fr := &frame{stack: []value{tuple{1}}}
+	makeInstruction(nil, typedInstruction{Op: opExtract, Result: -1, Args: []register{0}, Aux: extractAux{Index: 0}})(fr)
+	ch := make(chan any, 1)
+	makeInstruction(&Interp{}, typedInstruction{Op: opSend, Args: []register{0, 1}, Aux: sendAux{}})(&frame{stack: []value{ch, nil}})
+	if got := <-ch; got != nil {
+		t.Fatalf("sent %#v", got)
+	}
+	var out any = 42
+	makeInstruction(nil, typedInstruction{Op: opStore, Args: []register{0, 1}, Aux: storeAux{}})(&frame{stack: []value{&out, nil}})
+	if out != nil {
+		t.Fatalf("stored %#v", out)
+	}
+}
+
+func TestPR598SelectNilSendGC(t *testing.T) {
+	const source = `package main
+ func Run() bool {
+  ch:=make(chan any,1)
+  select {case ch<-nil:default:panic("send")}
+  select {case v:=<-ch:return v==nil;default:panic("receive")}
+ }`
+	i, err := NewContext(EnableInstructionExecution|ExperimentalSupportGC|EnableGCExecutionPlan).LoadInterp("select_gc.go", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer i.UnsafeRelease()
+	got, err := i.RunFunc("Run")
+	if err != nil || got != true {
+		t.Fatalf("Run=%v,%v", got, err)
+	}
+}
+
+func TestInstructionScalarChangeType(t *testing.T) {
+	type namedBool bool
+	type otherBool bool
+	type namedInt int
+	type otherInt int
+	type namedInt8 int8
+	type otherInt8 int8
+	type namedInt16 int16
+	type otherInt16 int16
+	type namedInt32 int32
+	type otherInt32 int32
+	type namedInt64 int64
+	type otherInt64 int64
+	type namedUint uint
+	type otherUint uint
+	type namedUint8 uint8
+	type otherUint8 uint8
+	type namedUint16 uint16
+	type otherUint16 uint16
+	type namedUint32 uint32
+	type otherUint32 uint32
+	type namedUint64 uint64
+	type otherUint64 uint64
+	type namedUintptr uintptr
+	type otherUintptr uintptr
+	type namedFloat32 float32
+	type otherFloat32 float32
+	type namedFloat64 float64
+	type otherFloat64 float64
+	type namedComplex64 complex64
+	type otherComplex64 complex64
+	type namedComplex128 complex128
+	type otherComplex128 complex128
+	type namedString string
+	type otherString string
+	cases := []struct{ basic, named, other value }{
+		{bool(true), namedBool(true), otherBool(true)},
+		{int(-7), namedInt(-7), otherInt(-7)},
+		{int8(-127), namedInt8(-127), otherInt8(-127)},
+		{int16(-32767), namedInt16(-32767), otherInt16(-32767)},
+		{int32(-2147483647), namedInt32(-2147483647), otherInt32(-2147483647)},
+		{int64(-9223372036854775807), namedInt64(-9223372036854775807), otherInt64(-9223372036854775807)},
+		{uint(42), namedUint(42), otherUint(42)},
+		{uint8(255), namedUint8(255), otherUint8(255)},
+		{uint16(65535), namedUint16(65535), otherUint16(65535)},
+		{uint32(4294967295), namedUint32(4294967295), otherUint32(4294967295)},
+		{uint64(18446744073709551615), namedUint64(18446744073709551615), otherUint64(18446744073709551615)},
+		{uintptr(42), namedUintptr(42), otherUintptr(42)},
+		{float32(-1.25), namedFloat32(-1.25), otherFloat32(-1.25)},
+		{float64(-3.5), namedFloat64(-3.5), otherFloat64(-3.5)},
+		{complex64(complex(1.5, -2.5)), namedComplex64(complex(1.5, -2.5)), otherComplex64(complex(1.5, -2.5))},
+		{complex128(complex(-3.5, 4.5)), namedComplex128(complex(-3.5, 4.5)), otherComplex128(complex(-3.5, 4.5))},
+		{string("hello"), namedString("hello"), otherString("hello")},
+	}
+	for _, tc := range cases {
+		for _, from := range []value{tc.basic, tc.named} {
+			for _, want := range []value{tc.basic, tc.named, tc.other} {
+				for _, bound := range []bool{false, true} {
+					target := reflect.TypeOf(want)
+					t.Run(fmt.Sprintf("%T_to_%T/bound=%t", from, want, bound), func(t *testing.T) {
+						d := typedInstruction{Op: opChangeType, Result: 2, Args: []register{1}, Aux: conversionAux{Source: reflect.TypeOf(from), Target: target}}
+						if bound {
+							bindRuntimeRegisters(&d)
+							d.Result = 0
+							d.Args = []register{0}
+						}
+						run := makeInstruction(nil, d)
+						fr := &frame{stack: []value{"sentinel", from, nil}}
+						run(fr)
+						if got := fr.reg(2); reflect.TypeOf(got) != target || !reflect.DeepEqual(got, want) {
+							t.Fatalf("got %#v (%T), want %#v (%T)", got, got, want, want)
+						}
+						fr.stack[1] = nil
+						run(fr)
+						if got := fr.reg(2); !reflect.DeepEqual(got, reflect.Zero(target).Interface()) {
+							t.Fatalf("nil input: %#v", got)
+						}
+						if fr.reg(0) != "sentinel" {
+							t.Fatal("wrong register written")
+						}
+					})
+				}
+			}
+		}
+	}
+	type counter int
+	d := typedInstruction{Op: opChangeType, Result: 1, Args: []register{0}, Aux: conversionAux{Source: reflect.TypeFor[counter](), Target: reflect.TypeFor[int]()}}
+	fr := &frame{stack: []value{counter(42), nil}}
+	run := makeInstruction(nil, d)
+	if n := testing.AllocsPerRun(1000, func() { run(fr) }); n != 0 {
+		t.Fatalf("counter to int allocated %v times", n)
+	}
+}
+
+func BenchmarkInstructionScalarInterface(b *testing.B) {
+	for _, mode := range []Mode{0, EnableInstructionExecution} {
+		b.Run(fmt.Sprint(mode), func(b *testing.B) {
+			ctx := NewContext(DisableMemo | mode)
+			ctx.SetLeastCallForEnablePool(0)
+			i, err := ctx.LoadInterp("scalar_bench.go", executionDescriptionSource)
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.Cleanup(i.UnsafeRelease)
+			for n := 0; n < 10; n++ {
+				if v, e := i.RunFunc("interfaceCall"); e != nil || v != 42 {
+					b.Fatalf("%v,%v", v, e)
+				}
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				if v, e := i.RunFunc("interfaceCall"); e != nil || v != 42 {
+					b.Fatalf("%v,%v", v, e)
+				}
+			}
+		})
+	}
+}
+
+func TestInstructionScalarChangeTypeSSA(t *testing.T) {
+	const source = `package main
+ type number int
+ type text string
+ type flag bool
+ type imaginary complex128
+ func Run() bool {
+  n:=number(42);s:=text("ok");b:=flag(true);z:=imaginary(1+2i)
+  return int(n)==42 && string(s)=="ok" && bool(b) && complex128(z)==1+2i
+ }`
+	for _, mode := range []Mode{0, EnableInstructionExecution} {
+		i, err := NewContext(DisableMemo|mode).LoadInterp("scalar_ssa.go", source)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := i.RunFunc("Run")
+		if err != nil || got != true {
+			t.Fatalf("mode %v: %v,%v", mode, got, err)
+		}
+		if mode != 0 {
+			found := false
+			for _, p := range i.funcs {
+				for _, d := range p.Code {
+					if d.Op == opChangeType {
+						found = true
+					}
+				}
+			}
+			if !found {
+				t.Fatal("no SSA ChangeType executed")
+			}
+		}
+		i.UnsafeRelease()
+	}
+}
+
+func TestDirectClosureMaterialization(t *testing.T) {
+	const source = `package main
+import "runtime"
+func Direct(n int) int { x:=n; f:=func(v int)int{x+=v;return x}; f(2);runtime.GC();return f(3) }
+func Escape(n int) func()int {return func()int{return n}}
+func UseEscape()int {f:=Escape(7);return f()}
+var saved func()int
+func Stored(n int)int {f:=func()int{return n};saved=f;return f()+saved()}
+func Passed(n int)int {f:=func()int{return n};return apply(f)}
+func apply(f func()int)int{return f()}
+func Deferred(n int)(r int) {f:=func(){r=n};defer f();return}
+func Goroutine(n int)int {ch:=make(chan int,1);f:=func(){ch<-n};go f();return <-ch}
+`
+	for _, mode := range []Mode{EnableInstructionDescriptions, EnableInstructionExecution, EnableInstructionExecution | ExperimentalSupportGC | EnableGCExecutionPlan} {
+		t.Run(fmt.Sprint(mode), func(t *testing.T) {
+			i, err := NewContext(DisableMemo|mode).LoadInterp("direct_closure.go", source)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer i.UnsafeRelease()
+			for _, tc := range []struct {
+				name string
+				args []any
+				want int
+			}{{"Direct", []any{10}, 15}, {"UseEscape", nil, 7}, {"Stored", []any{8}, 16}, {"Passed", []any{9}, 9}, {"Deferred", []any{11}, 11}, {"Goroutine", []any{12}, 12}} {
+				got, err := i.RunFunc(tc.name, tc.args...)
+				if err != nil || got != tc.want {
+					t.Fatalf("%s=%v,%v", tc.name, got, err)
+				}
+			}
+			direct, retained := 0, 0
+			for _, p := range i.funcs {
+				for _, b := range p.Fn.Blocks {
+					for _, instr := range b.Instrs {
+						if c, ok := instr.(*ssa.MakeClosure); ok && p.Fn.Name() == "Direct" {
+							if !skipDirectCallClosure(c) {
+								t.Fatal("direct closure not eligible")
+							}
+							direct++
+						}
+					}
+				}
+				for _, instr := range p.ssaInstrs {
+					if _, ok := instr.(*ssa.MakeClosure); ok {
+						if p.Fn.Name() == "Direct" {
+							t.Fatal("direct closure materialized")
+						}
+						retained++
+					}
+				}
+			}
+			if direct == 0 || retained == 0 {
+				t.Fatalf("direct=%d retained=%d", direct, retained)
+			}
+		})
+	}
+}
+
+func BenchmarkDirectClosureMaterialization(b *testing.B) {
+	for _, mode := range []Mode{0, EnableInstructionExecution} {
+		b.Run(fmt.Sprint(mode), func(b *testing.B) {
+			ctx := NewContext(DisableMemo | mode)
+			ctx.SetLeastCallForEnablePool(0)
+			i, err := ctx.LoadInterp("closure_perf.go", executionDescriptionSource)
+			if err != nil {
+				b.Fatal(err)
+			}
+			b.Cleanup(i.UnsafeRelease)
+			for n := 0; n < 10; n++ {
+				if v, e := i.RunFunc("closure"); e != nil || v != 42 {
+					b.Fatalf("%v,%v", v, e)
+				}
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				if v, e := i.RunFunc("closure"); e != nil || v != 42 {
+					b.Fatalf("%v,%v", v, e)
+				}
+			}
+		})
+	}
+}
+
+func TestDirectClosureDebugObservability(t *testing.T) {
+	for _, mode := range []Mode{EnableInstructionDescriptions, EnableInstructionExecution} {
+		ctx := NewContext(DisableMemo | mode)
+		seen := false
+		ctx.SetDebug(func(info *DebugInfo) {
+			if _, v, ok := info.AsVar(); ok && reflect.TypeOf(v) != nil && reflect.TypeOf(v).Kind() == reflect.Func {
+				seen = true
+			}
+		})
+		i, err := ctx.LoadInterp("closure_debug.go", `package main
+func Run(n int)int { f:=func()int{return n};return f() }`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := i.RunFunc("Run", 7)
+		if err != nil || got != 7 {
+			t.Fatalf("%v,%v", got, err)
+		}
+		// DebugRef makes the function value observable to debug callbacks.
+		retained := false
+		for _, p := range i.funcs {
+			for _, instr := range p.ssaInstrs {
+				if _, ok := instr.(*ssa.MakeClosure); ok {
+					retained = true
+				}
+			}
+		}
+		if !retained {
+			t.Fatal("debug-visible closure was elided")
+		}
+		if !seen {
+			t.Fatal("debug callback did not observe function value")
+		}
+		i.UnsafeRelease()
+	}
+}
+
+func TestDirectClosureLoopBindings(t *testing.T) {
+	const source = `package main
+import "runtime"
+type number int
+func(n number)Value()int{return int(n)}
+func Run()int {
+ x:=0; f:=func()int{runtime.GC();return x};sum:=0
+ for j:=0;j<3;j++ {x=j;sum+=f()}
+ for j:=0;j<3;j++ {g:=func()int{return j};sum+=g();n:=number(j);m:=n.Value;sum+=m()}
+ return sum
+}
+func Phi()int {
+ var old func()int
+ sum:=0
+ for j:=0;j<3;j++ {n:=j;f:=func()int{return n};if old!=nil {sum+=old()};old=f}
+ return sum+old()
+}
+func Both()int {n:=new(int);*n=7;f:=func(g any)int{return *n};return f(f)}
+`
+	for _, backend := range []Mode{EnableInstructionDescriptions, EnableInstructionExecution} {
+		for _, gc := range []Mode{0, ExperimentalSupportGC, ExperimentalSupportGC | EnableGCExecutionPlan} {
+			mode := backend | gc
+			t.Run(fmt.Sprint(mode), func(t *testing.T) {
+				i, err := NewContext(DisableMemo|mode).LoadInterp("loop_closure.go", source)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer i.UnsafeRelease()
+				for _, tc := range []struct {
+					name string
+					want int
+				}{{"Run", 9}, {"Phi", 3}, {"Both", 7}} {
+					got, err := i.RunFunc(tc.name)
+					if err != nil || got != tc.want {
+						t.Fatalf("%s=%v,%v", tc.name, got, err)
+					}
+				}
+				for _, p := range i.funcs {
+					if p.Fn.Name() == "Both" || p.Fn.Name() == "Phi" {
+						found := false
+						for _, instr := range p.ssaInstrs {
+							if _, ok := instr.(*ssa.MakeClosure); ok {
+								found = true
+							}
+						}
+						if !found {
+							t.Fatalf("%s lost observable closure", p.Fn)
+						}
+					}
+				}
+			})
+		}
 	}
 }

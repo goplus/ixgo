@@ -18,3 +18,9 @@ func describeInstruction(*function, ssa.Instruction, []*ssa.Value, []register) t
 }
 
 func makeInstruction(*Interp, typedInstruction) func(*frame) { return nil }
+
+func planInstructionLayout(*function) {}
+
+func compileInstruction(*function, ssa.Instruction) (typedInstruction, func(*frame)) {
+	panic("instruction backend requires the instruction build tag")
+}

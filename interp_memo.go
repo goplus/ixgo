@@ -469,6 +469,7 @@ type MemoPlugin func(MemoInstaller, *ssa.Function)
 var memoPlugin MemoPlugin
 
 // RegisterMemoPlugin enables an optional optimizer package.
+// EnableInstructionExecution bypasses memo plugins; the stack backend uses them.
 // The plugin API is experimental and may change without notice.
 func RegisterMemoPlugin(plugin MemoPlugin) { memoPlugin = plugin }
 

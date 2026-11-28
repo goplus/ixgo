@@ -58,7 +58,7 @@ func makeUnOpMUL(pfn *function, instr *ssa.UnOp) func(fr *frame) {
 	// range operand; skip only that trailing load, unless the operand itself
 	// has a call or receive that must panic. The skipped instruction never
 	// writes a register, so debug inspection of the elided *p sees nil.
-	if skipUnusedArrayDeref(instr) && !arrayPointerOperandHasEffectAfter(instr.X, instr.Pos(), nil) {
+	if skipArrayRangeDeref(instr) {
 		return nil
 	}
 	ir := pfn.regIndex(instr)

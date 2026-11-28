@@ -292,6 +292,10 @@ func (visit *visitor) function(fn *ssa.Function) {
 		pfn.stack = append(pfn.stack, nil)
 	}
 
+	instructionExecution := instructionSupported && visit.intp.ctx.Mode&EnableInstructionExecution != 0
+	if instructionExecution {
+		planInstructionLayout(pfn)
+	}
 	var buf [32]*ssa.Value // avoid alloc in common case
 	for _, b := range fn.Blocks {
 		Instrs := make([]func(*frame), len(b.Instrs))
@@ -342,23 +346,22 @@ func (visit *visitor) function(fn *ssa.Function) {
 					visit.intp.loadType(v.Type())
 				}
 			}
-			ifn := makeInstr(visit.intp, pfn, instr)
+			var ifn func(*frame)
+			if instructionExecution {
+				descriptions[index], ifn = compileInstruction(pfn, instr)
+			} else {
+				ifn = makeInstr(visit.intp, pfn, instr)
+			}
 			if ifn == nil {
 				continue
 			}
-			if instructionSupported && visit.intp.ctx.Mode&(EnableInstructionDescriptions|EnableInstructionExecution) != 0 {
+			if !instructionExecution && instructionSupported && visit.intp.ctx.Mode&EnableInstructionDescriptions != 0 {
 				var dests []register
 				if call, ok := instr.(ssa.Value); ok {
 					dests = describeCallResults(pfn, call)
 				}
 				descriptions[index] = describeInstruction(pfn, instr, instr.Operands(buf[:0]), dests)
 				bindRuntimeRegisters(&descriptions[index])
-				if visit.intp.ctx.Mode&EnableInstructionExecution != 0 {
-					// Use the bound runtime registers for supported instructions.
-					if described := makeInstruction(visit.intp, descriptions[index]); described != nil {
-						ifn = described
-					}
-				}
 			}
 			if visit.intp.ctx.evalMode && fn.String() == "main.init" {
 				if visit.intp.ctx.evalInit == nil {
@@ -485,7 +488,7 @@ func (visit *visitor) function(fn *ssa.Function) {
 			first(fr)
 		}
 	}
-	if visit.intp.ctx.Mode&DisableMemo == 0 && entry == nil && leave == nil && visit.intp.execution == nil &&
+	if !instructionExecution && visit.intp.ctx.Mode&DisableMemo == 0 && entry == nil && leave == nil && visit.intp.execution == nil &&
 		visit.intp.ctx.Mode&EnableTracing == 0 && visit.intp.ctx.BuilderMode&ssa.GlobalDebug == 0 &&
 		visit.intp.ctx.evalCallFn == nil && visit.intp.ctx.debugFunc == nil {
 		applyMemoPlugin(pfn, fn)

@@ -5,6 +5,15 @@ package ixgo
 import "testing"
 
 func TestInstructionStub(t *testing.T) {
+	planInstructionLayout(nil)
+	func() {
+		defer func() {
+			if recover() != "instruction backend requires the instruction build tag" {
+				t.Fatal("missing instruction build-tag error")
+			}
+		}()
+		compileInstruction(nil, nil)
+	}()
 	d := describeInstruction(nil, nil, nil, nil)
 	if makeInstruction(nil, d) != nil {
 		t.Fatal("stub returned an executor")
